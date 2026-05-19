@@ -1,0 +1,81 @@
+{
+  "name": "openai",
+  "description": "OpenAI API — GPT chat completions and text generation",
+  "category": "ai",
+  "source": "local_api",
+  "kind": "service",
+  "aliases": [
+    "gpt",
+    "chatgpt"
+  ],
+  "keywords": [
+    "ai",
+    "llm",
+    "chat",
+    "gpt",
+    "openai",
+    "generation"
+  ],
+  "base_url": "https://api.openai.com",
+  "setup_steps": [
+    "New to using OpenAI for AI? Here's how to do it..."
+  ],
+  "auth": {
+    "type": "bearer",
+    "setting": "api_key"
+  },
+  "headers": {
+    "content-type": "application/json"
+  },
+  "usage": "invoke('openai', 'v1/responses', { model: 'gpt-4o', input: 'Hello', max_output_tokens: 1024 })",
+  "methods": [
+    {
+      "name": "v1/responses",
+      "description": "Send a request via the Responses API (falls back to v1/chat/completions or v1/completions automatically)",
+      "params": [
+        "model",
+        "input",
+        "max_output_tokens"
+      ]
+    }
+  ],
+  "settings": {
+    "api_key": {
+      "type": "secret",
+      "label": "API Key",
+      "required": true
+    },
+    "model": {
+      "type": "select",
+      "label": "Default Model",
+      "default": "gpt-4o",
+      "models_url": "https://api.openai.com/v1/models",
+      "models_list_path": "data",
+      "models_value_key": "id",
+      "options": [
+        {
+          "value": "gpt-4o",
+          "label": "GPT-4o"
+        },
+        {
+          "value": "gpt-4o-mini",
+          "label": "GPT-4o Mini"
+        },
+        {
+          "value": "o3",
+          "label": "o3"
+        },
+        {
+          "value": "o4-mini",
+          "label": "o4 Mini"
+        }
+      ]
+    }
+  },
+  "good_for": [
+    "framegen",
+    "modify",
+    "chat",
+    "text"
+  ]
+}

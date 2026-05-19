@@ -1,0 +1,25 @@
+{
+  "catalog_id": "smallcraft_capabilities",
+  "name": "Small Craft Tandem Capabilities",
+  "description": "Community capabilities published by Small Craft.",
+  "kind": "Capabilities",
+  "items": [
+    {
+      "kind": "Capabilities",
+      "id": "openai",
+      "name": "openai",
+      "description": "OpenAI API \u2014 GPT chat completions and text generation",
+      "icon": "",
+      "modified_at": "2026-05-19T18:10:39Z",
+      "frame_preview": null,
+      "capability_preview": {
+        "kind": "service",
+        "methods": [
+          "v1/responses"
+        ]
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/capabilities/openai.json",
+      "package_sha256": "5ebb470862f2964bf13e0d1d27b1f05e16811c7d406201a3cb029f6312040e9b"
+    }
+  ]
+}

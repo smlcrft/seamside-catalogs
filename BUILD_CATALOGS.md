@@ -47,9 +47,9 @@ The build script emits this shape — it mirrors the `WireCatalogManifest` struc
 
 ```jsonc
 {
-  "catalog_id":  "smlcrft_frames",        // stable id; rename = new catalog from the client's POV
-  "name":        "Smlcrft Frames",
-  "description": "Community frames published by smlcrft.",
+  "catalog_id":  "smallcraft_frames",        // stable id; rename = new catalog from the client's POV
+  "name":        "Small Craft Tandem Frames",
+  "description": "Community frames published by Small Craft.",
   "kind":        "Frames",                // "Frames" | "Capabilities"
   "items": [
     {
