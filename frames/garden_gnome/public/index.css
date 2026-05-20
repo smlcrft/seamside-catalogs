@@ -47,6 +47,12 @@ body {
   border: 1px solid var(--os-border-color-subtle);
   white-space: nowrap;
 }
+.weather-chip .rain-ahead {
+  color: var(--os-c1);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
 
 /* ----- Notes ----- */
 .note {
@@ -398,40 +404,27 @@ body {
   color: var(--os-text-muted);
 }
 
-.soil-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--os-sp-xs);
-}
-.soil-option {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--os-sp-sm);
-  padding: var(--os-sp-sm);
-  background: var(--os-bg-subtle);
+.soil-select {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  font-size: var(--os-fs-sm);
+  color: var(--os-text);
+  background-color: var(--os-bg-subtle);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='none' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1.5l5 5 5-5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right var(--os-sp-sm) center;
+  padding: var(--os-sp-sm) calc(var(--os-sp-md) + 14px) var(--os-sp-sm) var(--os-sp-sm);
+  border: 1px solid var(--os-border-color-subtle);
   border-radius: var(--os-radius-sm);
   cursor: pointer;
-  border: 1px solid transparent;
-  transition: border-color var(--os-transition-fast);
+  transition: border-color var(--os-transition-fast), background-color var(--os-transition-fast);
 }
-.soil-option:hover { border-color: var(--os-border-color-subtle); }
-.soil-option.checked {
+.soil-select:hover { border-color: var(--os-border-color); }
+.soil-select:focus {
+  outline: none;
   border-color: var(--ch, var(--os-c5-fg));
-  background: var(--os-bg-surface);
-}
-.soil-option input[type="radio"] { margin-top: 3px; }
-.soil-option .soil-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.soil-option .soil-label {
-  font-size: var(--os-fs-sm);
-  font-weight: var(--os-weight-medium);
-}
-.soil-option .soil-desc {
-  font-size: var(--os-fs-xs);
-  color: var(--os-text-muted);
+  background-color: var(--os-bg-surface);
 }
 
 .plant-grid {

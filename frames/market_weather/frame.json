@@ -1,0 +1,13 @@
+{
+    "name": "Market Weather",
+    "description": "A turnout forecaster for outdoor commerce — farmers markets, festivals, food trucks, street vendors, walkable storefronts. Set a location and Market Weather pulls 72 hours of weather from Open-Meteo (keyless), compares it against the last 30 days' local norms, and folds in temperature comfort, rain, UV, daylight, wind, weekend bonus, and time-of-day into a single composite turnout curve. The graph overlays each contributing factor as a faint band (daytime in pale yellow, rain in blue rising from the bottom, extreme heat/cold in red, weekend bonus in green) so you can see at a glance WHY the bold turnout line moves the way it does — and plan how much to stock, bake, or brew for the days ahead.",
+    "frame_type": "Tandem",
+    "permissions": {
+        "net": ["api.open-meteo.com", "geocoding-api.open-meteo.com"]
+    },
+    "default_width_px": 720,
+    "default_height_px": 560,
+    "created_at": "2026-05-20T14:40:14Z",
+    "modified_at": "2026-05-20T15:30:41Z",
+    "depends_on_capabilities": []
+}

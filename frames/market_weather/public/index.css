@@ -1,0 +1,330 @@
+body {
+  margin: 0;
+  padding: var(--os-sp-lg);
+  background: var(--os-bg);
+  font-family: var(--os-font-sans);
+  color: var(--os-text);
+}
+
+.hidden { display: none !important; }
+
+/* ----- Header ----- */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--os-sp-md);
+  margin-bottom: var(--os-sp-md);
+  flex-wrap: wrap;
+}
+.page-header .title {
+  display: flex;
+  align-items: center;
+  gap: var(--os-sp-sm);
+}
+.page-header h1 {
+  margin: 0;
+  font-size: var(--os-fs-lg);
+  font-weight: var(--os-weight-semibold);
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--os-sp-sm);
+  flex-wrap: wrap;
+}
+
+.weather-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--os-sp-xs);
+  font-size: var(--os-fs-xs);
+  font-family: var(--os-font-mono);
+  color: var(--os-text-secondary);
+  background: var(--os-bg-subtle);
+  padding: 2px var(--os-sp-sm);
+  border-radius: var(--os-radius-full);
+  border: 1px solid var(--os-border-color-subtle);
+  white-space: nowrap;
+}
+
+/* ----- Notes ----- */
+.note {
+  display: flex;
+  align-items: center;
+  gap: var(--os-sp-xs);
+  margin: 0 0 var(--os-sp-md);
+  font-size: var(--os-fs-sm);
+}
+
+/* ----- Chart -----
+ * Single canvas. CSS sets the on-screen size; the JS sets internal pixel size to
+ * match (DPR-aware) when rendering. The chart is the focal element — everything
+ * else on the page exists to point at it.
+ */
+.chart-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--os-sp-sm);
+}
+.chart-wrap {
+  position: relative;
+  width: 100%;
+  background: var(--os-bg-surface);
+  border: 1px solid var(--os-border-color-subtle);
+  border-radius: var(--os-radius-md);
+  padding: var(--os-sp-sm);
+  box-sizing: border-box;
+}
+#chart {
+  display: block;
+  width: 100%;
+  height: clamp(260px, 45vh, 420px);
+}
+
+/* ----- Tooltip ----- */
+.tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--os-bg-elevated);
+  color: var(--os-text);
+  border: 1px solid var(--os-border-color);
+  border-radius: var(--os-radius-sm);
+  padding: var(--os-sp-xs) var(--os-sp-sm);
+  font-size: var(--os-fs-xs);
+  line-height: 1.4;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  z-index: 10;
+  max-width: 240px;
+}
+.tooltip .t-head {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--os-text-secondary);
+  margin-bottom: 4px;
+}
+.tooltip .t-turnout {
+  font-size: var(--os-fs-md);
+  font-weight: var(--os-weight-semibold);
+  margin-bottom: 4px;
+}
+.tooltip .t-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--os-sp-md);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-fs-2xs);
+  color: var(--os-text-secondary);
+}
+.tooltip .t-factors {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--os-border-color-subtle);
+}
+.tooltip .t-factor {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--os-sp-md);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-fs-2xs);
+}
+.tooltip .t-factor .f-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.tooltip .t-factor .f-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(0,0,0,0.10);
+}
+.tooltip .t-factor .v-pos { color: var(--os-cSuccess); }
+.tooltip .t-factor .v-neg { color: var(--os-cError); }
+.tooltip .t-factor .v-zero { color: var(--os-text-muted); }
+
+/* Active-condition chips that mirror the on-chart bars in color. The chip's fill
+ * and border colors are set inline by the JS so they stay in sync with the canvas
+ * fill colors without a CSS lookup table getting out of date. */
+.tooltip .t-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 6px;
+}
+.tooltip .t-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--os-radius-full);
+  border: 1px solid transparent;
+  font-family: var(--os-font-mono);
+  font-size: var(--os-fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--os-text);
+  white-space: nowrap;
+}
+
+/* ----- Legend ----- */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--os-sp-sm);
+  align-items: center;
+  padding: var(--os-sp-xs) var(--os-sp-sm);
+  background: var(--os-bg-subtle);
+  border-radius: var(--os-radius-sm);
+  border: 1px solid var(--os-border-color-subtle);
+}
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--os-fs-2xs);
+  font-family: var(--os-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--os-text-muted);
+}
+.legend-chip .swatch {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid var(--os-border-color-subtle);
+}
+.swatch--turnout { background: var(--os-text); border-color: var(--os-text); }
+.swatch--peak    { background: var(--os-c3); border-color: var(--os-c3); }
+.swatch--day     { background: rgba(232, 184, 75, 0.30); }   /* pale yellow */
+.swatch--night   { background: rgba(120, 120, 130, 0.28); }
+.swatch--rain    { background: rgba(56, 145, 168, 0.45); }
+.swatch--extreme { background: rgba(229, 105, 92, 0.40); }
+.swatch--weekend { background: rgba(90, 158, 111, 0.30); }
+.swatch--temp    { background: rgba(229, 105, 92, 0.7); }
+.swatch--seasonal{ background: rgba(122, 107, 158, 0.7); }
+
+/* ----- Peaks ("best windows" callouts) ----- */
+.peaks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--os-sp-sm);
+  margin-top: var(--os-sp-md);
+}
+.peak-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--os-sp-sm) var(--os-sp-md);
+  background: var(--os-bg-surface);
+  border: 1px solid var(--os-border-color-subtle);
+  border-radius: var(--os-radius-md);
+  cursor: default;
+  transition: border-color var(--os-transition-fast), box-shadow var(--os-transition-fast);
+}
+/* Card-side cue paired with the on-chart glow: when the user is hovering this card
+ * and the matching peak segment in the chart is fattened + glowing, the card grows
+ * a purple ring so the two visuals read as the same selection. */
+.peak-card--hovered {
+  border-color: var(--os-c3);
+  box-shadow: 0 0 0 2px var(--os-c3-muted, color-mix(in oklch, var(--os-c3) 35%, transparent));
+}
+/* Tier color = at-a-glance strength of the window. The user can scan a row of
+ * cards and tell "open for the green ones, maybe for the teal, skip the rest"
+ * without reading the numbers. */
+.peak-card--decent { background: var(--os-bg-subtle); }
+.peak-card--nice   { background: var(--os-c1-muted); }
+.peak-card--great  { background: var(--os-cSuccess-muted); }
+.peak-card .p-why {
+  font-size: var(--os-fs-xs);
+  font-weight: var(--os-weight-medium);
+  color: var(--os-text);
+  line-height: 1.3;
+}
+.peak-card .p-day {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--os-text-muted);
+}
+.peak-card .p-range {
+  font-size: var(--os-fs-md);
+  font-weight: var(--os-weight-semibold);
+}
+.peak-card .p-score {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-fs-xs);
+  /* Matches the highlighted segment color on the chart so a card and its on-chart
+   * peak read as visually paired without an explicit connector. */
+  color: var(--os-c3);
+}
+.peak-card .p-note {
+  font-size: var(--os-fs-xs);
+  color: var(--os-text-secondary);
+}
+
+/* ----- Settings dialog ----- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--os-sp-md);
+  z-index: 100;
+}
+.dialog {
+  width: 100%;
+  max-width: 480px;
+  padding: var(--os-sp-lg);
+  background: var(--os-bg-surface);
+  border-radius: var(--os-radius-lg);
+  border: 1px solid var(--os-border-color);
+  display: flex;
+  flex-direction: column;
+  gap: var(--os-sp-md);
+}
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--os-sp-sm);
+}
+.dialog-header h2 {
+  margin: 0;
+  font-size: var(--os-fs-lg);
+  font-weight: var(--os-weight-semibold);
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--os-sp-sm);
+  margin-top: var(--os-sp-sm);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--os-sp-xs);
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+.field > span,
+.field > legend {
+  font-size: var(--os-fs-sm);
+  font-weight: var(--os-weight-medium);
+  color: var(--os-text-secondary);
+}
+.field .hint {
+  font-size: var(--os-fs-2xs);
+  color: var(--os-text-muted);
+}

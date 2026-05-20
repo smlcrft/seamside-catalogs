@@ -410,9 +410,10 @@ function detectRisks(w: WeatherData, moisture: number, profile: PlantProfile): R
     });
   }
 
-  const past_max = w.past_days.length ? Math.max(...w.past_days.map((d) => d.t_max)) : -Infinity;
-  const fc_max   = w.forecast_24h.length ? Math.max(...w.forecast_24h.map((h) => h.t)) : -Infinity;
-  const hot_high = Math.max(past_max, fc_max);
+  // Heat stress is forward-looking too: a heatwave last week is in the past. Only
+  // the current observation + next-24h forecast count.
+  const fc_max    = w.forecast_24h.length ? Math.max(...w.forecast_24h.map((h) => h.t)) : -Infinity;
+  const hot_high  = Math.max(w.summary.current_temp_f, fc_max);
   if (Number.isFinite(hot_high) && hot_high >= profile.heat_risk_f) {
     risks.push({
       key: "HEAT STRESS",

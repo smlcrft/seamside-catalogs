@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Garden Gnome</title>
+  <title>Market Weather</title>
   <link rel="stylesheet" href="/dynamic/frame-prefs.css">
   <link rel="stylesheet" href="./index.css">
 </head>
-<body class="ch5">
+<body class="ch2">
   <header class="page-header">
     <div class="title">
-      <i class="ph-light ph-plant icon-md"></i>
-      <h1>Garden Gnome</h1>
+      <i class="ph-light ph-storefront icon-md"></i>
+      <h1>Market Weather</h1>
     </div>
     <div class="header-actions">
       <span id="weather-chip" class="weather-chip hidden"></span>
@@ -23,42 +23,44 @@
 
   <p id="setup-note" class="muted note hidden">
     <i class="ph-light ph-info icon-sm"></i>
-    <span id="setup-text">Open settings to set your location and pick what you're growing.</span>
+    <span id="setup-text">Open settings to set your market's location.</span>
   </p>
 
-  <section id="plants" class="plants"></section>
+  <section id="chart-section" class="chart-section hidden">
+    <div class="chart-wrap">
+      <canvas id="chart" width="800" height="320"></canvas>
+      <div id="tooltip" class="tooltip hidden"></div>
+    </div>
+    <div class="legend">
+      <span class="legend-chip"><span class="swatch swatch--turnout"></span>turnout</span>
+      <span class="legend-chip"><span class="swatch swatch--peak"></span>peak window</span>
+      <span class="legend-chip"><span class="swatch swatch--day"></span>day</span>
+      <span class="legend-chip"><span class="swatch swatch--night"></span>night</span>
+      <span class="legend-chip"><span class="swatch swatch--rain"></span>rain</span>
+      <span class="legend-chip"><span class="swatch swatch--extreme"></span>heat/cold</span>
+      <span class="legend-chip"><span class="swatch swatch--weekend"></span>weekend</span>
+      <span class="legend-chip"><span class="swatch swatch--temp"></span>temp comfort</span>
+      <span class="legend-chip"><span class="swatch swatch--seasonal"></span>seasonal pleasantness</span>
+    </div>
+  </section>
 
-  <p id="empty-note" class="muted note empty-note hidden">
-    <i class="ph-light ph-leaf icon-sm"></i>
-    No plants picked yet — open settings to choose what's growing.
-  </p>
+  <section id="peaks" class="peaks hidden"></section>
 
   <!-- Settings dialog -->
   <div id="settings-overlay" class="overlay hidden">
     <div class="surface dialog">
       <header class="dialog-header">
-        <h2>Garden settings</h2>
+        <h2>Market settings</h2>
         <button id="settings-close" class="ghost" title="Close">
           <i class="ph-light ph-x icon-sm"></i>
         </button>
       </header>
 
       <label class="field">
-        <span>Location (city, region, or zip)</span>
+        <span>Market location (city, region, or zip)</span>
         <input id="cfg-location" type="text" maxlength="120" placeholder="e.g. 97214 or Portland, Oregon">
         <span class="muted hint">Used only to fetch weather from open-meteo.com.</span>
       </label>
-
-      <label class="field">
-        <span>Soil type</span>
-        <select id="cfg-soil" class="soil-select"></select>
-        <span id="cfg-soil-desc" class="muted hint"></span>
-      </label>
-
-      <fieldset class="field">
-        <legend>Plants you're growing</legend>
-        <div id="cfg-plants" class="plant-grid"></div>
-      </fieldset>
 
       <div class="dialog-actions">
         <button id="settings-cancel" class="ghost">cancel</button>

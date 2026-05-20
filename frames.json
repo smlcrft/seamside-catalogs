@@ -1,7 +1,7 @@
 {
-  "catalog_id": "smallcraft_frames",
-  "name": "Small Craft Tandem Frames",
-  "description": "Community frames published by Small Craft.",
+  "catalog_id": "smlcrft_frames",
+  "name": "Smlcrft Frames",
+  "description": "Community frames published by smlcrft.",
   "kind": "Frames",
   "items": [
     {
@@ -27,7 +27,7 @@
       "name": "Garden Gnome",
       "description": "An at-a-glance helper for home gardeners. Set a location, pick your soil, tick the plants you grow, and Garden Gnome fetches local weather (Open-Meteo, keyless) every 15 minutes \u2014 past 5 days plus the next 24 hours \u2014 and shows three color-coded dots on a +/- spectrum next to each plant for water, temperature, and sunlight so you know when a plant is being naturally pampered or stressed.",
       "icon": "",
-      "modified_at": "2026-05-19T01:55:00Z",
+      "modified_at": "2026-05-20T14:08:08Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 560,
@@ -36,7 +36,24 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/garden_gnome.tar.gz",
-      "package_sha256": "79567799548276c74e73c41a820b5909519017c604beeaf49fcd15860fb8ebb2"
+      "package_sha256": "6427af05517ad6357952ffbbff7f5f335ce3c889f96a3afa554bb746dc025f6a"
+    },
+    {
+      "kind": "Frames",
+      "id": "market_weather",
+      "name": "Market Weather",
+      "description": "A turnout forecaster for outdoor commerce \u2014 farmers markets, festivals, food trucks, street vendors, walkable storefronts. Set a location and Market Weather pulls 72 hours of weather from Open-Meteo (keyless), compares it against the last 30 days' local norms, and folds in temperature comfort, rain, UV, daylight, wind, weekend bonus, and time-of-day into a single composite turnout curve. The graph overlays each contributing factor as a faint band (daytime in pale yellow, rain in blue rising from the bottom, extreme heat/cold in red, weekend bonus in green) so you can see at a glance WHY the bold turnout line moves the way it does \u2014 and plan how much to stock, bake, or brew for the days ahead.",
+      "icon": "",
+      "modified_at": "2026-05-20T15:30:41Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 720,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/market_weather.tar.gz",
+      "package_sha256": "f0453c98388a8bccddd2ec9b5c92bd2be47ae1f54b5de21461be40c9218f4139"
     },
     {
       "kind": "Frames",

@@ -72,8 +72,8 @@
       // Sub-trace amounts add noise without telling the gardener anything actionable.
       const rainAhead = w.forecast_24h_rain;
       const rainPart = rainAhead >= 0.05
-        ? ' + <i class="ph-light ph-cloud-rain icon-sm"></i> ' +
-          rainAhead.toFixed(rainAhead >= 1 ? 1 : 2) + '"'
+        ? ' + <span class="rain-ahead"><i class="ph-light ph-cloud-rain icon-sm"></i> ' +
+          rainAhead.toFixed(rainAhead >= 1 ? 1 : 2) + '"</span>'
         : '';
       // Icon hints at whether rain is happening *now*, vs just somewhere in the next 24h.
       const headIcon = w.current_precip_in > 0.01 ? 'ph-cloud-rain' : 'ph-sun';
@@ -188,7 +188,8 @@
       return;
     }
     empty.classList.add("hidden");
-    container.innerHTML = state.statuses.map(plantCardHtml).join("");
+    const sorted = state.statuses.slice().sort((a, b) => a.label.localeCompare(b.label));
+    container.innerHTML = sorted.map(plantCardHtml).join("");
     wireRiskBadgeClicks(container);
   }
 
@@ -200,29 +201,27 @@
 
   // ----- Settings dialog -----------------------------------------------------------------
   function renderSoilOptions() {
-    const list = $("cfg-soil");
-    list.innerHTML = state.soil_types.map((s) => (
-      '<label class="soil-option' + (s.key === draft.soil ? ' checked' : '') + '">' +
-        `<input type="radio" name="cfg-soil-radio" value="${escapeHTML(s.key)}"${s.key === draft.soil ? ' checked' : ''}>` +
-        '<span class="soil-text">' +
-          `<span class="soil-label">${escapeHTML(s.label)}</span>` +
-          `<span class="soil-desc">${escapeHTML(s.description)}</span>` +
-        '</span>' +
-      '</label>'
+    const sel = $("cfg-soil");
+    const desc = $("cfg-soil-desc");
+    sel.innerHTML = state.soil_types.map((s) => (
+      `<option value="${escapeHTML(s.key)}"${s.key === draft.soil ? ' selected' : ''}>${escapeHTML(s.label)}</option>`
     )).join("");
-    list.querySelectorAll('input[type="radio"]').forEach((el) => {
-      el.addEventListener("change", () => {
-        draft.soil = el.value;
-        list.querySelectorAll(".soil-option").forEach((o) => o.classList.remove("checked"));
-        el.closest(".soil-option").classList.add("checked");
-      });
+    const refreshDesc = () => {
+      const cur = state.soil_types.find((s) => s.key === draft.soil);
+      desc.textContent = cur ? cur.description : "";
+    };
+    refreshDesc();
+    sel.addEventListener("change", () => {
+      draft.soil = sel.value;
+      refreshDesc();
     });
   }
 
   function renderPlantOptions() {
     const grid = $("cfg-plants");
     const set = new Set(draft.plants);
-    grid.innerHTML = state.plant_types.map((p) => (
+    const sorted = state.plant_types.slice().sort((a, b) => a.label.localeCompare(b.label));
+    grid.innerHTML = sorted.map((p) => (
       '<label class="plant-option' + (set.has(p.key) ? ' checked' : '') + '">' +
         `<input type="checkbox" value="${escapeHTML(p.key)}"${set.has(p.key) ? ' checked' : ''}>` +
         `<span class="plant-icon"><i class="ph-light ${escapeHTML(p.icon)} icon-sm"></i></span>` +
