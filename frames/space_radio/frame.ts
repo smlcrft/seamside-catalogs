@@ -223,7 +223,7 @@ function setLocalState(sfiId: string, deviceId: string, next: LocalState): void 
 self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body, cookies) => {
   const peer = parsePeerInfo(query, cookies);
   const sfiId = peer.sfi_id;
-  const isSfiMember = peer.is_sfi_member === "1";
+  const isSfiMember = peer.is_sfi_member;
 
   // UI shell — served to everyone. Non-members render a private-frame notice client-side
   // after /api/state returns 403, matching the pattern other private frames use.

@@ -499,8 +499,8 @@ function statusFor(plant: PlantKey, w: WeatherData, soilFactor: number): PlantSt
 // ----- HTTP handler ---------------------------------------------------------------------
 self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cookies) => {
   const peer = parsePeerInfo(query, cookies);
-  const isAnon  = peer.is_anon  === "1" || !peer.user_id;
-  const isOwner = peer.is_owner === "1";
+  const isAnon  = peer.is_anon || !peer.user_id;
+  const isOwner = peer.is_owner;
 
   if (reqPath === "/index.html" && method === "GET") {
     // The script is a separate ES module file so it can import /lib/js/framelib.js —

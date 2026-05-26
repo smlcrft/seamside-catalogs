@@ -2,7 +2,7 @@ import { frame } from "/lib/js/framelib.js";
 
 (function () {
   const peer = window.__peer || {};
-  const isAnon = peer.is_anon === "1" || !peer.user_id;
+  const isAnon = !!peer.is_anon || !peer.user_id;
 
   const $ = (id) => document.getElementById(id);
 

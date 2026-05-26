@@ -14,7 +14,7 @@ import { frame } from "/lib/js/framelib.js";
 (() => {
   const app = document.getElementById("app");
   const peer = window.__peer || {};
-  const isSfiMember = peer.is_sfi_member === "1";
+  const isSfiMember = !!peer.is_sfi_member;
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -152,7 +152,7 @@ import { frame } from "/lib/js/framelib.js";
           <button class="sr-volup"  id="sr-volup"  title="volume up"     aria-label="volume up"><i class="ph-light ph-plus"></i></button>
         </div>
       </div>
-      <div class="sr-footer">play state is shared — volume is yours alone</div>
+      <div class="sr-footer">play is shared — volume is yours</div>
       <audio id="sr-audio" preload="none"></audio>
     `;
 
@@ -216,14 +216,14 @@ import { frame } from "/lib/js/framelib.js";
     const s = stationById.get(playstate.station_id);
     const name = s ? s.name : playstate.station_id;
     const verb = playstate.playing ? "playing" : "paused";
-    const by = playstate.updated_by_name ? ` · ${verb} by ${esc(playstate.updated_by_name)}` : "";
+    const playInfo = playstate.updated_by_name ? `${verb} by ${esc(playstate.updated_by_name)}` : `${verb}`;
     // sr-hint is a dual-purpose slot:
     //   • plain text errors (transient, hide after 4s) via showHint(msg)
     //   • an "enable audio" affordance when autoplay was blocked but the room is playing;
     //     clicking it retries audio.play() under a user gesture WITHOUT touching the
     //     shared room state (otherwise local-vs-room would flip-flop on every click).
     el.innerHTML = `<div class="sr-station-name">${esc(name)}</div>
-                    <div class="sr-by">${verb}${by}</div>
+                    <div class="sr-by">${playInfo}</div>
                     <div class="sr-hint" id="sr-hint" hidden></div>`;
   }
 

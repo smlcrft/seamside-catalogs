@@ -10,7 +10,7 @@
       "name": "openai",
       "description": "OpenAI API \u2014 GPT chat completions and text generation",
       "icon": "",
-      "modified_at": "2026-05-20T21:37:36Z",
+      "modified_at": "2026-05-26T13:17:20Z",
       "frame_preview": null,
       "capability_preview": {
         "kind": "service",
