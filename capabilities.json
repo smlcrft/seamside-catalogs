@@ -10,16 +10,16 @@
       "name": "openai",
       "description": "OpenAI API \u2014 GPT chat completions and text generation",
       "icon": "",
-      "modified_at": "2026-05-29T13:53:55Z",
+      "modified_at": "2026-05-30T00:00:00Z",
       "frame_preview": null,
       "capability_preview": {
         "kind": "service",
         "methods": [
-          "v1/responses"
+          "v1/chat/completions"
         ]
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/capabilities/openai.json",
-      "package_sha256": "5ebb470862f2964bf13e0d1d27b1f05e16811c7d406201a3cb029f6312040e9b"
+      "package_sha256": "288a684c9567e5f1ed7ba19d611336d79ad72207ca5989f5db5f05e5194e9049"
     }
   ]
 }

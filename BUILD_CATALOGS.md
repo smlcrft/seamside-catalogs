@@ -28,6 +28,7 @@ The build script:
 2. Walks [`capabilities/`](capabilities/). For each `*.json` file (not starting with `_` or `.`):
    - Copies it as-is to `packages/capabilities/<name>.json` (capabilities ship as single JSON files, not tarballs).
    - Computes its sha256 and writes an entry in `capabilities.json` with a `capability_preview` carrying `kind` and method names.
+   - **`modified_at` in the `capabilities.json` manifest is taken verbatim from the `modified_at` field of the source capability JSON** (the build does not stamp it with the build time). Bump `modified_at` in the capability JSON only when you ship an actual change you want existing installs to see. This is what ensures the Tandem app flags *only* genuinely-updated capabilities as "update available" — a no-op rebuild leaves every capability's `modified_at` unchanged, so users aren't nagged to re-install something that didn't change. (If the source JSON omits `modified_at`, the build falls back to its `created_at`, then to the build time — so always set `modified_at` explicitly to keep update detection deterministic.)
 3. Writes `frames.json` / `capabilities.json` at the repo root.
 
 ## Hosting
