@@ -74,6 +74,9 @@
     };
     function wmoLabel(code) { return WMO[code] ?? "Unknown"; }
     function wmoIcon(code) { return WMO_ICON[code] ?? "🌡️"; }
+    // A weather field may be absent if the placement's settings.json trims it (or the API
+    // omits it). Coerce to a finite number, or null so callers can render a "—" placeholder.
+    function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
     function dayName(isoDate) {
       return new Date(isoDate + "T12:00:00").toLocaleDateString(undefined, { weekday: "short" });
     }
@@ -94,28 +97,35 @@
         localStorage.setItem("weather_location", locationQuery);
 
         document.getElementById("location-label").textContent = d.location.name;
-        const cur = d.current;
+        const cur = d.current || {};
         const code = cur.weather_code;
+        const temp = num(cur.temperature_2m), feels = num(cur.apparent_temperature);
+        const hum = num(cur.relative_humidity_2m), wind = num(cur.wind_speed_10m);
         document.getElementById("cur-icon").textContent = wmoIcon(code);
-        document.getElementById("cur-temp").textContent = Math.round(cur.temperature_2m) + "°";
-        document.getElementById("cur-feels").textContent = Math.round(cur.apparent_temperature) + "°";
-        document.getElementById("cur-humidity").textContent = cur.relative_humidity_2m + "%";
-        document.getElementById("cur-wind").textContent = Math.round(cur.wind_speed_10m) + " mph";
+        document.getElementById("cur-temp").textContent = temp != null ? Math.round(temp) + "°" : "—";
+        document.getElementById("cur-feels").textContent = feels != null ? Math.round(feels) + "°" : "—";
+        document.getElementById("cur-humidity").textContent = hum != null ? hum + "%" : "—";
+        document.getElementById("cur-wind").textContent = wind != null ? Math.round(wind) + " mph" : "—";
         document.getElementById("condition").textContent = wmoLabel(code);
 
-        const daily = d.daily;
+        const daily = d.daily || {};
+        const days = Array.isArray(daily.time) ? daily.time : [];
         const forecastEl = document.getElementById("forecast");
         forecastEl.innerHTML = "";
-        for (let i = 0; i < daily.time.length; i++) {
-          const precip = daily.precipitation_sum[i];
+        for (let i = 0; i < days.length; i++) {
+          // Each daily series is optional (settings.json may trim fields), so index
+          // defensively and only render a value when it's actually present.
+          const hi = num(daily.temperature_2m_max?.[i]);
+          const lo = num(daily.temperature_2m_min?.[i]);
+          const precip = num(daily.precipitation_sum?.[i]);
           const div = document.createElement("div");
           div.className = "day";
           div.innerHTML = `
-            <div class="day-name">${dayName(daily.time[i])}</div>
-            <div class="day-icon">${wmoIcon(daily.weather_code[i])}</div>
-            <div class="day-hi">${Math.round(daily.temperature_2m_max[i])}°</div>
-            <div class="day-lo">${Math.round(daily.temperature_2m_min[i])}°</div>
-            ${precip > 0 ? `<div class="day-precip">${precip.toFixed(2)}"</div>` : ""}
+            <div class="day-name">${dayName(days[i])}</div>
+            <div class="day-icon">${wmoIcon(daily.weather_code?.[i])}</div>
+            <div class="day-hi">${hi != null ? Math.round(hi) + "°" : "—"}</div>
+            <div class="day-lo">${lo != null ? Math.round(lo) + "°" : "—"}</div>
+            ${precip != null && precip > 0 ? `<div class="day-precip">${precip.toFixed(2)}"</div>` : ""}
           `;
           forecastEl.appendChild(div);
         }

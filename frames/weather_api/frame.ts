@@ -36,8 +36,10 @@ async function fetchWeather(locationQuery: string): Promise<WeatherData> {
   const params = new URLSearchParams({
     latitude: String(latitude),
     longitude: String(longitude),
-    current:            settings.current            ?? "temperature_2m,weather_code",
-    daily:              settings.daily              ?? "weather_code,temperature_2m_max,temperature_2m_min",
+    // Defaults must cover every field the UI renders — on a fresh install there is no
+    // settings.json (the data dir ships empty), so these fallbacks are what actually run.
+    current:            settings.current            ?? "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m",
+    daily:              settings.daily              ?? "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum",
     temperature_unit:   settings.temperature_unit   ?? "fahrenheit",
     wind_speed_unit:    settings.wind_speed_unit    ?? "mph",
     precipitation_unit: settings.precipitation_unit ?? "inch",
