@@ -6,6 +6,23 @@
   "items": [
     {
       "kind": "Frames",
+      "id": "checklist",
+      "name": "Checklist",
+      "description": "A simple, collaborative to-do list. Each placement is its own list \u2014 any member of the space can add tasks, cycle each task through three states (unstarted, in-progress, complete), drag to reorder, and delete. Non-members get a live read-only view. Items, ordering, and states are stored in a lightweight local SQLite database keyed by placement, and every change is pushed live to all viewers.",
+      "icon": "",
+      "modified_at": "2026-06-02T23:18:49Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 420,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/checklist.tar.gz",
+      "package_sha256": "f3983f645453ca8de43a5054ddcf2c609b7d2eaa1b1507b4b8c1bf8ed7ef20f4"
+    },
+    {
+      "kind": "Frames",
       "id": "community_home",
       "name": "Community Home",
       "description": "A minimal website builder for a community home page. Admins configure the title, color, sections, and links; anonymous visitors see the published public page.",
@@ -54,6 +71,23 @@
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/discussion_channel.tar.gz",
       "package_sha256": "a4500ebc462e5385de4a76d1dcb39c37b5225d5b9e03005e56c40d878add03c7"
+    },
+    {
+      "kind": "Frames",
+      "id": "file_folder",
+      "name": "File Folder",
+      "description": "A simple shared file bucket, unique per placement. Members (or just the owner \u2014 the owner chooses) can add files by clicking 'Add file' or dragging them in from the desktop. The owner sets who may add files, who may download them (space members only, or anyone with the link), a max file size, and a max number of files. Files live in the frame's own data folder in a per-placement subfolder; only the owner's sharing preferences are stored, in a single JSON file. No database or sync tables.",
+      "icon": "",
+      "modified_at": "2026-06-03T01:36:04Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 420,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/file_folder.tar.gz",
+      "package_sha256": "45bbd06dc227d70d8a71a8b01694ad33a89ec954d22be2d069b82cd2bb50d446"
     },
     {
       "kind": "Frames",

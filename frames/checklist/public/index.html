@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Checklist</title>
+  <link rel="stylesheet" href="/dynamic/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); }          /* frame accent: teal (matches the in-progress state) */
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      max-width: 640px; margin: 0 auto;
+      padding: clamp(var(--os-sp-md), 4vw, var(--os-sp-xl));
+      display: flex; flex-direction: column; gap: var(--os-sp-md); min-height: 100%;
+    }
+
+    .header { display: flex; align-items: center; gap: var(--os-sp-sm); }
+    .header i { font-size: 20px; color: var(--ch); }
+    .header h1 { margin: 0; font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); }
+    .header .mode {
+      margin-left: auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-family: var(--os-font-mono); text-transform: lowercase; white-space: nowrap;
+    }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: color-mix(in srgb, var(--os-c1-muted) 30%, transparent);
+      border: 1px solid var(--os-c1-muted); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-c1-fg);
+    }
+
+    .list { display: flex; flex-direction: column; gap: 2px; }
+
+    .item {
+      display: flex; align-items: center; gap: var(--os-sp-sm);
+      padding: var(--os-sp-sm); border-radius: var(--os-radius-md);
+      transition: background 150ms; min-width: 0;
+    }
+    .item:hover { background: var(--os-bg-subtle); }
+    .item.dragging { opacity: 0.4; }
+    .item.drop-target { box-shadow: inset 0 2px 0 var(--ch); }
+
+    .grip {
+      flex: 0 0 auto; cursor: grab; color: var(--os-text-subtle);
+      opacity: 0; transition: opacity 150ms; font-size: 16px; line-height: 0;
+      display: flex; align-items: center; touch-action: none;
+    }
+    .item:hover .grip { opacity: 1; }
+    .grip:active { cursor: grabbing; }
+    .read-only .grip { display: none; }
+
+    .status {
+      flex: 0 0 auto; background: none; border: 0; padding: 2px; cursor: pointer;
+      font-size: 20px; line-height: 0; display: flex; align-items: center;
+      transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), filter 150ms;
+    }
+    .status:hover:not(:disabled) { filter: brightness(1.12); }
+    .status:active:not(:disabled) { transform: scale(0.88); }
+    .status:disabled { cursor: default; }
+    .status.s0 { color: var(--os-text-subtle); }
+    .status.s1 { color: var(--os-c1); }
+    .status.s2 { color: var(--os-cSuccess); }
+
+    .text { flex: 1 1 auto; min-width: 0; font-size: var(--os-fs-base); }
+    .text.s1 { color: var(--os-c1); }
+    .text.s2 { color: var(--os-text-muted); text-decoration: line-through; }
+    .text input {
+      width: 100%; font: inherit; color: inherit; background: transparent;
+      border: 0; border-radius: var(--os-radius-sm); padding: 2px 4px; outline: none;
+    }
+    .text input:focus { background: var(--os-bg-surface); box-shadow: 0 0 0 2px var(--ch); }
+    .text .static { padding: 2px 4px; word-break: break-word; }
+
+    .trash {
+      flex: 0 0 auto; background: none; border: 0; cursor: pointer; padding: 4px;
+      font-size: 16px; line-height: 0; color: var(--os-text-subtle);
+      opacity: 0; transition: opacity 150ms, color 150ms; display: flex; align-items: center;
+      border-radius: var(--os-radius-sm);
+    }
+    .item:hover .trash { opacity: 1; }
+    .trash:hover { color: var(--os-cError); }
+    .trash.armed { opacity: 1; color: var(--os-cError); background: var(--os-cError-muted); }
+    .read-only .trash { display: none; }
+
+    .new {
+      display: flex; align-items: center; gap: var(--os-sp-sm);
+      padding: var(--os-sp-sm); border-radius: var(--os-radius-md);
+      border: 1px dashed var(--os-border-color);
+    }
+    .new i { color: var(--os-text-subtle); font-size: 20px; line-height: 0; }
+    .new input {
+      flex: 1; font: inherit; color: var(--os-text); background: transparent;
+      border: 0; outline: none; padding: 2px 4px;
+    }
+    .new input::placeholder { color: var(--os-text-muted); }
+
+    .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-lg); }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useRef, useFramePush } from "/lib/js/framelib.js";
+
+    const ICONS = ["ph-circle", "ph-circle-half", "ph-check-circle"];
+    const NEXT  = { 0: 1, 1: 2, 2: 0 };
+
+    // Find the item the cursor is hovering above, for drop positioning.
+    function dragAfter(list, y) {
+      const rows = [...list.querySelectorAll(".item:not(.dragging)")];
+      let closest = null, closestOffset = Number.NEGATIVE_INFINITY;
+      for (const row of rows) {
+        const box = row.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closestOffset) { closestOffset = offset; closest = row; }
+      }
+      return closest;
+    }
+
+    function App() {
+      const [me, setMe]       = useState(null);
+      const [items, setItems] = useState([]);
+      const [draft, setDraft] = useState("");
+      const [armed, setArmed] = useState(null);   // id of the delete-armed item
+      const armTimer = useRef(null);
+
+      async function refresh() {
+        const r = await frame.api("api/list").catch(() => ({ items: [] }));
+        setItems(r.items || []);
+      }
+      useEffect(() => {
+        frame.api("api/whoami").then(setMe).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({ checklist_changed: refresh });
+
+      if (!me) return html`<div></div>`;
+      const isEditor = !!me.is_sfi_editor;
+
+      // Apply the server's authoritative item list after any mutation.
+      const apply = (r) => { if (r && r.items) setItems(r.items); };
+
+      async function add() {
+        const text = draft.trim();
+        if (!text) return;
+        setDraft("");
+        apply(await frame.api("api/add", { text }).catch(() => null));
+      }
+      async function cycle(it) {
+        if (!isEditor) return;
+        // optimistic
+        setItems(items.map((x) => x.id === it.id ? { ...x, state: NEXT[it.state] } : x));
+        apply(await frame.api("api/item/" + it.id, { state: NEXT[it.state] }).catch(() => null));
+      }
+      async function saveText(it, text) {
+        const v = text.trim();
+        if (!v || v === it.text) return;
+        apply(await frame.api("api/item/" + it.id, { text: v }).catch(() => null));
+      }
+      function disarm() { setArmed(null); if (armTimer.current) clearTimeout(armTimer.current); }
+      async function trash(it) {
+        if (armed !== it.id) {
+          setArmed(it.id);
+          if (armTimer.current) clearTimeout(armTimer.current);
+          armTimer.current = setTimeout(() => setArmed(null), 2500);
+          return;
+        }
+        disarm();
+        setItems(items.filter((x) => x.id !== it.id));
+        apply(await frame.api("api/delete/" + it.id, {}, "POST").catch(() => null));
+      }
+
+      // --- drag reorder -----------------------------------------------------------------
+      const dragId = useRef(null);
+      const listRef = useRef(null);
+      function onListDragOver(e) {
+        if (dragId.current == null) return;
+        e.preventDefault();
+        const after = dragAfter(listRef.current, e.clientY);
+        listRef.current.querySelectorAll(".drop-target").forEach((n) => n.classList.remove("drop-target"));
+        if (after) after.classList.add("drop-target");
+      }
+      function onListDrop(e) {
+        if (dragId.current == null) return;
+        e.preventDefault();
+        const after = dragAfter(listRef.current, e.clientY);
+        const afterId = after ? Number(after.dataset.id) : null;
+        listRef.current.querySelectorAll(".drop-target").forEach((n) => n.classList.remove("drop-target"));
+        const id = dragId.current;
+        const ids = items.map((x) => x.id).filter((x) => x !== id);
+        const to = afterId == null ? ids.length : ids.indexOf(afterId);
+        ids.splice(to, 0, id);
+        const byId = new Map(items.map((x) => [x.id, x]));
+        const reordered = ids.map((x) => byId.get(x));
+        setItems(reordered);
+        frame.api("api/reorder", { ids }).then(apply).catch(() => {});
+      }
+
+      const mode = isEditor ? (me.is_owner ? "editor · owner" : "editor")
+                 : me.is_sfi_member ? "viewer · read-only"
+                 : (me.is_anon ? "anonymous · read-only" : "non-member · read-only");
+
+      return html`
+        <main class=${isEditor ? "" : "read-only"}>
+          <div class="header">
+            <i class="ph-light ph-list-checks"></i>
+            <h1>Checklist</h1>
+            <span class="mode">${mode}</span>
+          </div>
+
+          ${!isEditor ? html`
+            <div class="banner">
+              <i class="ph-light ph-eye"></i>
+              ${me.is_sfi_member
+                ? html`You have viewer-only access. Ask the owner to raise your role to edit this list.`
+                : html`You're viewing this list publicly. Join this space to add and check off tasks.`}
+            </div>` : null}
+
+          ${items.length === 0 && !isEditor
+            ? html`<div class="empty">Nothing here yet.</div>`
+            : html`
+              <div class="list" ref=${listRef}
+                onDragOver=${isEditor ? onListDragOver : null}
+                onDrop=${isEditor ? onListDrop : null}>
+                ${items.map((it) => html`
+                  <div class="item" key=${it.id} data-id=${it.id}>
+                    ${isEditor ? html`
+                      <span class="grip" draggable="true"
+                        onDragStart=${(e) => {
+                          dragId.current = it.id;
+                          e.currentTarget.closest(".item").classList.add("dragging");
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDragEnd=${(e) => {
+                          dragId.current = null;
+                          e.currentTarget.closest(".item").classList.remove("dragging");
+                          listRef.current?.querySelectorAll(".drop-target").forEach((n) => n.classList.remove("drop-target"));
+                        }}>
+                        <i class="ph-light ph-dots-six-vertical"></i>
+                      </span>` : null}
+
+                    <button class=${"status s" + it.state} disabled=${!isEditor}
+                      title=${["unstarted", "in progress", "complete"][it.state]}
+                      onClick=${() => cycle(it)}>
+                      <i class=${"ph-light " + ICONS[it.state]}></i>
+                    </button>
+
+                    <div class=${"text s" + it.state}>
+                      ${isEditor
+                        ? html`<input value=${it.text} maxlength="1000"
+                            onBlur=${(e) => saveText(it, e.target.value)}
+                            onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />`
+                        : html`<div class="static">${it.text}</div>`}
+                    </div>
+
+                    ${isEditor ? html`
+                      <button class=${"trash" + (armed === it.id ? " armed" : "")}
+                        title=${armed === it.id ? "Click again to delete" : "Delete"}
+                        onClick=${() => trash(it)} onBlur=${disarm}>
+                        <i class=${"ph-light " + (armed === it.id ? "ph-trash" : "ph-trash-simple")}></i>
+                      </button>` : null}
+                  </div>
+                `)}
+              </div>`}
+
+          ${isEditor ? html`
+            <div class="new">
+              <i class="ph-light ph-plus"></i>
+              <input placeholder="Add a task…" value=${draft}
+                onInput=${(e) => setDraft(e.target.value)}
+                onKeyDown=${(e) => { if (e.key === "Enter") add(); }}
+                onBlur=${add} maxlength="1000" />
+            </div>` : null}
+        </main>
+      `;
+    }
+
+    render(html`<${App}/>`, document.body);
+  </script>
+</body>
+</html>

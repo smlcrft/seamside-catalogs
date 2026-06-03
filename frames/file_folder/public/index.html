@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>File Folder</title>
+  <link rel="stylesheet" href="/dynamic/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c4); }          /* frame accent: amber */
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      max-width: 640px; margin: 0 auto; min-height: 100%;
+      padding: clamp(var(--os-sp-sm), 3.5vw, var(--os-sp-xl));
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+    }
+
+    .header { display: flex; align-items: center; gap: var(--os-sp-sm); }
+    .header > i { font-size: 20px; color: var(--ch); }
+    .header h1 { margin: 0; font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); flex: 1; }
+    .header .mode {
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-family: var(--os-font-mono); text-transform: lowercase; white-space: nowrap;
+    }
+    .gear {
+      background: none; border: 0; cursor: pointer; color: var(--os-text-muted);
+      padding: 4px; border-radius: var(--os-radius-sm); font-size: 18px; line-height: 0;
+      display: flex; align-items: center; transition: color 150ms, background 150ms;
+    }
+    .gear:hover, .gear.on { color: var(--ch); background: var(--os-bg-subtle); }
+
+    /* Owner settings */
+    .settings {
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color);
+      border-radius: var(--os-radius-lg); padding: var(--os-sp-md);
+    }
+    .field { display: flex; flex-direction: column; gap: var(--os-sp-xs); }
+    .field > label {
+      font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--os-text-muted);
+    }
+    .seg { display: flex; gap: 0; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md); overflow: hidden; }
+    .seg button {
+      flex: 1; background: var(--os-bg); border: 0; cursor: pointer; padding: var(--os-sp-sm);
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      display: inline-flex; align-items: center; justify-content: center; gap: var(--os-sp-xs);
+      transition: background 150ms, color 150ms; min-width: 0;
+    }
+    .seg button + button { border-left: 1px solid var(--os-border-color); }
+    .seg button.active { background: var(--ch); color: var(--os-c4-fg, #2a2207); font-weight: var(--os-weight-medium); }
+    .seg button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .limits { display: flex; gap: var(--os-sp-md); }
+    .limits .field { flex: 1; }
+    .limits input {
+      font: inherit; color: var(--os-text); background: var(--os-bg);
+      border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm); outline: none; width: 100%; transition: border-color 150ms, background 150ms;
+    }
+    .limits input:focus { border-color: var(--ch); background: var(--os-bg-surface); }
+
+    /* Drop / add zone */
+    .drop {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--os-sp-xs);
+      text-align: center; border: 1.5px dashed var(--os-border-color); border-radius: var(--os-radius-lg);
+      padding: var(--os-sp-lg) var(--os-sp-md); cursor: pointer; color: var(--os-text-muted);
+      transition: border-color 150ms, background 150ms, color 150ms;
+    }
+    .drop:hover { border-color: var(--ch); color: var(--os-text-secondary); }
+    .drop i { font-size: 26px; color: var(--ch); }
+    .drop .big { font-size: var(--os-fs-base); color: var(--os-text); }
+    .drop .hint { font-size: var(--os-fs-2xs); font-family: var(--os-font-mono); }
+
+    /* File list */
+    .files { display: flex; flex-direction: column; gap: 2px; }
+    .file {
+      display: flex; align-items: center; gap: var(--os-sp-sm);
+      padding: var(--os-sp-sm); border-radius: var(--os-radius-md); transition: background 150ms; min-width: 0;
+    }
+    .file:hover { background: var(--os-bg-subtle); }
+    .file > i.kind { font-size: 20px; color: var(--os-text-muted); flex: 0 0 auto; line-height: 0; }
+    .file .meta { flex: 1; min-width: 0; }
+    .file .name { font-size: var(--os-fs-base); word-break: break-word; }
+    .file .sub { font-size: var(--os-fs-2xs); font-family: var(--os-font-mono); color: var(--os-text-muted); }
+    .iconbtn {
+      flex: 0 0 auto; background: none; border: 0; cursor: pointer; padding: 5px; line-height: 0;
+      font-size: 17px; color: var(--os-text-subtle); border-radius: var(--os-radius-sm);
+      display: flex; align-items: center; transition: color 150ms, background 150ms, opacity 150ms;
+    }
+    .iconbtn.dl:hover { color: var(--ch); }
+    .iconbtn.del { opacity: 0; }
+    .file:hover .iconbtn.del { opacity: 1; }
+    .iconbtn.del:hover { color: var(--os-cError); }
+    .iconbtn.del.armed { opacity: 1; color: var(--os-cError); background: var(--os-cError-muted); }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: color-mix(in srgb, var(--os-c1-muted) 30%, transparent);
+      border: 1px solid var(--os-c1-muted); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-c1-fg);
+    }
+    .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-lg); }
+    .count { font-size: var(--os-fs-2xs); font-family: var(--os-font-mono); color: var(--os-text-muted); padding: 0 var(--os-sp-xs); }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useRef, useFramePush } from "/lib/js/framelib.js";
+
+    function fmtSize(n) {
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
+      if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
+      return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+    }
+    function withSfi(p) {
+      try {
+        const sfi = new URLSearchParams(location.search).get("sfi");
+        if (sfi && !/[?&]sfi=/.test(p)) return p + (p.includes("?") ? "&" : "?") + "sfi=" + encodeURIComponent(sfi);
+      } catch (_) {}
+      return p;
+    }
+
+    function App() {
+      const [st, setSt]       = useState(null);
+      const [showCfg, setCfg] = useState(false);
+      const [busy, setBusy]   = useState(false);
+      const [armed, setArmed] = useState(null);
+      const fileInput = useRef(null);
+      const armTimer  = useRef(null);
+
+      async function refresh() {
+        const s = await frame.api("api/state").catch(() => null);
+        if (s) setSt(s);
+      }
+      useEffect(() => { refresh(); }, []);
+      useFramePush({ folder_changed: refresh });
+
+      if (!st) return html`<div></div>`;
+      const { me, prefs, can_add, can_view, files } = st;
+      const atLimit = files.length >= prefs.max_files;
+
+      async function savePrefs(patch) {
+        const next = { ...prefs, ...patch };
+        setSt({ ...st, prefs: next });          // optimistic
+        const s = await frame.api("api/prefs", next).catch(() => null);
+        if (s) setSt(s);
+      }
+
+      async function uploadFiles(list) {
+        const arr = [...list];
+        if (!arr.length) return;
+        setBusy(true);
+        try {
+          for (const f of arr) {
+            if (files.length + arr.indexOf(f) >= prefs.max_files) {
+              await frame.alert(`This folder is limited to ${prefs.max_files} files.`);
+              break;
+            }
+            if (f.size > prefs.max_size_mb * 1024 * 1024) {
+              await frame.alert(`"${f.name}" is larger than the ${prefs.max_size_mb} MB limit.`);
+              continue;
+            }
+            // Send the file's bytes already resolved into memory (ArrayBuffer), NOT the
+            // File object: the axum:// custom-scheme webview bridge captures the request
+            // before an async Blob/File read finishes, so a File body arrives empty.
+            const buf = await f.arrayBuffer();
+            const res = await frame.fetch(withSfi("api/upload?name=" + encodeURIComponent(f.name)), { method: "POST", body: buf });
+            if (!res.ok) {
+              const msg = await res.json().catch(() => ({}));
+              await frame.alert(msg.error || ("Upload failed (" + res.status + ")"));
+            }
+          }
+          await refresh();
+        } finally { setBusy(false); }
+      }
+
+      async function download(f) {
+        try {
+          const res = await frame.fetch(withSfi("api/download/" + f.id));
+          if (!res.ok) { await frame.alert("Download failed (" + res.status + ")"); return; }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = f.name;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 4000);
+        } catch (_) { await frame.alert("Download failed."); }
+      }
+
+      function disarm() { setArmed(null); if (armTimer.current) clearTimeout(armTimer.current); }
+      async function del(f) {
+        if (armed !== f.id) {
+          setArmed(f.id);
+          if (armTimer.current) clearTimeout(armTimer.current);
+          armTimer.current = setTimeout(() => setArmed(null), 2500);
+          return;
+        }
+        disarm();
+        const s = await frame.api("api/delete/" + f.id, {}, "POST").catch(() => null);
+        if (s) setSt(s);
+      }
+
+      const mode = me.is_owner ? "owner"
+                 : me.is_sfi_editor ? "editor"
+                 : me.is_sfi_member ? "member"
+                 : (me.is_anon ? "anonymous" : "guest");
+
+      return html`
+        <main>
+          <div class="header">
+            <i class="ph-light ph-folder"></i>
+            <h1>File Folder</h1>
+            <span class="mode">${mode}</span>
+            ${me.is_owner ? html`
+              <button class=${"gear" + (showCfg ? " on" : "")} title="Settings" onClick=${() => setCfg(!showCfg)}>
+                <i class="ph-light ph-gear-six"></i>
+              </button>` : null}
+          </div>
+
+          ${me.is_owner && showCfg ? html`
+            <div class="settings">
+              <div class="field">
+                <label>Who can add files</label>
+                <div class="seg">
+                  <button class=${prefs.who_can_add === "owner" ? "active" : ""} onClick=${() => savePrefs({ who_can_add: "owner" })}>
+                    <i class="ph-light ph-user"></i><span>Owner only</span>
+                  </button>
+                  <button class=${prefs.who_can_add === "editors" ? "active" : ""} onClick=${() => savePrefs({ who_can_add: "editors" })}>
+                    <i class="ph-light ph-users"></i><span>Owner & editors</span>
+                  </button>
+                </div>
+              </div>
+              <div class="field">
+                <label>Who can download</label>
+                <div class="seg">
+                  <button class=${prefs.who_can_download === "members" ? "active" : ""} onClick=${() => savePrefs({ who_can_download: "members" })}>
+                    <i class="ph-light ph-lock-simple"></i><span>Space members</span>
+                  </button>
+                  <button class=${prefs.who_can_download === "anyone" ? "active" : ""} onClick=${() => savePrefs({ who_can_download: "anyone" })}>
+                    <i class="ph-light ph-globe"></i><span>Anyone with link</span>
+                  </button>
+                </div>
+              </div>
+              <div class="limits">
+                <div class="field">
+                  <label>Max size (MB)</label>
+                  <input type="number" min="1" max="1024" value=${prefs.max_size_mb}
+                    onChange=${(e) => savePrefs({ max_size_mb: Math.max(1, Math.min(1024, parseInt(e.target.value) || 100)) })} />
+                </div>
+                <div class="field">
+                  <label>Max files</label>
+                  <input type="number" min="1" max="1000" value=${prefs.max_files}
+                    onChange=${(e) => savePrefs({ max_files: Math.max(1, Math.min(1000, parseInt(e.target.value) || 10)) })} />
+                </div>
+              </div>
+            </div>` : null}
+
+          ${can_add ? html`
+            <div class="drop" onClick=${() => !busy && !atLimit && fileInput.current?.click()}>
+              <i class="ph-light ${busy ? "ph-spinner-gap" : "ph-upload-simple"}"></i>
+              <span class="big">${busy ? "Uploading…" : atLimit ? "Folder is full" : "Add a file"}</span>
+              <span class="hint">${atLimit ? `${prefs.max_files}/${prefs.max_files} files` : `click to add · up to ${prefs.max_size_mb} MB · ${files.length}/${prefs.max_files}`}</span>
+              <input ref=${fileInput} type="file" multiple style="display:none"
+                onChange=${(e) => { uploadFiles(e.target.files); e.target.value = ""; }} />
+            </div>` : null}
+
+          ${!can_view ? html`
+            <div class="banner">
+              <i class="ph-light ph-lock-simple"></i>
+              This folder is shared with space members only. Join the space to see and download its files.
+            </div>`
+          : files.length === 0 ? html`
+            <div class="empty">No files yet.${can_add ? " Add one above." : ""}</div>`
+          : html`
+            <div>
+              <div class="count">${files.length} file${files.length === 1 ? "" : "s"}</div>
+              <div class="files">
+                ${files.map((f) => html`
+                  <div class="file" key=${f.id}>
+                    <i class="ph-light ph-file kind"></i>
+                    <div class="meta">
+                      <div class="name">${f.name}</div>
+                      <div class="sub">${fmtSize(f.size)}</div>
+                    </div>
+                    <button class="iconbtn dl" title="Download" onClick=${() => download(f)}>
+                      <i class="ph-light ph-download-simple"></i>
+                    </button>
+                    ${can_add ? html`
+                      <button class=${"iconbtn del" + (armed === f.id ? " armed" : "")}
+                        title=${armed === f.id ? "Click again to delete" : "Delete"}
+                        onClick=${() => del(f)} onBlur=${disarm}>
+                        <i class="ph-light ${armed === f.id ? "ph-trash" : "ph-trash-simple"}"></i>
+                      </button>` : null}
+                  </div>
+                `)}
+              </div>
+            </div>`}
+        </main>
+      `;
+    }
+
+    render(html`<${App}/>`, document.body);
+  </script>
+</body>
+</html>
