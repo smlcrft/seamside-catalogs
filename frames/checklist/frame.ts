@@ -34,15 +34,21 @@ db.exec(`
     text       TEXT    NOT NULL DEFAULT '',
     state      INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0,
-    created_ms INTEGER NOT NULL
+    created_ms INTEGER NOT NULL,
+    actor_id   TEXT    NOT NULL DEFAULT '',
+    actor_name TEXT    NOT NULL DEFAULT ''
   );
   CREATE INDEX IF NOT EXISTS idx_items_sfi ON items (sfi_id, sort_order, id);
 `);
 
+// Migrations for pre-existing DBs: who last moved an item off "unstarted".
+try { db.exec("ALTER TABLE items ADD COLUMN actor_id   TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+try { db.exec("ALTER TABLE items ADD COLUMN actor_name TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+
 // ----- Helpers --------------------------------------------------------------------------
 function listItems(sfiId: string) {
   return db.prepare(
-    "SELECT id, text, state, sort_order FROM items WHERE sfi_id = ? ORDER BY sort_order, id"
+    "SELECT id, text, state, sort_order, actor_name FROM items WHERE sfi_id = ? ORDER BY sort_order, id"
   ).all(sfiId);
 }
 
@@ -113,7 +119,15 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     const v = parseJsonBody<{ state?: unknown; text?: unknown }>(body);
     if (v?.state !== undefined) {
       const state = clampInt(toIntOrNull(v.state) ?? 0, 0, 2);
-      db.prepare("UPDATE items SET state = ? WHERE id = ? AND sfi_id = ?").run(state, id, peer.sfi_id);
+      // Record who moved this item off "unstarted"; clear the credit when it returns to 0.
+      if (state === 0) {
+        db.prepare("UPDATE items SET state = ?, actor_id = '', actor_name = '' WHERE id = ? AND sfi_id = ?")
+          .run(state, id, peer.sfi_id);
+      } else {
+        const actorName = sanitizeText(peer.user_name, 80) || "someone";
+        db.prepare("UPDATE items SET state = ?, actor_id = ?, actor_name = ? WHERE id = ? AND sfi_id = ?")
+          .run(state, peer.user_id ?? "", actorName, id, peer.sfi_id);
+      }
     }
     if (v?.text !== undefined) {
       const text = sanitizeText(v.text, 1000);

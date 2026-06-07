@@ -2,7 +2,8 @@
   "name": "openai",
   "description": "OpenAI API — GPT chat completions and text generation",
   "category": "ai",
-  "modified_at": "2026-05-30T00:00:00Z",
+  "modified_at": "2026-06-03T23:35:07Z",
+  "app_version_min": "0.1.7",
   "source": "local_api",
   "kind": "service",
   "aliases": [

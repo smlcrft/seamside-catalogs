@@ -10,7 +10,7 @@
       "name": "Checklist",
       "description": "A simple, collaborative to-do list. Each placement is its own list \u2014 any member of the space can add tasks, cycle each task through three states (unstarted, in-progress, complete), drag to reorder, and delete. Non-members get a live read-only view. Items, ordering, and states are stored in a lightweight local SQLite database keyed by placement, and every change is pushed live to all viewers.",
       "icon": "",
-      "modified_at": "2026-06-02T23:18:49Z",
+      "modified_at": "2026-06-04T17:28:44Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 420,
@@ -19,7 +19,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/checklist.tar.gz",
-      "package_sha256": "f3983f645453ca8de43a5054ddcf2c609b7d2eaa1b1507b4b8c1bf8ed7ef20f4"
+      "package_sha256": "1d58407b01a93d0876a951244b535f8d884bf6cfe429ece1de16e51ee284c3ee",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -27,7 +28,7 @@
       "name": "Community Home",
       "description": "A minimal website builder for a community home page. Admins configure the title, color, sections, and links; anonymous visitors see the published public page.",
       "icon": "",
-      "modified_at": "2026-06-02T14:44:08Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -36,7 +37,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/community_home.tar.gz",
-      "package_sha256": "cb8cdd0b7177d877c313f8a74224dfa97119813aa543e1daba0e345b36bfaf97"
+      "package_sha256": "5a6180379f4431b249179ff8b2bbb0540f805666ca5e288876706ba587134a8f",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -44,7 +46,7 @@
       "name": "Community Library",
       "description": "Track items shared by a community \u2014 books, tools, gear \u2014 and who has them checked out. Items and members live in shared SyncTables (the members table is compatible with Member Manager so the same roster can be reused). Per-placement preferences (org name, borrow durations, owner-only edit) are stored in a local JSON file.",
       "icon": "",
-      "modified_at": "2026-06-02T19:29:59Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -53,7 +55,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/community_library.tar.gz",
-      "package_sha256": "afaeb3514b8aa57f2674fb37591456f92c20192064ed51a4b7d0e9287a316f0f"
+      "package_sha256": "d7466577bfef7d185974394b159372163008074461af61305ebf144fb1070dd6",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -61,7 +64,7 @@
       "name": "Discussion Channel",
       "description": "A per-placement realtime chat channel for known users in the space. Any signed-in member can rename the channel, pick a theme, post messages, and react with Phosphor Light icons. Anonymous viewers see a private-channel notice.",
       "icon": "",
-      "modified_at": "2026-06-02T14:44:08Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -70,7 +73,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/discussion_channel.tar.gz",
-      "package_sha256": "a4500ebc462e5385de4a76d1dcb39c37b5225d5b9e03005e56c40d878add03c7"
+      "package_sha256": "a5e1116165b6099d2a821c9483b77ad4cae0f36f22d4f6ff3954e85208918ccc",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -78,7 +82,7 @@
       "name": "File Folder",
       "description": "A simple shared file bucket, unique per placement. Members (or just the owner \u2014 the owner chooses) can add files by clicking 'Add file' or dragging them in from the desktop. The owner sets who may add files, who may download them (space members only, or anyone with the link), a max file size, and a max number of files. Files live in the frame's own data folder in a per-placement subfolder; only the owner's sharing preferences are stored, in a single JSON file. No database or sync tables.",
       "icon": "",
-      "modified_at": "2026-06-03T01:36:04Z",
+      "modified_at": "2026-06-03T01:48:04Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 420,
@@ -87,7 +91,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/file_folder.tar.gz",
-      "package_sha256": "6aaaf15bd4281fbb920dca57c73a336ef9a73d01220e0a45f30d00e2a62cffc6"
+      "package_sha256": "0ef2848405d7ea45adb3bcca646add98addb0b53f95fe1692ddc3f7623482933",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -95,7 +100,7 @@
       "name": "ASCII Runner",
       "description": "A retro side-scrolling ASCII game where you jump over rocks and duck under birds. Use arrow keys to survive as long as you can!",
       "icon": "",
-      "modified_at": "2026-06-02T14:44:08Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -104,7 +109,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/game_ascii_runner.tar.gz",
-      "package_sha256": "51c32ded15eb0bed186d25ba30b0c1f0b06131468a4848079d3eb1fe0aac7647"
+      "package_sha256": "bf09d17af92a703ec359207593407ccfabadc260e7660c5d3762dbce5bc7fb40",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -112,7 +118,7 @@
       "name": "Dice Roller",
       "description": "Simple dice roller. Roll via the UI or HTTP API; result is broadcast to all viewers of a frame instance.",
       "icon": "",
-      "modified_at": "2026-06-02T14:44:08Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -121,7 +127,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/game_dice_roller.tar.gz",
-      "package_sha256": "240d43983247bad1747171757841292a86a0715a0bff77b13fd2f80a6b988262"
+      "package_sha256": "c5bf8847efc7b0d228f141d0a581785ca0de29188b0928fbb62eb23131c658be",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -129,16 +136,17 @@
       "name": "Pancake Stacker",
       "description": "Simple solo arcade game. A pancake swings back and forth at the top of the griddle \u2014 tap, click, or hit space to drop it onto the stack. Each pancake trims to the overlap with the one below, so the tower narrows as you climb. Miss entirely and the stack topples. High score per placement.",
       "icon": "",
-      "modified_at": "2026-06-02T14:44:08Z",
+      "modified_at": "2026-06-06T01:24:07Z",
       "frame_preview": {
         "frame_type": "Tandem",
-        "default_width_px": 400,
-        "default_height_px": 640,
+        "default_width_px": 400.0,
+        "default_height_px": 640.0,
         "depends_on_capabilities": []
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/game_pancake_stacker.tar.gz",
-      "package_sha256": "0d119081df32694c7efd85c30ce67926bcc8acbb8605e7d7276291b7863bfa8c"
+      "package_sha256": "9888f639e7b5af71a60303b1962cf0610283749f02f1185abcb4ccd360c21096",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -146,7 +154,7 @@
       "name": "Garden Gnome",
       "description": "An at-a-glance helper for home gardeners. Set a location, pick your soil, tick the plants you grow, and Garden Gnome fetches local weather (Open-Meteo, keyless) every 15 minutes \u2014 past 5 days plus the next 24 hours \u2014 and shows three color-coded dots on a +/- spectrum next to each plant for water, temperature, and sunlight so you know when a plant is being naturally pampered or stressed.",
       "icon": "",
-      "modified_at": "2026-06-02T14:44:08Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 560,
@@ -155,7 +163,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/garden_gnome.tar.gz",
-      "package_sha256": "9ce51022f0406f7c125885fd40a76306af452849d6ebcc771794176b01ce2be1"
+      "package_sha256": "9e2ca804ccc83d5771348146c66eb8d1f9586edd2f38db93ad807635d36b1c08",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -163,7 +172,7 @@
       "name": "Help Desk",
       "description": "Anonymous visitors submit a message with email (plus admin-configured fields); known users in the space see a realtime inbox of incoming correspondence.",
       "icon": "",
-      "modified_at": "2026-06-02T14:44:08Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -172,7 +181,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/help_desk.tar.gz",
-      "package_sha256": "7f10a6bc1a0aa45eebe8cf4a13d052653af9a4e4017e97548759d77407c1b003"
+      "package_sha256": "2eee553a9a94429fa50cb649955e5de7ca942594639883421ba4eac547e9c763",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -180,7 +190,7 @@
       "name": "Market Weather",
       "description": "A turnout forecaster for outdoor commerce \u2014 farmers markets, festivals, food trucks, street vendors, walkable storefronts. Set a location and Market Weather pulls 72 hours of weather from Open-Meteo (keyless), compares it against the last 30 days' local norms, and folds in temperature comfort, rain, UV, daylight, wind, weekend bonus, and time-of-day into a single composite turnout curve. The graph overlays each contributing factor as a faint band (daytime in pale yellow, rain in blue rising from the bottom, extreme heat/cold in red, weekend bonus in green) so you can see at a glance WHY the bold turnout line moves the way it does \u2014 and plan how much to stock, bake, or brew for the days ahead.",
       "icon": "",
-      "modified_at": "2026-06-02T14:44:08Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 720,
@@ -189,7 +199,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/market_weather.tar.gz",
-      "package_sha256": "7f401628e1ec6b13b4ad2ccb80cac6d09685368ac6e748427652aa7642cd6e44"
+      "package_sha256": "6f49c7afa05c4af1b4837680b00c896fcbad7e2433d7d79424a74bf05d043472",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -197,7 +208,7 @@
       "name": "Member Manager",
       "description": "View and manage a roster of people and their roles within an organization. Member entries are stored in a shared SyncTable so every space member sees the same list. Per-placement preferences (org name, available roles, edit policy) are stored in a local JSON file.",
       "icon": "",
-      "modified_at": "2026-06-02T14:44:08Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -206,7 +217,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/member_manager.tar.gz",
-      "package_sha256": "87f55537240faf7caba345351fc948630e08f3060dcb9dae0636348703a7eb9b"
+      "package_sha256": "1a2be005e110927c3224f7375f2fd65a97f343cf2eb218aa5f1c99454a1ff0a2",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -214,7 +226,7 @@
       "name": "Roundtable",
       "description": "A per-placement private discussion + two prioritized idea boards for known space members. Members chat in a single channel, add items to a Positives list (features/tasks) or a Negatives list (issues/bugs), and +1 the ones that matter. Items are ranked by votes, then recency. Only the owner can rename the frame and set high-level preferences. Anonymous viewers see a private-frame notice.",
       "icon": "",
-      "modified_at": "2026-06-02T14:44:08Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -223,15 +235,16 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/roundtable.tar.gz",
-      "package_sha256": "dfb3056953d72fc04470a22ced43148567872af476b803df3f3873ee81a3d6d1"
+      "package_sha256": "e4c001baba03070a2fe05244075781616446c13f6e6c6363cc4845ff1c487116",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
       "id": "slideshow",
       "name": "Slideshow",
-      "description": "A simple presentation maker and presenter, unique per placement. Space editors build a deck of slides \u2014 stylized text (headings, body, bullet lists), uploaded images, and shapes \u2014 laid out freely on a fixed slide canvas; everything is positioned and sized proportionally so the deck looks identical from a 300\u00d7300 tile up to a scaled-up fullscreen presentation. Viewers can browse and present the deck but cannot edit it. A few show-wide settings (accent palette, background, slide aspect) sit alongside the slides. The whole deck lives in a single JSON file in a per-placement folder, with uploaded images (auto-resized to keep file sizes reasonable) stored beside it. No database or sync tables.",
+      "description": "A simple presentation maker and presenter, unique per placement. Space editors build a deck of slides \u2014 stylized text (headings, body, bullet lists), uploaded images, and shapes \u2014 laid out freely on a fixed slide canvas; everything is positioned and sized proportionally so the deck looks identical from a 300\u00d7300 tile up to a scaled-up fullscreen presentation. Viewers can browse and present the deck but cannot edit it. A few show-wide settings (accent palette, background, slide aspect, and an optional \"keep viewers in sync\" mode that locks every viewer's presentation to the editor's current slide) sit alongside the slides. The whole deck lives in a single JSON file in a per-placement folder, with uploaded images (auto-resized to keep file sizes reasonable) stored beside it. No database or sync tables.",
       "icon": "",
-      "modified_at": "2026-06-03T15:35:22Z",
+      "modified_at": "2026-06-05T16:32:29Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 640,
@@ -240,7 +253,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/slideshow.tar.gz",
-      "package_sha256": "143b499ba50e8acec34c52871babfc744395ec2d1e217fd2cf3d8ccb9d771597"
+      "package_sha256": "658436bceef84609b2a0322368bfda69d9a25ee6e1d6d581ccd4956a0c462931",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -248,7 +262,7 @@
       "name": "Space Radio",
       "description": "A synced web radio player for everyone in a space. Any space member can pick a station from a large list of public web stations \u2014 rock, pop, ambient, jazz, French, Italian, Australian, NPR, chiptune, and more \u2014 and everyone else in the space hears the same audio simultaneously. Play/pause and station selection are shared; each viewer's volume and mute are local and remembered between sessions.",
       "icon": "",
-      "modified_at": "2026-06-02T14:44:08Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -257,7 +271,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/space_radio.tar.gz",
-      "package_sha256": "b078c78a005abb3aef2a058c1d8c3340ec8d3c2dd4eb1762aa764ea77dd25ee7"
+      "package_sha256": "15586c04c16623728dadeef28ca3b35d57ec326445bfc240322faac0e27b5ad3",
+      "app_version_min": "0.1.7"
     },
     {
       "kind": "Frames",
@@ -265,7 +280,7 @@
       "name": "Weather Info",
       "description": "Example weather info/forecast using keyless API (open meteo)",
       "icon": "",
-      "modified_at": "2026-06-02T19:41:21Z",
+      "modified_at": "2026-06-03T17:14:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -274,7 +289,8 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/weather_api.tar.gz",
-      "package_sha256": "81d611c5077d396d00477ac481027303204c480487ca6ec953ea564f3875eb5c"
+      "package_sha256": "33fc2fc427a78ebaf464e1bb52a251895c03a0ca87f0ae35d8573a3ec32b3ebe",
+      "app_version_min": "0.1.7"
     }
   ]
 }

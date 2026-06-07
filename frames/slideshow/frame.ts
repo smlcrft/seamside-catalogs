@@ -8,7 +8,9 @@
 //                                           per-sfi folder; uploaded images sit beside it in an
 //                                           images/ subfolder. No DB / SyncTable.
 //   view_realtime:  view-collaborative   — every save calls pushToInstance so all viewers of the
-//                                           placement refresh live.
+//                                           placement refresh live; when "keep viewers in sync" is on,
+//                                           each slide advance also pushes present_changed so every
+//                                           viewer's presentation tracks the editor's current slide.
 //   settings_scope: settings-per-sfi     — everything is keyed by peer.sfi_id.
 // ----------------------------------------------------------------------------------------
 import {
@@ -22,7 +24,7 @@ import {
 // aspect ratio (see ASPECTS in the frontend). The frontend renders that canvas at any size via
 // a single CSS transform: scale(...), so every element stays precisely placed at any zoom.
 type Show = { settings: Settings; slides: Slide[] };
-type Settings = { palette: string; background: string; aspect: string };
+type Settings = { palette: string; background: string; aspect: string; syncPresent: boolean };
 type Slide = { id: string; background: string; elements: SlideElement[] };
 type SlideElement = {
   id: string;
@@ -37,7 +39,7 @@ type SlideElement = {
 };
 
 const DEFAULT_SHOW: Show = {
-  settings: { palette: "c1", background: "paper", aspect: "16:9" },
+  settings: { palette: "c1", background: "paper", aspect: "16:9", syncPresent: false },
   slides: [],
 };
 
@@ -52,6 +54,7 @@ const KEEP_RECENT_IMG_MS = 5 * 60 * 1000; // don't GC images uploaded in the las
 // ----- Files on disk --------------------------------------------------------------------
 // data/shows/<sfi_slug>/show.json
 // data/shows/<sfi_slug>/images/<uuid>.<ext>
+// data/shows/<sfi_slug>/present.json   — the live shared present position (sync mode only)
 const SHOWS_DIR = path.join(frameDataDir(import.meta.url), "shows");
 
 function sfiSlug(sfiId: string): string {
@@ -60,6 +63,7 @@ function sfiSlug(sfiId: string): string {
 function showDir(sfiId: string): string { return path.join(SHOWS_DIR, sfiSlug(sfiId)); }
 function imagesDir(sfiId: string): string { return path.join(showDir(sfiId), "images"); }
 function showFile(sfiId: string): string { return path.join(showDir(sfiId), "show.json"); }
+function presentFile(sfiId: string): string { return path.join(showDir(sfiId), "present.json"); }
 
 const ID_RE = /^[0-9a-fA-F-]{8,64}$/;
 
@@ -72,6 +76,21 @@ function loadShow(sfiId: string): Show {
 function saveShow(sfiId: string, show: Show): void {
   Deno.mkdirSync(showDir(sfiId), { recursive: true });
   Deno.writeTextFileSync(showFile(sfiId), JSON.stringify(show, null, 2));
+}
+
+// The live shared present position. Kept in its own file (not show.json) so that frequent
+// slide-advance writes never collide with editor deck saves or fire deck_changed refreshes.
+// Late joiners read it via /api/state so they land on the slide the presenter is currently on.
+type Present = { index: number };
+function loadPresent(sfiId: string): Present {
+  try {
+    const p = JSON.parse(Deno.readTextFileSync(presentFile(sfiId)));
+    return { index: num(p?.index, 0, 0, MAX_SLIDES) };
+  } catch { return { index: 0 }; }
+}
+function savePresent(sfiId: string, index: number): void {
+  Deno.mkdirSync(showDir(sfiId), { recursive: true });
+  Deno.writeTextFileSync(presentFile(sfiId), JSON.stringify({ index }));
 }
 
 // ----- Validation -----------------------------------------------------------------------
@@ -122,6 +141,7 @@ function sanitizeShow(raw: any): Show {
     palette: oneOf(s.settings?.palette, ["c1","c2","c3","c4","c5","c6","c7","c8","c9","c10","c11","c12"], "c1"),
     background: oneOf(s.settings?.background, ["paper","white","dark","accent","accentmuted"], "paper"),
     aspect: oneOf(s.settings?.aspect, ["16:9","4:3","1:1"], "16:9"),
+    syncPresent: s.settings?.syncPresent === true,
   };
   const slidesIn = Array.isArray(s.slides) ? s.slides.slice(0, MAX_SLIDES) : [];
   const slides: Slide[] = slidesIn.map((sl: any) => {
@@ -182,6 +202,7 @@ function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
       user_name: peer.user_name,
     },
     show: loadShow(peer.sfi_id),
+    present: loadPresent(peer.sfi_id),
   };
 }
 
@@ -207,6 +228,19 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     saveShow(peer.sfi_id, show);
     gcImages(peer.sfi_id, show);
     pushToInstance(peer.sfi_id, { type: "deck_changed", by: str(v.by, 64) });
+    return jsonReply(replyPort, 200, { ok: true });
+  }
+
+  // Advance the live shared presentation — editors only (they are the presenters). The new
+  // index is persisted and pushed to EVERY viewer of the placement: peers AND our own sibling
+  // devices both receive it via pushToInstance, so a follower's present view tracks the presenter.
+  if (reqPath === "/api/present" && method === "POST") {
+    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
+    const v = parseJsonBody<{ index?: number; by?: string }>(body) || {};
+    const show = loadShow(peer.sfi_id);
+    const index = num(v.index, 0, 0, Math.max(0, show.slides.length - 1));
+    savePresent(peer.sfi_id, index);
+    pushToInstance(peer.sfi_id, { type: "present_changed", index, by: str(v.by, 64) });
     return jsonReply(replyPort, 200, { ok: true });
   }
 

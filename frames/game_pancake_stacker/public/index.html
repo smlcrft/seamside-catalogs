@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pancake Stacker</title>
-  <link rel="stylesheet" href="/dynamic/frame-prefs.css">
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
   <style>
-    :root { --ch: var(--os-c8); }  /* warm orange — pancake-y */
+    :root { --ch: var(--os-c8); }
     body { margin: 0; font-family: var(--os-font-sans); background: var(--os-bg); color: var(--os-text);
       min-height: 100vh; display: flex; flex-direction: column; align-items: center;
       padding: var(--os-sp-md); gap: var(--os-sp-sm); user-select: none; -webkit-user-select: none; }
@@ -20,7 +20,7 @@
     .stage { position: relative; line-height: 0; }
     canvas { border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
       background: linear-gradient(180deg, #cfe0ee 0%, #f5e1bd 100%); cursor: pointer;
-      touch-action: none; box-shadow: 0 2px 12px rgba(0,0,0,0.06); display: block; }
+      touch-action: none; box-shadow: 0 2px 12px rgba(0,0,0,0.06); display: block; transition: background 0.5s ease; }
     .hint { font-family: var(--os-font-mono); font-size: var(--os-fs-2xs);
       color: var(--os-text-muted); text-align: center; }
     .modal-backdrop { position: absolute; inset: 0; display: flex; align-items: center;
@@ -43,6 +43,39 @@
     .gameover button:active { transform: scale(0.97); }
     .holder { font-family: var(--os-font-mono); font-size: var(--os-fs-2xs);
       color: var(--os-text-muted); }
+
+    .shimmer { animation: shimmer-flash 0.6s ease-out; }
+    @keyframes shimmer-flash {
+      0% { filter: brightness(1) contrast(1); }
+      50% { filter: brightness(1.5) contrast(1.2); }
+      100% { filter: brightness(1) contrast(1); }
+    }
+
+    .callout-layer { position: absolute; inset: 0; display: flex; align-items: flex-start;
+      justify-content: center; pointer-events: none; }
+    /* Sit just below the moving pancake's hover line so the text stays above
+       the stack and legible no matter how tall the tower gets. */
+    .callout { position: absolute; top: 75px; font-family: var(--os-font-mono);
+      font-size: var(--os-fs-lg); font-weight: var(--os-weight-bold);
+      text-transform: uppercase; letter-spacing: 0.04em; text-align: center;
+      white-space: nowrap; text-shadow: 0 2px 10px rgba(20, 18, 14, 0.45);
+      animation: callout-pop 950ms var(--os-ease-spring) forwards; }
+    @keyframes callout-pop {
+      0%   { transform: scale(0.35) translateY(8px); opacity: 0; }
+      18%  { transform: scale(1.18) translateY(0);   opacity: 1; }
+      55%  { transform: scale(1)    translateY(0);   opacity: 1; }
+      100% { transform: scale(1.45) translateY(-22px); opacity: 0; }
+    }
+    .callout--perfect { color: #f2c14e; }
+    .callout--golden  { color: #e8b84b; }
+    .callout--tomato  { color: #e5483b; }
+    .callout--whip {
+      background-image: linear-gradient(90deg,
+        #ff5e5e, #ffb24d, #ffe24d, #5ed46a, #4db8ff, #9a6cff, #ff5ec8);
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent; color: transparent;
+      text-shadow: 0 2px 10px rgba(20, 18, 14, 0.25);
+    }
   </style>
 </head>
 <body>
@@ -53,6 +86,7 @@
   </div>
   <div class="stage">
     <canvas id="game" width="360" height="480"></canvas>
+    <div id="callout" class="callout-layer"></div>
     <div id="result"></div>
   </div>
   <div class="hint">click · tap · spacebar to drop</div>
@@ -65,14 +99,21 @@
     const W = canvas.width;
     const H = canvas.height;
     const PANCAKE_H = 22;
+    const WHIP_H = PANCAKE_H * 3;
+    const WHIP_VALUE = 3;
+    const pieceHeight = (type) => (type === 'whip' ? WHIP_H : PANCAKE_H);
+    // Hover/drop top Y so a piece's LOWER edge always sits at the standard
+    // hover line — tall pieces (whip) grow upward and never dip into the stack.
+    const hoverTopY = (type) => HOVER_Y + PANCAKE_H - pieceHeight(type);
     const START_WIDTH = 150;
     const START_SPEED = 2.4;
-    const TOP_MARGIN = 80;   // pixels of headroom kept above the stack
-    const HOVER_Y = 30;      // y where the moving pancake hovers
+    const MAX_SPEED = 8.0;
+    const TOP_MARGIN = 80;
+    const HOVER_Y = 30;
     const FALL_SPEED = 14;
-    const MIN_OVERLAP = 6;   // sliver thinner than this counts as a total miss
+    const MIN_OVERLAP = 6;
 
-    let stack = [];   // bottom-up array of { x, w }
+    let stack = [];
     let scrollY = 0;
     let moving = null;
     let dropping = null;
@@ -81,10 +122,106 @@
     let holder = "";
     let alive = true;
     let started = false;
+    let isRedStack = false;
 
     const $score = document.getElementById('score');
     const $best  = document.getElementById('best');
     const $result = document.getElementById('result');
+    const $callout = document.getElementById('callout');
+
+    function showCallout(text, variant) {
+      const el = document.createElement('div');
+      el.className = 'callout callout--' + variant;
+      el.textContent = text;
+      $callout.appendChild(el);
+      setTimeout(() => el.remove(), 1000);
+    }
+
+    function flashShimmer() {
+      canvas.classList.add('shimmer');
+      setTimeout(() => canvas.classList.remove('shimmer'), 600);
+    }
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let climbOsc = null;
+    let climbGain = null;
+
+    // Browsers start the AudioContext suspended until a user gesture.
+    function resumeAudio() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    // Schedule one oscillator note — consolidates the boilerplate every sound
+    // shares (create osc + gain, connect, start, stop). `glide` ramps the pitch
+    // to `freqEnd`; the gain envelope rises to `peak` (optionally over `attack`)
+    // then ramps to `floor` by `dur`.
+    function note({ type = 'sine', freq, freqEnd, freqRamp = 'exp', glide,
+                    peak = 0.1, gainRamp = 'linear', floor = 0, dur = 0.3, at = 0, attack = 0 }) {
+      const t = audioCtx.currentTime + at;
+      const osc = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t);
+      if (freqEnd != null) {
+        const gt = t + (glide ?? dur);
+        if (freqRamp === 'linear') osc.frequency.linearRampToValueAtTime(freqEnd, gt);
+        else osc.frequency.exponentialRampToValueAtTime(freqEnd, gt);
+      }
+      if (attack > 0) {
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(peak, t + attack);
+      } else {
+        g.gain.setValueAtTime(peak, t);
+      }
+      if (gainRamp === 'exp') g.gain.exponentialRampToValueAtTime(Math.max(floor, 0.0001), t + dur);
+      else g.gain.linearRampToValueAtTime(floor, t + dur);
+      osc.connect(g);
+      g.connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + dur + 0.02);
+    }
+
+    function playSplat(quality) {
+      if (quality === 'perfect')   note({ type: 'sine',     freq: 440, freqEnd: 880, glide: 0.1, peak: 0.15, dur: 0.3 });
+      else if (quality === 'good') note({ type: 'sawtooth', freq: 110, freqEnd: 70,  glide: 0.1, peak: 0.1,  dur: 0.1 });
+      else                         note({ type: 'square',   freq: 80,  freqEnd: 40,  freqRamp: 'linear', glide: 0.1, peak: 0.05, dur: 0.1 });
+    }
+
+    function playGoldenSplat() {
+      note({ type: 'square', freq: 120, freqEnd: 880, glide: 0.6, peak: 0.2, dur: 0.8 });
+    }
+
+    function playWhipBonus() {
+      [523, 659, 784, 1047, 1319].forEach((freq, i) =>
+        note({ type: 'triangle', freq, peak: 0.18, attack: 0.02, gainRamp: 'exp', floor: 0.001, dur: 0.32, at: i * 0.07 }));
+    }
+
+    function playXylophoneDing() {
+      note({ type: 'sine', freq: 880, freqEnd: 1320, glide: 0.05, peak: 0.2, gainRamp: 'exp', floor: 0.01, dur: 0.5 });
+    }
+
+    function playSadTrombone() {
+      // Classic deflating "womp-womp-womp-wommmp" game-over: four descending
+      // brassy notes, each bending downward like a slide trombone, the last one
+      // drooping low and long for the final loser flourish.
+      const steps = [
+        { freq: 300, freqEnd: 294, at: 0.00, dur: 0.20 },
+        { freq: 250, freqEnd: 250, at: 0.22, dur: 0.20 },
+        { freq: 220, freqEnd: 200, at: 0.44, dur: 0.20 },
+        { freq: 180, freqEnd: 123, at: 0.66, dur: 1.0 },
+      ];
+      for (const s of steps) {
+        note({ type: 'sawtooth', freq: s.freq, freqEnd: s.freqEnd, freqRamp: 'exp',
+               glide: s.dur, peak: 0.18, attack: 0.02, dur: s.dur, at: s.at });
+      }
+    }
+
+    // Distinct "you got splatted" jingle for a rotten-tomato loss.
+    function playTomatoLose() {
+      [220, 440, 330, 660, 550, 880, 110, 1320].forEach((freq, i) =>
+        note({ type: i % 2 === 0 ? 'square' : 'sawtooth', freq, freqEnd: freq * 1.5,
+               glide: 0.05, peak: 0.1, dur: 0.08, at: i * 0.1 }));
+    }
 
     async function loadState() {
       try {
@@ -95,50 +232,105 @@
       } catch (_) {}
     }
 
+    function stackHeight() {
+      let total = 0;
+      for (const p of stack) total += (p.h || PANCAKE_H);
+      return total;
+    }
+
     function stackTopY() {
-      return H - stack.length * PANCAKE_H + scrollY;
+      return H - stackHeight() + scrollY;
     }
 
     function reset() {
       alive = true;
       started = true;
-      stack = [{ x: (W - START_WIDTH) / 2, w: START_WIDTH }];
+      isRedStack = false;
+      stack = [{ x: (W - START_WIDTH) / 2, w: START_WIDTH, type: 'normal' }];
       scrollY = 0;
       score = 0;
       $score.textContent = '0';
       $result.innerHTML = '';
+      $callout.innerHTML = '';
+      canvas.style.background = 'linear-gradient(180deg, #cfe0ee 0%, #f5e1bd 100%)';
+      
+      if (climbOsc) {
+        climbOsc.stop();
+        climbOsc = null;
+      }
+
       spawnMoving();
     }
 
     function spawnMoving() {
       const top = stack[stack.length - 1];
-      const speed = START_SPEED + Math.min(score * 0.18, 5.5);
-      // Alternate starting side so it's not always coming from the left.
+      const speed = Math.min(START_SPEED + (score * 0.22), MAX_SPEED);
       const fromLeft = (score % 2) === 0;
+      
+      const rand = Math.random();
+      const height = stack.length;   // current stack height, in pancakes
+      let type = 'normal';
+
+      // Special pieces unlock as the tower grows: tomato hazard at 5 high,
+      // golden buttercake at 7, the rare whipped-cream bonus at 9.
+      if (rand < 0.03 && height >= 9 && top.w > 40) {
+        type = 'whip';
+      } else if (rand < 0.15 && height >= 7 && top.w < W * 0.45) {
+        type = 'golden';
+      } else if (rand > 0.85 && height >= 5) {
+        type = 'tomato';
+      }
+
+      let w = top.w;
+      if (type === 'tomato') {
+        w = (W - top.w) / 3;
+      }
+
       moving = {
-        x: fromLeft ? 0 : (W - top.w),
-        w: top.w,
+        x: fromLeft ? 0 : (W - w),
+        w: w,
         dir: fromLeft ? 1 : -1,
         speed,
+        type
       };
     }
 
     function drop() {
+      resumeAudio();
       if (!alive) { reset(); return; }
       if (!moving || dropping) return;
       const top = stack[stack.length - 1];
       const left = Math.max(moving.x, top.x);
       const right = Math.min(moving.x + moving.w, top.x + top.w);
       const overlap = right - left;
-      const startY = HOVER_Y;
+      const startY = hoverTopY(moving.type);
 
-      if (overlap < MIN_OVERLAP) {
-        // Total miss — fall off the side of the stack.
-        dropping = { x: moving.x, w: moving.w, y: startY, targetY: H + 80, miss: true };
+      if (moving.type === 'tomato') {
+        const isHazard = overlap >= MIN_OVERLAP;
+        dropping = { x: moving.x, w: moving.w, y: startY, targetY: H + 80, miss: isHazard, type: 'tomato', h: PANCAKE_H };
         moving = null;
         return;
       }
-      dropping = { x: left, w: overlap, y: startY, targetY: stackTopY() - PANCAKE_H, miss: false };
+
+      if (overlap < MIN_OVERLAP) {
+        dropping = { x: moving.x, w: moving.w, y: startY, targetY: H + 80, miss: true, type: moving.type, h: pieceHeight(moving.type) };
+        moving = null;
+        return;
+      }
+
+      let finalW = overlap;
+      let finalX = left;
+      if (moving.type === 'golden') {
+        // A correctly-landed golden buttercake widens the stack and guarantees
+        // at least 20% of the play width — a lucky golden can rescue a dwindling
+        // tower even when you were about to lose.
+        finalW = Math.min(W, Math.max(overlap * 2, W * 0.20));
+        finalX = left + overlap / 2 - finalW / 2;   // grow outward from where it landed
+        finalX = Math.max(0, Math.min(finalX, W - finalW));
+      }
+
+      const h = pieceHeight(moving.type);
+      dropping = { x: finalX, w: finalW, y: startY, targetY: stackTopY() - h, miss: false, type: moving.type, h };
       moving = null;
     }
 
@@ -150,12 +342,68 @@
       }
       if (dropping) {
         dropping.y += FALL_SPEED;
+        
+        if (dropping.type === 'tomato') {
+          const topCakeY = stackTopY() - PANCAKE_H;
+          if (dropping.y >= topCakeY && dropping.y <= topCakeY + PANCAKE_H) {
+            if (dropping.miss) {
+              isRedStack = true;
+              showCallout('Rotten Tomato!', 'tomato');
+              endGame();
+              return;
+            }
+          }
+          if (dropping.y >= H + 80) {
+            if (!dropping.miss) {
+              playXylophoneDing();
+            }
+            dropping = null;
+            spawnMoving();
+          }
+          return;
+        }
+
         if (!dropping.miss && dropping.y >= dropping.targetY) {
           dropping.y = dropping.targetY;
-          stack.push({ x: dropping.x, w: dropping.w });
-          score += 1;
+          
+          const prev = stack[stack.length - 1];
+          const diff = Math.abs(dropping.x - prev.x) + Math.abs(dropping.w - prev.w);
+          let quality = 'bad';
+          if (diff < 5) quality = 'perfect';
+          else if (diff < 15) quality = 'good';
+
+          stack.push({ x: dropping.x, w: dropping.w, type: dropping.type, h: dropping.h || PANCAKE_H });
+          score += (dropping.type === 'whip' ? WHIP_VALUE : 1);
           $score.textContent = String(score);
-          // Scroll the stack down so the action stays in view near the top.
+
+          if (dropping.type === 'golden') {
+            playGoldenSplat();
+            flashShimmer();
+            showCallout('Golden Buttercake!', 'golden');
+          } else if (dropping.type === 'whip') {
+            playWhipBonus();
+            flashShimmer();
+            showCallout('Whipped Cream Bonus! +' + WHIP_VALUE, 'whip');
+          } else {
+            playSplat(quality);
+            if (quality === 'perfect') showCallout('Perfect!', 'perfect');
+          }
+
+          if (score >= 15) {
+            if (!climbOsc) {
+              climbOsc = audioCtx.createOscillator();
+              climbGain = audioCtx.createGain();
+              climbOsc.type = 'sine';
+              climbGain.gain.setValueAtTime(0.03+Math.min(0.1,(score-15)*0.002), audioCtx.currentTime);
+              climbOsc.connect(climbGain);
+              climbGain.connect(audioCtx.destination);
+              climbOsc.start();
+            }
+            const noteIndex = score - 15;
+            const freq = 110 * Math.pow(2, noteIndex / 12);
+            climbOsc.frequency.exponentialRampToValueAtTime(freq, audioCtx.currentTime + 0.1);
+          }
+          
           while (stackTopY() < TOP_MARGIN) scrollY += PANCAKE_H;
           dropping = null;
           spawnMoving();
@@ -164,11 +412,15 @@
           endGame();
         }
       }
+
+      if (score >= 20) {
+        const hue = (Date.now() / 20) % 360;
+        canvas.style.background = `linear-gradient(180deg, hsl(${hue}, 70%, 80%), hsl(${(hue+60)%360}, 70%, 70%))`;
+      }
     }
 
     function draw() {
       ctx.clearRect(0, 0, W, H);
-      // Subtle griddle shimmer line near the top.
       ctx.strokeStyle = 'rgba(255,255,255,0.5)';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -176,16 +428,18 @@
       ctx.lineTo(W, HOVER_Y + PANCAKE_H + 10);
       ctx.stroke();
 
-      // Stack (bottom-up).
+      let yCursor = H + scrollY;
       for (let i = 0; i < stack.length; i++) {
         const p = stack[i];
-        const y = H - (i + 1) * PANCAKE_H + scrollY;
-        if (y < -PANCAKE_H || y > H) continue;
-        drawPancake(p.x, y, p.w, i, i === stack.length - 1);
+        const h = p.h || PANCAKE_H;
+        const y = yCursor - h;
+        yCursor = y;
+        if (y > H || y + h < 0) continue;
+        drawPancake(p.x, y, p.w, i, i === stack.length - 1, p.type, h);
       }
 
-      if (moving)   drawPancake(moving.x, HOVER_Y, moving.w, stack.length, false);
-      if (dropping) drawPancake(dropping.x, dropping.y, dropping.w, stack.length, false);
+      if (moving)   drawPancake(moving.x, hoverTopY(moving.type), moving.w, stack.length, false, moving.type, pieceHeight(moving.type));
+      if (dropping) drawPancake(dropping.x, dropping.y, dropping.w, stack.length, false, dropping.type, dropping.h || PANCAKE_H);
 
       if (!started) {
         ctx.fillStyle = 'rgba(0,0,0,0.4)';
@@ -195,21 +449,40 @@
       }
     }
 
-    function drawPancake(x, y, w, i, withSyrup) {
-      const hue = 32 + (i % 5) * 4;
-      const light = 74 - (i % 6);
-      ctx.fillStyle = `hsl(${hue}, 58%, ${light}%)`;
-      ctx.strokeStyle = `hsl(${hue}, 50%, 38%)`;
+    function drawPancake(x, y, w, i, withSyrup, type, h) {
+      h = h || PANCAKE_H;
+      const isWhip = type === 'whip' && !isRedStack;
+      let hue, sat, light, strokeColor;
+      if (isRedStack) {
+        hue = 0; sat = 80; light = 40; strokeColor = '#4b0000';
+      } else if (type === 'golden') {
+        hue = 45; sat = 80; light = 60; strokeColor = '#d4af37';
+      } else if (type === 'tomato') {
+        hue = 0; sat = 70; light = 50; strokeColor = '#8b0000';
+      } else if (isWhip) {
+        hue = 40; sat = 45; light = 97; strokeColor = '#e3dccb';
+      } else {
+        hue = 32 + (i % 5) * 4;
+        sat = 58;
+        light = 74 - (i % 6);
+        strokeColor = `hsl(${hue}, 50%, 38%)`;
+      }
+
+      ctx.fillStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
+      ctx.strokeStyle = strokeColor;
       ctx.lineWidth = 2;
       const r = Math.min(8, w / 2);
-      roundRect(x, y, w, PANCAKE_H, r);
+      roundRect(x, y, w, h, r);
       ctx.fill();
       ctx.stroke();
-      // Browning rim highlight.
-      ctx.fillStyle = `hsla(${hue}, 60%, 30%, 0.18)`;
-      roundRect(x, y + PANCAKE_H - 5, w, 4, 2);
+
+      ctx.fillStyle = `hsla(${hue}, ${Math.round(sat * 0.7)}%, 30%, 0.18)`;
+      roundRect(x, y + h - 5, w, 4, 2);
       ctx.fill();
-      if (withSyrup && w > 30) {
+
+      if (isWhip) drawSprinkles(x, y, w, h);
+
+      if (withSyrup && w > 30 && type !== 'tomato' && type !== 'whip') {
         ctx.fillStyle = 'rgba(120, 60, 20, 0.55)';
         ctx.beginPath();
         const sx = x + w * 0.35;
@@ -223,6 +496,35 @@
         ctx.closePath();
         ctx.fill();
       }
+    }
+
+    // Deterministic rainbow sprinkles scattered over a whipped-cream block.
+    function drawSprinkles(x, y, w, h) {
+      const cols = Math.max(3, Math.floor(w / 18));
+      const rows = Math.max(3, Math.floor(h / 18));
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      let k = 0;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          // Pseudo-random but stable jitter from integer index — no per-frame flicker.
+          const jx = ((k * 53) % 17) / 17 - 0.5;
+          const jy = ((k * 31) % 13) / 13 - 0.5;
+          const sx = x + 8 + (c + 0.5 + jx) * (w - 16) / cols;
+          const sy = y + 7 + (r + 0.5 + jy) * (h - 14) / rows;
+          if (sx < x + 4 || sx > x + w - 4) { k++; continue; }
+          const ang = (k * 1.27);
+          const dx = Math.cos(ang) * 4;
+          const dy = Math.sin(ang) * 4;
+          ctx.strokeStyle = `hsl(${(k * 47) % 360}, 85%, 58%)`;
+          ctx.beginPath();
+          ctx.moveTo(sx - dx, sy - dy);
+          ctx.lineTo(sx + dx, sy + dy);
+          ctx.stroke();
+          k++;
+        }
+      }
+      ctx.lineCap = 'butt';
     }
 
     function roundRect(x, y, w, h, r) {
@@ -241,6 +543,13 @@
 
     async function endGame() {
       alive = false;
+      if (isRedStack) playTomatoLose(); else playSadTrombone();
+
+      if (climbOsc) {
+        climbOsc.stop();
+        climbOsc = null;
+      }
+
       const beat = score > best;
       try {
         const r = await frame.api('api/submit', { score });
@@ -265,8 +574,8 @@
     }
 
     function escapeHTML(s) {
-      return String(s).replace(/[&<>"']/g, (c) => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      return String(s).replace(/[&<>"']/g, (c) => ({ 
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' 
       }[c]));
     }
 
@@ -279,7 +588,10 @@
     canvas.addEventListener('mousedown', drop);
     canvas.addEventListener('touchstart', (e) => { e.preventDefault(); drop(); }, { passive: false });
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); drop(); }
+      if (e.code === 'Space' || e.code === 'Enter') {
+        e.preventDefault();
+        drop();
+      }
     });
 
     loadState().then(() => {

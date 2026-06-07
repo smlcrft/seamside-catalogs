@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Checklist</title>
-  <link rel="stylesheet" href="/dynamic/frame-prefs.css">
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }          /* frame accent: teal (matches the in-progress state) */
     * { box-sizing: border-box; }
@@ -68,13 +68,19 @@
 
     .text { flex: 1 1 auto; min-width: 0; font-size: var(--os-fs-base); }
     .text.s1 { color: var(--os-c1); }
-    .text.s2 { color: var(--os-text-muted); text-decoration: line-through; }
+    .text.s2 { color: var(--os-text-muted); }
+    .text.s2 input {text-decoration: line-through;}
     .text input {
       width: 100%; font: inherit; color: inherit; background: transparent;
       border: 0; border-radius: var(--os-radius-sm); padding: 2px 4px; outline: none;
     }
     .text input:focus { background: var(--os-bg-surface); box-shadow: 0 0 0 2px var(--ch); }
     .text .static { padding: 2px 4px; word-break: break-word; }
+    .by {
+      padding: 0 4px; margin-top: 1px; font-size: var(--os-fs-2xs);
+      font-weight: var(--os-weight-normal); color: var(--os-text-subtle); word-break: break-word;
+    }
+    .by.s2 { font-style: italic; }
 
     .trash {
       flex: 0 0 auto; background: none; border: 0; cursor: pointer; padding: 4px;
@@ -152,9 +158,12 @@
       }
       async function cycle(it) {
         if (!isEditor) return;
-        // optimistic
-        setItems(items.map((x) => x.id === it.id ? { ...x, state: NEXT[it.state] } : x));
-        apply(await frame.api("api/item/" + it.id, { state: NEXT[it.state] }).catch(() => null));
+        const next = NEXT[it.state];
+        // optimistic — credit (or clear) the byline immediately; server reply confirms.
+        setItems(items.map((x) => x.id === it.id
+          ? { ...x, state: next, actor_name: next === 0 ? "" : (me.user_name || "you") }
+          : x));
+        apply(await frame.api("api/item/" + it.id, { state: next }).catch(() => null));
       }
       async function saveText(it, text) {
         const v = text.trim();
@@ -255,6 +264,11 @@
                             onBlur=${(e) => saveText(it, e.target.value)}
                             onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />`
                         : html`<div class="static">${it.text}</div>`}
+                      ${it.state !== 0 && it.actor_name
+                        ? html`<div class=${"by s" + it.state}>
+                            ${it.state === 2 ? "Completed by " : "In progress · "}${it.actor_name}
+                          </div>`
+                        : null}
                     </div>
 
                     ${isEditor ? html`

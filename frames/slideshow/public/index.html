@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Slideshow</title>
-  <link rel="stylesheet" href="/dynamic/frame-prefs.css">
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }
     * { box-sizing: border-box; }
@@ -107,6 +107,9 @@
     }
     .ins-row textarea:focus { outline: none; border-color: var(--ch); background: var(--os-bg-surface); }
     .numin { width: 58px; flex: 0 0 auto; padding: 5px 6px; font-size: var(--os-fs-sm); }
+    .synctoggle { display: inline-flex; align-items: center; gap: var(--os-sp-xs); cursor: pointer; font-size: var(--os-fs-sm); color: var(--os-text); }
+    .synctoggle input { accent-color: var(--ch); cursor: pointer; }
+    .synchint { font-size: var(--os-fs-2xs); line-height: 1.4; color: var(--os-text-muted); }
     .ibtn {
       background: var(--os-bg-subtle); border: 1px solid var(--os-border-color); cursor: pointer;
       width: 28px; height: 28px; border-radius: var(--os-radius-sm); color: var(--os-text-secondary);
@@ -443,6 +446,19 @@
                 onClick=${() => setSettings({ aspect: a })}>${a}</button>`)}
             </div>
           </div>
+          <div class="ins-row">
+            <span class="rlbl">present</span>
+            <label class="synctoggle">
+              <input type="checkbox" checked=${s.syncPresent === true}
+                onChange=${(e) => setSettings({ syncPresent: e.target.checked })} />
+              <span>Keep viewers in sync</span>
+            </label>
+          </div>
+          <div class="ins-row">
+            <span class="synchint">When on, viewers see slides in sync with the presenter and do not have control
+              over manually advancing the slides. Only editors drive the live presentation; the slide each
+              person is editing stays independent.</span>
+          </div>
           ${slide ? html`<div class="ins-row">
             <span class="rlbl">this slide</span>
             <select value=${slide.background} onChange=${(e) => setSlideBg(e.target.value)} style=${{ width: "auto", flex: "1" }}>
@@ -465,6 +481,7 @@
       const [cur, setCur] = useState(0);
       const [selectedId, setSelectedId] = useState(null);
       const [present, setPresent] = useState(false);
+      const [pIdx, setPIdx] = useState(0);   // current slide while presenting (separate from the editing cursor)
       const [showSettings, setShowSettings] = useState(false);
       const [focusReq, setFocusReq] = useState(0);
 
@@ -475,24 +492,39 @@
       const staleRef = useRef(false);
       const saveTimer = useRef(null);
       const fileInput = useRef(null);
+      const presentRef = useRef(false);         // are we currently in present mode?
+      const sharedPresentRef = useRef(0);        // last-known shared present index (for sync mode)
       useEffect(() => { showRef.current = show; }, [show]);
       useEffect(() => { curRef.current = cur; }, [cur]);
+      useEffect(() => { presentRef.current = present; }, [present]);
 
       async function refresh() {
         const s = await frame.api("api/state").catch(() => null);
         if (!s) return;
         setMe(s.me); setShow(s.show); showRef.current = s.show;
+        if (s.present) sharedPresentRef.current = s.present.index;
         setCur((c) => clamp(c, 0, Math.max(0, s.show.slides.length - 1)));
       }
       useEffect(() => { refresh(); }, []);
 
-      useFramePush({ deck_changed: (data) => {
-        if (data && data.by === SESSION) return;
-        const tag = (document.activeElement && document.activeElement.tagName) || "";
-        const typing = tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT";
-        if (busyRef.current || typing) { staleRef.current = true; return; }
-        refresh();
-      } });
+      useFramePush({
+        deck_changed: (data) => {
+          if (data && data.by === SESSION) return;
+          const tag = (document.activeElement && document.activeElement.tagName) || "";
+          const typing = tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT";
+          if (busyRef.current || typing) { staleRef.current = true; return; }
+          refresh();
+        },
+        // Live presentation moved. Fires for peers AND sibling devices of the presenter. We track
+        // the shared index always, and follow it on-screen whenever we're presenting in sync mode.
+        present_changed: (data) => {
+          if (!data || data.by === SESSION) return;
+          sharedPresentRef.current = data.index;
+          const sh = showRef.current;
+          if (!sh || !sh.settings.syncPresent) return;
+          if (presentRef.current) setPIdx(clamp(data.index, 0, Math.max(0, sh.slides.length - 1)));
+        },
+      });
 
       function endInteraction() {
         busyRef.current = false;
@@ -502,13 +534,15 @@
       // keyboard nav (present mode, and read-only browsing for viewers)
       useEffect(() => {
         const isEditor = me && me.is_sfi_editor;
+        const follower = show && show.settings.syncPresent && !isEditor;  // can't drive the synced show
         function onKey(e) {
           const tag = (document.activeElement && document.activeElement.tagName) || "";
           const typing = tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT";
           if (present) {
             if (e.key === "Escape") exitPresent();
-            else if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") { e.preventDefault(); nav(1); }
-            else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); nav(-1); }
+            else if (follower) return;
+            else if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") { e.preventDefault(); presentNav(1); }
+            else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); presentNav(-1); }
           } else if (!isEditor && !typing) {
             if (e.key === "ArrowRight") nav(1); else if (e.key === "ArrowLeft") nav(-1);
           }
@@ -709,18 +743,46 @@
       }
 
       // ---- present ----
-      function enterPresent() { setSelectedId(null); setPresent(true); try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); } catch (_) {} }
+      // Start presenting at the shared position when synced (so we join wherever the presenter is),
+      // otherwise at our own editing/browse cursor. Present position is tracked separately from cur.
+      function enterPresent() {
+        setSelectedId(null);
+        const sh = showRef.current;
+        const start = sh.settings.syncPresent ? sharedPresentRef.current : curRef.current;
+        setPIdx(clamp(start, 0, Math.max(0, sh.slides.length - 1)));
+        setPresent(true);
+        try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); } catch (_) {}
+      }
       function exitPresent() { setPresent(false); try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) {} }
       function nav(dir) { setCur((c) => clamp(c + dir, 0, Math.max(0, showRef.current.slides.length - 1))); }
+      // Advance the presentation. In sync mode only editors may drive, and each step is broadcast
+      // to all viewers (peers + sibling devices) via the backend; followers ignore this entirely.
+      function presentNav(dir) {
+        const sh = showRef.current;
+        const isEd = me && me.is_sfi_editor;
+        if (sh.settings.syncPresent && !isEd) return;
+        setPIdx((p) => {
+          const n = clamp(p + dir, 0, Math.max(0, sh.slides.length - 1));
+          if (sh.settings.syncPresent && isEd && n !== p) {
+            sharedPresentRef.current = n;  // our own broadcast is echo-suppressed, so track it locally too
+            frame.api("api/present", { index: n, by: SESSION }).catch(() => {});
+          }
+          return n;
+        });
+      }
 
       // ================= PRESENT MODE =================
       if (present) {
-        return html`<div class="present" onClick=${() => nav(1)}>
-          <${Stage} show=${show} slide=${slide} interactive=${false} />
+        const pi = clamp(pIdx, 0, Math.max(0, slides.length - 1));
+        const pSlide = slides[pi] || null;
+        const follower = show.settings.syncPresent && !isEditor;  // synced viewer: follows, can't advance
+        return html`<div class="present" onClick=${follower ? null : () => presentNav(1)}>
+          <${Stage} show=${show} slide=${pSlide} interactive=${false} />
           <button class="pexit" title="Exit (Esc)" onClick=${(e) => { e.stopPropagation(); exitPresent(); }}><i class="ph-light ph-x"></i></button>
-          <button class="pnav left" disabled=${curIdx === 0} onClick=${(e) => { e.stopPropagation(); nav(-1); }}><i class="ph-light ph-caret-left"></i></button>
-          <button class="pnav right" disabled=${curIdx >= slides.length - 1} onClick=${(e) => { e.stopPropagation(); nav(1); }}><i class="ph-light ph-caret-right"></i></button>
-          <div class="pcount-fixed">${slides.length ? curIdx + 1 : 0} / ${slides.length}</div>
+          ${follower ? null : html`
+            <button class="pnav left" disabled=${pi === 0} onClick=${(e) => { e.stopPropagation(); presentNav(-1); }}><i class="ph-light ph-caret-left"></i></button>
+            <button class="pnav right" disabled=${pi >= slides.length - 1} onClick=${(e) => { e.stopPropagation(); presentNav(1); }}><i class="ph-light ph-caret-right"></i></button>`}
+          <div class="pcount-fixed">${slides.length ? pi + 1 : 0} / ${slides.length}${follower ? " · following presenter" : ""}</div>
         </div>`;
       }
 

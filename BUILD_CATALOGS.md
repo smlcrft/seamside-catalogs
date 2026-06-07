@@ -21,6 +21,7 @@ git push
 The build script:
 
 1. Walks [`frames/`](frames/). For each subdirectory that has a `frame.json` and does not start with `_` or `.`:
+   - **Rejects (excludes from the manifest + exits non-zero) any frame that carries a top-level `data/` or `_todos/` folder.** These are user- or author-specific — `data/` is per-host runtime state and `_todos/` is author scratch — and must never be checked into a catalog entry. A catalog frame ships only its code; the installer provisions `data/` per host. If the build stops here, delete the offending folder from the frame source and rebuild.
    - Builds a deterministic gzipped tarball at `packages/frames/<dir_id>.tar.gz`. Mtimes, uids, gids, and gzip header timestamps are all zeroed so rebuilds with no source changes produce byte-identical artifacts (stable sha256 across rebuilds).
    - Excludes `data/`, `.DS_Store`, `__pycache__`, and `.git` from each tarball. `data/` is per-host runtime state and is preserved separately by the Tandem installer.
    - Computes the sha256 of the tarball.
@@ -52,6 +53,7 @@ The build script emits this shape — it mirrors the `WireCatalogManifest` struc
   "name":        "Small Craft Tandem Frames",
   "description": "Community frames published by Small Craft.",
   "kind":        "Frames",                // "Frames" | "Capabilities"
+  "about_url":   "https://.../about",     // OPTIONAL — about page for the catalog (omitted when unset)
   "items": [
     {
       "kind":            "Frames",                       // matches the catalog kind
@@ -68,7 +70,8 @@ The build script emits this shape — it mirrors the `WireCatalogManifest` struc
       },
       "capability_preview": null,                        // populated only for capability items
       "package_url":     "https://.../packages/frames/garden_gnome.tar.gz",
-      "package_sha256":  "<64-char hex>"                 // required when package_url is set
+      "package_sha256":  "<64-char hex>",                // required when package_url is set
+      "app_version_min": "0.1.7"                         // OPTIONAL — min Tandem version to install/update (omitted when unset)
     }
   ]
 }
@@ -87,6 +90,14 @@ Capability items use `capability_preview` instead:
   "package_sha256": "<64-char hex>"
 }
 ```
+
+## Optional source fields
+
+These are read from the source `frame.json` / capability JSON and surfaced into the manifest. All are optional and backward-compatible: older Tandem clients that don't know them ignore them, and a source file that omits them simply has the field omitted from the manifest.
+
+- **`app_version_min`** (frame.json **and** capability JSON) — minimum Tandem app version (semver, e.g. `"0.1.7"`) required to install or update the item. The client compares it against its running version and, when the running app is older, disables the install/update affordance and shows a "requires vX.Y.Z+" badge instead of installing something it can't run correctly. Set this whenever a frame/cap depends on a feature added in a specific Tandem release. The build copies it verbatim into each manifest item.
+- **`images_b64`** (frame.json only) — an optional array of base64-encoded **JPEG** preview images. The build **validates** every frame and rejects (excludes from the manifest + exits non-zero) any that violate: at most **3** images, each under **32 KB** decoded, each a real JPEG (`FF D8 FF` SOI marker). A `data:image/jpeg;base64,…` prefix is tolerated. These are not emitted into the manifest items — they travel inside the frame package — but the build is where they're verified.
+- **`about_url`** (catalog-level, not per-item) — set it on the catalog metadata (the `CATALOG_FRAMES` / `CATALOG_CAPS` dict in [`scripts/build_catalogs.py`](scripts/build_catalogs.py)) to point users at an about page for the whole catalog. Emitted at the manifest top level when set, omitted otherwise.
 
 ## Adding a new frame
 
@@ -112,7 +123,10 @@ Edit the source in place, bump `modified_at` in the `frame.json` / capability JS
 - ✅ Sources: [`frames/`](frames/), [`capabilities/`](capabilities/).
 - ✅ Generated manifests: `frames.json`, `capabilities.json`.
 - ✅ Generated packages: `packages/frames/*.tar.gz`, `packages/capabilities/*.json`. These are what `package_url` points at, so they MUST be checked in (or hosted somewhere else — see "Hosting").
-- ❌ Per-host runtime state: any `data/` subdir inside a frame. The build script skips these.
+- ❌ Per-host runtime state: any `data/` subdir inside a frame.
+- ❌ Author scratch: any `_todos/` subdir inside a frame.
+
+`data/` and `_todos/` are user/author-specific and must not be checked into a catalog entry. The build does more than skip them — it **stops** (non-zero exit) on any frame that carries one, so a leaked runtime/scratch folder can't ship inside a published package. Delete the folder from the frame source and rebuild.
 
 The build is deterministic, so a rebuild with no source changes produces no `git diff` — if you see one, something in the source actually changed (or the build script itself).
 
