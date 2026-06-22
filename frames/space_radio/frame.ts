@@ -146,13 +146,11 @@ const STATIONS: Station[] = [
 const STATION_INDEX = new Set(STATIONS.map((s) => s.id));
 
 // ----------------------------------------------------------------------------------------
-// PER-PLACEMENT STATE — single JSON file keyed by sfi_id. Each entry holds:
-//   • The shared playstate (station + playing + who last changed it), broadcast to all
-//     viewers of the placement.
-//   • A per-device map of local volume/mute settings (`local_by_device`). The Tauri
-//     webview's localStorage doesn't survive app restarts reliably, so we round-trip
-//     local state through the frame backend instead. Each device_id gets its own slot,
-//     so siblings on the same account keep independent volumes.
+// PER-PLACEMENT STATE — single JSON file keyed by sfi_id, holding the shared playstate
+// (station + playing + who last changed it), broadcast to all viewers of the placement.
+// Per-device volume/mute is NOT stored here — each viewer keeps it in their own browser
+// localStorage via framelib (frame.localStorageSetItem/GetItem; see public/index.js), so
+// it never travels through the backend and is never synced across viewers.
 // ----------------------------------------------------------------------------------------
 type Playstate = {
   station_id: string | null;
@@ -167,53 +165,22 @@ const DEFAULT_PLAYSTATE: Playstate = {
   updated_by_name: "",
 };
 
-type LocalState = { volume: number; muted: boolean };
-const DEFAULT_LOCAL: LocalState = { volume: 15, muted: false };
+// Records may pre-date this version and still carry a legacy `local_by_device` map;
+// getPlaystate reads only the playstate fields and setPlaystate rewrites the clean
+// record, so any stale local data is dropped from disk on the next playstate change.
+const allRecords: Record<string, Partial<Playstate>> = loadJsonFile(import.meta.url, "playstate.json", {});
 
-type SfiRecord = Playstate & {
-  local_by_device: Record<string, LocalState>;
-};
-
-// On-disk records may pre-date `local_by_device`; getRecord normalizes.
-const allRecords: Record<string, Partial<SfiRecord>> = loadJsonFile(import.meta.url, "playstate.json", {});
-
-function getRecord(sfiId: string): SfiRecord {
+function getPlaystate(sfiId: string): Playstate {
   const r = allRecords[sfiId] ?? {};
   return {
-    ...DEFAULT_PLAYSTATE,
-    ...r,
-    local_by_device: r.local_by_device ?? {},
+    station_id: r.station_id ?? DEFAULT_PLAYSTATE.station_id,
+    playing: r.playing ?? DEFAULT_PLAYSTATE.playing,
+    updated_at: r.updated_at ?? DEFAULT_PLAYSTATE.updated_at,
+    updated_by_name: r.updated_by_name ?? DEFAULT_PLAYSTATE.updated_by_name,
   };
 }
-function getPlaystate(sfiId: string): Playstate {
-  const r = getRecord(sfiId);
-  return {
-    station_id: r.station_id,
-    playing: r.playing,
-    updated_at: r.updated_at,
-    updated_by_name: r.updated_by_name,
-  };
-}
-function getLocalState(sfiId: string, deviceId: string): LocalState {
-  if (!deviceId) return { ...DEFAULT_LOCAL };
-  const r = allRecords[sfiId];
-  const entry = r?.local_by_device?.[deviceId];
-  return { ...DEFAULT_LOCAL, ...(entry ?? {}) };
-}
-
-// Update the shared playstate while preserving the per-device local map.
 function setPlaystate(sfiId: string, next: Playstate): void {
-  const cur = getRecord(sfiId);
-  allRecords[sfiId] = { ...next, local_by_device: cur.local_by_device };
-  saveJsonFile(import.meta.url, "playstate.json", allRecords);
-}
-// Update one device's local volume/mute. Other clients never see this — it's purely a
-// persistence layer for the client's own state, scoped to (sfi_id, device_id).
-function setLocalState(sfiId: string, deviceId: string, next: LocalState): void {
-  if (!sfiId || !deviceId) return;
-  const cur = getRecord(sfiId);
-  cur.local_by_device = { ...cur.local_by_device, [deviceId]: next };
-  allRecords[sfiId] = cur;
+  allRecords[sfiId] = next;
   saveJsonFile(import.meta.url, "playstate.json", allRecords);
 }
 
@@ -248,32 +215,8 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
     return jsonReply(replyPort, 200, {
       stations: STATIONS,
       playstate: getPlaystate(sfiId),
-      // Per-device local volume/mute for the requesting device. Falls back to
-      // DEFAULT_LOCAL (volume 15, not muted) when no row exists yet.
-      local: getLocalState(sfiId, peer.device_id),
       me: { user_id: peer.user_id, user_name: peer.user_name, device_id: peer.device_id },
     });
-  }
-
-  // Save this device's local volume/mute. Body fields are optional: omitted = preserve.
-  // Never broadcast — local state is private to one (sfi_id, device_id) slot.
-  if (reqPath === "/api/local-set" && method === "POST") {
-    if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
-    if (!peer.device_id) return jsonReply(replyPort, 400, { error: "device_id missing" });
-    const v = parseJsonBody<{ volume?: unknown; muted?: unknown }>(body);
-    const cur = getLocalState(sfiId, peer.device_id);
-    let volume = cur.volume;
-    if (Object.prototype.hasOwnProperty.call(v ?? {}, "volume")) {
-      const n = Number(v?.volume);
-      if (Number.isFinite(n)) volume = Math.max(0, Math.min(100, Math.trunc(n)));
-    }
-    let muted = cur.muted;
-    if (Object.prototype.hasOwnProperty.call(v ?? {}, "muted")) {
-      muted = v?.muted === true;
-    }
-    const next: LocalState = { volume, muted };
-    setLocalState(sfiId, peer.device_id, next);
-    return jsonReply(replyPort, 200, { ok: true, local: next });
   }
 
   // Set station and/or playing. Both fields are optional in the body — omitted fields

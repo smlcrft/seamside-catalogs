@@ -5,9 +5,9 @@
 //   • Player shell (member) — station dropdown + transport + local-only volume / mute
 //
 // Shared state (station + playing) flows over /api/state and pushed radio_state events.
-// Local state (volume + mute) is persisted server-side via /api/local-set, keyed by
-// (sfi_id, device_id), so each user's preferences travel with their device and survive
-// app restarts (the Tauri webview's localStorage doesn't reliably survive those).
+// Local state (volume + mute) is per-device only — saved in the host page's localStorage
+// via framelib (frame.localStorageSetItem/GetItem) as a single JSON entry. It never
+// travels through the backend and is not synced across viewers.
 // ----------------------------------------------------------------------------------------
 import { frame } from "/lib/js/framelib.js";
 
@@ -39,17 +39,32 @@ import { frame } from "/lib/js/framelib.js";
   let playstate = { station_id: null, playing: false, updated_at: 0, updated_by_name: "" };
 
   // ---------------------------------------------------------------------------------------
-  // LOCAL (per-user) STATE — persisted on the frame backend, keyed by (sfi_id, device_id).
-  // The Tauri webview's localStorage doesn't reliably survive app restarts, so we round-trip
-  // through /api/state (read) + /api/local-set (write, debounced). lastVolume is purely
-  // in-memory — it just lets unmute restore the pre-mute level within a session.
-  // First-run default is intentionally quiet (15%) — a radio that blasts on first play is
-  // a worse first impression than one a user has to turn up. Server-side persisted state
-  // overrides this on every subsequent load.
+  // LOCAL (per-device) STATE — volume + mute, persisted in the host page's localStorage via
+  // framelib as a single JSON entry under LOCAL_PREFS_KEY (frames are sandboxed and can't
+  // touch window.localStorage directly). lastVolume is purely in-memory — it just lets
+  // unmute restore the pre-mute level within a session. First-run default is intentionally
+  // quiet (15%) — a radio that blasts on first play is a worse first impression than one a
+  // user has to turn up. Persisted prefs override this once loaded.
   // ---------------------------------------------------------------------------------------
+  const LOCAL_PREFS_KEY = "prefs";
   let volume = 15;
   let lastVolume = 15;
   let muted = false;
+
+  // Load this device's saved volume/mute from localStorage (via the host). Async; the
+  // single JSON entry holds both fields. Missing/corrupt → keep the quiet defaults.
+  async function loadLocalPrefs() {
+    try {
+      const raw = await frame.localStorageGetItem(LOCAL_PREFS_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (typeof p.volume === "number" && Number.isFinite(p.volume)) {
+        volume = Math.max(0, Math.min(100, Math.trunc(p.volume)));
+      }
+      muted = p.muted === true;
+      lastVolume = volume > 0 ? volume : 15;
+    } catch { /* missing or corrupt — keep the defaults above */ }
+  }
 
   // ---------------------------------------------------------------------------------------
   // Boot
@@ -79,44 +94,34 @@ import { frame } from "/lib/js/framelib.js";
     stationById = new Map(stations.map((s) => [s.id, s]));
     playstate = { ...playstate, ...(data.playstate || {}) };
 
-    // Apply server-persisted local volume/mute for this device. Server already clamped
-    // and defaulted; we re-clamp defensively in case of an old/edited record on disk.
-    const local = data.local || {};
-    if (typeof local.volume === "number" && Number.isFinite(local.volume)) {
-      volume = Math.max(0, Math.min(100, Math.trunc(local.volume)));
-    }
-    muted = local.muted === true;
-    lastVolume = volume > 0 ? volume : 15;
+    // Apply this device's saved volume/mute from localStorage. Defaults stay if unset.
+    await loadLocalPrefs();
 
     renderShell();
     applyAudioFromState({ resetSrc: true });
   }
 
-  // Debounced write-back of this device's local volume/mute to the frame backend. Multiple
-  // rapid +/− or mute clicks coalesce into a single POST after the user has stopped.
+  // Persist this device's volume/mute to localStorage (via the host) as a single JSON
+  // entry. Writes are local and cheap, but we still debounce so a burst of +/− or mute
+  // clicks coalesces into one write after the user stops.
   let _localSaveTimer = null;
+  function saveLocalPrefsNow() {
+    // Fire-and-forget — the payload is well under framelib's 512-byte cap. A failure just
+    // means the next reload starts from defaults.
+    frame.localStorageSetItem(LOCAL_PREFS_KEY, JSON.stringify({ volume, muted })).catch(() => {});
+  }
   function scheduleLocalSave() {
     clearTimeout(_localSaveTimer);
-    _localSaveTimer = setTimeout(async () => {
-      _localSaveTimer = null;
-      try {
-        await api("api/local-set", { volume, muted });
-      } catch {
-        // Best-effort persistence — failure just means next reload starts from defaults.
-      }
-    }, 600);
+    _localSaveTimer = setTimeout(() => { _localSaveTimer = null; saveLocalPrefsNow(); }, 600);
   }
-  // Flush any pending local-state save when the page/iframe is being torn down so the
-  // last volume tap before app close still reaches disk. sendBeacon is fire-and-forget
-  // and survives unload, unlike a regular fetch.
+  // Flush any pending save when the iframe is torn down (reload / frame close) so the last
+  // volume tap still lands. The host page outlives the iframe, so the postMessage issued by
+  // saveLocalPrefsNow is still delivered even though we don't await it here.
   function flushLocalSaveOnExit() {
     if (_localSaveTimer === null) return;
     clearTimeout(_localSaveTimer);
     _localSaveTimer = null;
-    try {
-      const blob = new Blob([JSON.stringify({ volume, muted })], { type: "application/json" });
-      navigator.sendBeacon("./api/local-set", blob);
-    } catch { /* ignore */ }
+    saveLocalPrefsNow();
   }
   window.addEventListener("pagehide", flushLocalSaveOnExit);
   window.addEventListener("beforeunload", flushLocalSaveOnExit);

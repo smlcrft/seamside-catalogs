@@ -1,0 +1,15 @@
+{
+    "name": "Watercolor Studio",
+    "description": "A quiet, beautiful place to paint with watercolors. Each placement is its own sheet of textured paper. Pigments are real watercolor pans \u2014 pick one, or add bits of several into the mixing well and they blend subtractively the way paint actually does (blue plus yellow makes green, complements make mud). A range of brushes (broad wash, round, flat, dry-brush, fine detail) lay translucent washes that pool, bleed, and darken at their edges; layered strokes glaze over one another. A clean-water Lift brush pulls pigment back out. Optional thin guide outlines (a pear, a teacup, a koi, a mountain lake\u2026) sit faintly beneath the paint so new painters can trace as they learn. Editors in the space paint together in real time; anonymous viewers watch read-only. The whole painting is stored as deterministic vector strokes in a single JSON file per placement \u2014 no database, no network.",
+    "frame_type": "Tandem",
+    "permissions": {
+        "net": []
+    },
+    "depends_on_capabilities": [],
+    "default_width_px": 760,
+    "default_height_px": 560,
+    "created_at": "2026-06-22T00:00:00Z",
+    "modified_at": "2026-06-22T18:07:37Z",
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}
