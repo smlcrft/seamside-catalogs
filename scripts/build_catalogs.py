@@ -157,6 +157,21 @@ def pick_modified_at(meta: dict) -> str:
     return meta.get("modified_at") or meta.get("created_at") or stamp_iso_utc_now()
 
 
+def normalize_permissions(perms: dict | None) -> dict:
+    """Project a frame.json `permissions` block to the canonical {net, web, web_scripts}
+    shape the manifest advertises. Missing lists default to []. The app compares this
+    against the installed frame.json's permissions as SETS (order-insensitive), so the
+    three keys are kept explicit only to make the advertised access unambiguous.
+        net         → backend worker outbound fetch (host[:port])
+        web         → frontend media/img/socket origins (https/wss)
+        web_scripts → HIGH-RISK external script origins (https/wss)"""
+    p = perms or {}
+    def lst(key: str) -> list:
+        v = p.get(key, [])
+        return v if isinstance(v, list) else []
+    return {"net": lst("net"), "web": lst("web"), "web_scripts": lst("web_scripts")}
+
+
 # ---------------------------------------------------------------------------
 # frames
 
@@ -214,6 +229,12 @@ def build_frames_manifest() -> tuple[int, int]:
                 "depends_on_capabilities": meta.get("depends_on_capabilities", []),
             },
             "capability_preview": None,
+            # Advertise the frame's declared outside-resource access (net / web /
+            # web_scripts) in the manifest so a client can show it to the user BEFORE
+            # install — and verify it after: the app refuses the install if the packaged
+            # frame.json's permissions don't match this. Sourced from the SAME frame.json
+            # that's tarballed above, so manifest and package agree by construction.
+            "permissions": normalize_permissions(meta.get("permissions")),
             "package_url":        url,
             "package_sha256":     sha,
         }

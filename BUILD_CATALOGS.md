@@ -69,6 +69,11 @@ The build script emits this shape — it mirrors the `WireCatalogManifest` struc
         "depends_on_capabilities":  []
       },
       "capability_preview": null,                        // populated only for capability items
+      "permissions": {                                   // frame's declared outside-resource access (frames only)
+        "net":         [],                               //   backend worker fetch — host[:port]
+        "web":         ["https://tiles.example.com"],    //   frontend media/img/socket — https/wss origins
+        "web_scripts": []                                //   HIGH-RISK external scripts — https/wss origins
+      },
       "package_url":     "https://.../packages/frames/garden_gnome.tar.gz",
       "package_sha256":  "<64-char hex>",                // required when package_url is set
       "app_version_min": "0.1.7"                         // OPTIONAL — min Tandem version to install/update (omitted when unset)
@@ -98,11 +103,12 @@ These are read from the source `frame.json` / capability JSON and surfaced into 
 - **`app_version_min`** (frame.json **and** capability JSON) — minimum Tandem app version (semver, e.g. `"0.1.7"`) required to install or update the item. The client compares it against its running version and, when the running app is older, disables the install/update affordance and shows a "requires vX.Y.Z+" badge instead of installing something it can't run correctly. Set this whenever a frame/cap depends on a feature added in a specific Tandem release. The build copies it verbatim into each manifest item.
 - **`images_b64`** (frame.json only) — an optional array of base64-encoded **JPEG** preview images. The build **validates** every frame and rejects (excludes from the manifest + exits non-zero) any that violate: at most **3** images, each under **32 KB** decoded, each a real JPEG (`FF D8 FF` SOI marker). A `data:image/jpeg;base64,…` prefix is tolerated. These are not emitted into the manifest items — they travel inside the frame package — but the build is where they're verified.
 - **`about_url`** (catalog-level, not per-item) — set it on the catalog metadata (the `CATALOG_FRAMES` / `CATALOG_CAPS` dict in [`scripts/build_catalogs.py`](scripts/build_catalogs.py)) to point users at an about page for the whole catalog. Emitted at the manifest top level when set, omitted otherwise.
+- **`permissions`** (frame.json only) — the frame's declared outside-resource access (`net` / `web` / `web_scripts`). The build copies it verbatim into each frame's manifest item (always, normalized to the three keys) **from the same `frame.json` that gets tarballed**, so the manifest and the package agree by construction. This serves two purposes in the client: it lets the UI show a frame's access **before** the user installs/places it (and on update, only the newly-added domains), and the app **strictly verifies it at install** — the installed `frame.json`'s permissions must equal what the manifest advertised. The check is **default-deny**: a manifest item that omits `permissions` means the frame may request **no** outside access at all, so any frame that needs net/web/web_scripts **must** advertise it (the build does this automatically — just keep `permissions` in `frame.json`). On mismatch the app doesn't fail the download; it installs the frame but **blocks it from running** (stamps `permissions_mismatch`) until a corrected catalog version is published. Because the build derives manifest + tarball from one source, a normal rebuild keeps them in sync; never hand-edit `permissions` in `frames.json` (edit `frame.json` and rebuild, or the strict gate will block the frame). See the Tandem manual's `s24_layer3_catalogs` for the install-side gate.
 
 ## Adding a new frame
 
 1. Drop a directory under [`frames/`](frames/) containing at minimum `frame.json` and whatever code the frame needs (`frame.ts`, `public/`, etc.). Frame-authoring conventions live in the Tandem app's [`MANUAL_FRAMEGEN_CONTEXT.md`](https://github.com/smlcrft/tandem/blob/main/tauri-app/src-tauri/chassis/bundled_catalogs/frames/MANUAL_FRAMEGEN_CONTEXT.md).
-2. Set `name`, `description`, `modified_at`, optional `default_width_px` / `default_height_px`, `permissions.net`, and `depends_on_capabilities` in `frame.json`. Bump `modified_at` whenever you ship a change you want existing installs to see as "update available".
+2. Set `name`, `description`, `modified_at`, optional `default_width_px` / `default_height_px`, `permissions` (`net` / `web` / `web_scripts` — the build copies these into the manifest and the app verifies them at install), and `depends_on_capabilities` in `frame.json`. Bump `modified_at` whenever you ship a change you want existing installs to see as "update available".
 3. Run `python3 scripts/build_catalogs.py`.
 4. Commit `frames.json`, the new `frames/<dir_id>/`, and `packages/frames/<dir_id>.tar.gz`.
 
