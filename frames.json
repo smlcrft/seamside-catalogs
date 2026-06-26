@@ -6,6 +6,29 @@
   "items": [
     {
       "kind": "Frames",
+      "id": "calendar",
+      "name": "Calendar",
+      "description": "A simple shared calendar, unique per placement. Space editors add events on a given day or set them to repeat weekly (for example every Mon/Wed/Fri at 3pm) until an end date or forever, each with an optional time, length, color, link, and note; other members see a clean read-only view, and a per-instance toggle decides whether the calendar is public (anyone with the link can view it) or kept private to members of the space. Switch between a month grid and a week view with events laid out by time of day. Timed events are authored in your own time zone and automatically shifted to each viewer's local time, so everyone sees the right moment wherever they are. Recurring events can be deleted just for one day, from a day onward, or entirely, and an event's link opens in the native browser (or a new tab on the web). The view also adapts to its size \u2014 the full month/week views when there's room, and a compact upcoming-events agenda once the tile gets small, so it stays usable down to about 200\u00d7200. The whole calendar lives in a single JSON file in a per-placement folder. No database or sync tables.",
+      "icon": "",
+      "modified_at": "2026-06-26T16:17:37Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 560,
+        "default_height_px": 460,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": []
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/calendar.tar.gz",
+      "package_sha256": "32f33ce33881c4a2f9c129ed42c2692886bc8e5a2a5e5783632445986fdd2f3f",
+      "app_version_min": "0.1.7"
+    },
+    {
+      "kind": "Frames",
       "id": "checklist",
       "name": "Checklist",
       "description": "A simple, collaborative to-do list. Each placement is its own list \u2014 any member of the space can add tasks, cycle each task through three states (unstarted, in-progress, complete), drag to reorder, and delete. Non-members get a live read-only view. Items, ordering, and states are stored in a lightweight local SQLite database keyed by placement, and every change is pushed live to all viewers.",

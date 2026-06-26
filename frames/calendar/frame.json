@@ -1,0 +1,18 @@
+{
+    "name": "Calendar",
+    "description": "A simple shared calendar, unique per placement. Space editors add events on a given day or set them to repeat weekly (for example every Mon/Wed/Fri at 3pm) until an end date or forever, each with an optional time, length, color, link, and note; other members see a clean read-only view, and a per-instance toggle decides whether the calendar is public (anyone with the link can view it) or kept private to members of the space. Switch between a month grid and a week view with events laid out by time of day. Timed events are authored in your own time zone and automatically shifted to each viewer's local time, so everyone sees the right moment wherever they are. Recurring events can be deleted just for one day, from a day onward, or entirely, and an event's link opens in the native browser (or a new tab on the web). The view also adapts to its size — the full month/week views when there's room, and a compact upcoming-events agenda once the tile gets small, so it stays usable down to about 200×200. The whole calendar lives in a single JSON file in a per-placement folder. No database or sync tables.",
+    "frame_type": "Tandem",
+    "app_version_min": "0.1.7",
+    "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": []
+    },
+    "created_at": "2026-06-26T15:44:19Z",
+    "modified_at": "2026-06-26T16:17:37Z",
+    "depends_on_capabilities": [],
+    "default_width_px": 560,
+    "default_height_px": 460,
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

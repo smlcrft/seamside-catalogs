@@ -1,0 +1,939 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calendar</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); --hour-px: 44px; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base); overflow: hidden;
+    }
+    .app { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+    /* ---- Top bar ---- */
+    .topbar {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      padding: var(--os-sp-xs) var(--os-sp-sm); border-bottom: 1px solid var(--os-border-color);
+      background: var(--os-bg-surface); flex: 0 0 auto;
+    }
+    .title {
+      font-weight: var(--os-weight-medium); font-size: var(--os-fs-md);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    }
+    .title .yr { color: var(--os-text-muted); font-weight: var(--os-weight-regular); margin-left: 0.35em; }
+    .spacer { flex: 1 1 auto; }
+    .tbtn {
+      background: none; border: 0; cursor: pointer; color: var(--os-text-secondary);
+      width: 30px; height: 30px; padding: 0; border-radius: var(--os-radius-sm);
+      display: inline-flex; align-items: center; justify-content: center; font-size: 17px; line-height: 0;
+      transition: color 150ms, background 150ms; flex: 0 0 auto;
+    }
+    .tbtn:hover { color: var(--ch); background: var(--os-bg-subtle); }
+    .tbtn.on { color: var(--ch); background: var(--os-bg-subtle); }
+    .tbtn.primary { background: var(--ch); color: var(--ch-fg); }
+    .tbtn.primary:hover { opacity: 0.9; }
+    .tbtn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .today-btn {
+      border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm);
+      background: var(--os-bg); color: var(--os-text-secondary); cursor: pointer;
+      font: inherit; font-size: var(--os-fs-2xs); text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 5px 8px; line-height: 1; flex: 0 0 auto;
+    }
+    .today-btn:hover { color: var(--ch); border-color: var(--ch); }
+
+    /* Month/Week segmented toggle */
+    .vtoggle { display: inline-flex; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm); overflow: hidden; flex: 0 0 auto; }
+    .vtoggle button {
+      background: var(--os-bg); border: 0; cursor: pointer; padding: 5px 10px; font: inherit;
+      font-size: var(--os-fs-xs); color: var(--os-text-secondary); line-height: 1;
+    }
+    .vtoggle button + button { border-left: 1px solid var(--os-border-color); }
+    .vtoggle button.active { background: var(--ch); color: var(--ch-fg); }
+
+    /* ---- Month grid ---- */
+    .gridwrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: var(--os-sp-xs); }
+    .dow {
+      display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+      font-family: var(--os-font-mono); font-size: var(--os-fs-2xs);
+      color: var(--os-text-muted); text-transform: uppercase; letter-spacing: 0.04em;
+      padding: 0 1px var(--os-sp-2xs);
+    }
+    .dow > div { text-align: center; }
+    .weeks { flex: 1 1 auto; min-height: 0; display: grid; grid-auto-rows: 1fr; gap: 2px; }
+    .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; min-height: 0; }
+    .cell {
+      position: relative; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-xs);
+      background: var(--os-bg-surface); padding: 2px 3px; overflow: hidden;
+      display: flex; flex-direction: column; gap: 1px; min-height: 0; min-width: 0; cursor: default;
+      transition: background 120ms, border-color 120ms;
+    }
+    .cell.editable { cursor: pointer; }
+    .cell.editable:hover { border-color: var(--ch); background: var(--os-bg-subtle); }
+    .cell.dim { background: var(--os-bg); }
+    .cell.dim .dnum { color: var(--os-text-subtle); }
+    .cell.today { border-color: var(--ch); }
+    .cell-head { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; }
+    .dnum { font-size: var(--os-fs-xs); color: var(--os-text-secondary); line-height: 1.2; padding: 1px 2px; }
+    .cell.today .dnum {
+      background: var(--ch); color: var(--ch-fg); border-radius: var(--os-radius-full);
+      min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+      font-weight: var(--os-weight-medium); padding: 0 5px;
+    }
+    .evs { display: flex; flex-direction: column; gap: 1px; overflow: hidden; min-height: 0; }
+    .chip {
+      display: flex; align-items: center; gap: 3px; cursor: default;
+      background: var(--ch-muted); color: var(--os-text); border-radius: var(--os-radius-xs);
+      padding: 1px 4px; font-size: var(--os-fs-2xs); line-height: 1.35;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      border-left: 2px solid var(--ch);
+    }
+    .chip.clickable { cursor: pointer; }
+    .chip.clickable:hover { background: var(--ch); color: var(--ch-fg); }
+    .chip .t { color: var(--os-text-muted); font-family: var(--os-font-mono); flex: 0 0 auto; }
+    .chip.clickable:hover .t { color: var(--ch-fg); }
+    .chip .rep, .chip .linkico { font-size: 10px; line-height: 0; opacity: 0.8; flex: 0 0 auto; }
+    .chip .lbl { overflow: hidden; text-overflow: ellipsis; }
+    .more { font-size: var(--os-fs-2xs); color: var(--os-text-muted); padding: 0 4px; cursor: pointer; }
+    .more:hover { color: var(--ch); }
+
+    /* ---- Week (time grid) ---- */
+    .weekwrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    .wk-head { display: grid; grid-template-columns: var(--gutter, 48px) repeat(7, 1fr); border-bottom: 1px solid var(--os-border-color); flex: 0 0 auto; }
+    .wk-head .corner { border-right: 1px solid var(--os-border-color); }
+    .wk-dcol {
+      text-align: center; padding: 3px 2px; border-right: 1px solid var(--os-border-color);
+      display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0;
+    }
+    .wk-dcol .wd { font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); color: var(--os-text-muted); text-transform: uppercase; }
+    .wk-dcol .dn { font-size: var(--os-fs-sm); width: 24px; height: 24px; line-height: 24px; border-radius: var(--os-radius-full); }
+    .wk-dcol.today .dn { background: var(--ch); color: var(--ch-fg); font-weight: var(--os-weight-medium); }
+    .wk-dcol.today .wd { color: var(--ch); }
+
+    .wk-allday { display: grid; grid-template-columns: var(--gutter, 48px) repeat(7, 1fr); border-bottom: 1px solid var(--os-border-color); flex: 0 0 auto; max-height: 64px; overflow-y: auto; }
+    .wk-allday .lbl { font-family: var(--os-font-mono); font-size: 9px; color: var(--os-text-subtle); text-align: right; padding: 3px 4px 0 0; text-transform: uppercase; border-right: 1px solid var(--os-border-color); }
+    .wk-adcol { border-right: 1px solid var(--os-border-color); padding: 2px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .wk-adcol.editable { cursor: pointer; }
+
+    .wk-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+    .wk-grid { display: grid; grid-template-columns: var(--gutter, 48px) repeat(7, 1fr); position: relative; }
+    .wk-gutter { position: relative; border-right: 1px solid var(--os-border-color); }
+    .wk-hourlabel { height: var(--hour-px); position: relative; font-family: var(--os-font-mono); font-size: 9px; color: var(--os-text-subtle); text-align: right; padding-right: 4px; }
+    .wk-hourlabel span { position: absolute; right: 4px; top: -6px; }
+    .wk-col {
+      position: relative; border-right: 1px solid var(--os-border-color);
+      background-image: linear-gradient(var(--os-border-color) 1px, transparent 1px);
+      background-size: 100% var(--hour-px); min-width: 0;
+    }
+    .wk-col.editable { cursor: pointer; }
+    .wk-col.today { background-color: color-mix(in srgb, var(--ch) 6%, transparent); }
+    .wk-ev {
+      position: absolute; border-radius: var(--os-radius-xs); overflow: hidden; cursor: default;
+      background: var(--ch-muted); border-left: 2px solid var(--ch); padding: 1px 4px;
+      font-size: var(--os-fs-2xs); line-height: 1.2; color: var(--os-text);
+    }
+    .wk-ev.clickable { cursor: pointer; }
+    .wk-ev.clickable:hover { filter: brightness(0.97); }
+    .wk-ev .et { font-family: var(--os-font-mono); font-size: 9px; color: var(--os-text-muted); }
+    .wk-ev .en { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wk-ev .linkico { font-size: 9px; opacity: 0.8; }
+    .nowline { position: absolute; left: 0; right: 0; height: 0; border-top: 1.5px solid var(--os-cError); z-index: 3; pointer-events: none; }
+    .nowline::before { content: ""; position: absolute; left: -3px; top: -3px; width: 5px; height: 5px; border-radius: 50%; background: var(--os-cError); }
+
+    /* ---- Agenda (compact / small sizes) ---- */
+    .agenda { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--os-sp-xs) var(--os-sp-sm) var(--os-sp-sm); }
+    .ag-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--os-sp-xs); color: var(--os-text-muted); text-align: center; padding: var(--os-sp-md); }
+    .ag-empty i { font-size: 28px; color: var(--ch); }
+    .ag-day { margin-bottom: var(--os-sp-sm); }
+    .ag-date { display: flex; align-items: baseline; gap: 6px; padding: 2px 0 var(--os-sp-2xs); border-bottom: 1px solid var(--os-border-color); margin-bottom: var(--os-sp-2xs); }
+    .ag-date .dow2 { font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); color: var(--os-text-muted); text-transform: uppercase; }
+    .ag-date .num2 { font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium); }
+    .ag-date.is-today .num2 { color: var(--ch); }
+    .ag-row { display: flex; align-items: center; gap: var(--os-sp-xs); padding: 4px 6px; border-radius: var(--os-radius-sm); border-left: 2px solid var(--ch); background: var(--os-bg-surface); margin-bottom: 2px; cursor: default; }
+    .ag-row.clickable { cursor: pointer; }
+    .ag-row.clickable:hover { background: var(--os-bg-subtle); }
+    .ag-row .at { font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); color: var(--os-text-muted); flex: 0 0 auto; min-width: 52px; }
+    .ag-row .atitle { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ag-row .rep, .ag-row .linkico { color: var(--os-text-muted); font-size: 13px; line-height: 0; flex: 0 0 auto; }
+
+    /* ---- Private / locked panel ---- */
+    .locked { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--os-sp-sm); color: var(--os-text-muted); text-align: center; padding: var(--os-sp-lg); }
+    .locked i { font-size: 34px; color: var(--ch); }
+    .locked .big { font-size: var(--os-fs-md); color: var(--os-text); }
+
+    /* ---- Modal forms ---- */
+    .form { display: flex; flex-direction: column; gap: var(--os-sp-sm); min-width: min(340px, 78vw); }
+    .field { display: flex; flex-direction: column; gap: var(--os-sp-2xs); }
+    .field > label {
+      font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--os-text-muted);
+    }
+    .form input[type=text], .form input[type=url], .form input[type=date], .form input[type=time], .form textarea, .form select {
+      width: 100%; font: inherit; font-size: var(--os-fs-sm); color: var(--os-text);
+      background: var(--os-bg); border: 1px solid var(--os-border-color);
+      border-radius: var(--os-radius-sm); padding: var(--os-sp-xs) var(--os-sp-sm);
+    }
+    .form textarea { min-height: 56px; resize: vertical; }
+    .form input:focus, .form textarea:focus, .form select:focus { outline: none; border-color: var(--ch); background: var(--os-bg-surface); }
+    .form input:disabled, .form select:disabled { opacity: 0.45; }
+    .row2 { display: flex; gap: var(--os-sp-sm); }
+    .row2 > .field { flex: 1 1 0; min-width: 0; }
+    .urlrow { display: flex; gap: var(--os-sp-xs); align-items: center; }
+    .urlrow input { flex: 1 1 auto; min-width: 0; }
+    .iconbtn { flex: 0 0 auto; width: 34px; height: 34px; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm); background: var(--os-bg); color: var(--os-text-secondary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; }
+    .iconbtn:hover { color: var(--ch); border-color: var(--ch); }
+    .iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .seg { display: inline-flex; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm); overflow: hidden; align-self: flex-start; }
+    .seg button { background: var(--os-bg); border: 0; cursor: pointer; padding: 6px 12px; font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-secondary); line-height: 1; }
+    .seg button + button { border-left: 1px solid var(--os-border-color); }
+    .seg button.active { background: var(--ch); color: var(--ch-fg); }
+    .dows { display: flex; gap: 4px; flex-wrap: wrap; }
+    .dpill {
+      width: 32px; height: 32px; border-radius: var(--os-radius-full); cursor: pointer;
+      border: 1px solid var(--os-border-color); background: var(--os-bg); color: var(--os-text-secondary);
+      font-size: var(--os-fs-xs); display: inline-flex; align-items: center; justify-content: center;
+      transition: background 120ms, color 120ms, border-color 120ms;
+    }
+    .dpill:hover { border-color: var(--ch); color: var(--ch); }
+    .dpill.on { background: var(--ch); color: var(--ch-fg); border-color: var(--ch); }
+    .ends { display: flex; align-items: center; gap: var(--os-sp-sm); flex-wrap: wrap; }
+    .ends input[type=date] { width: auto; }
+    .hint { font-size: var(--os-fs-2xs); color: var(--os-text-muted); line-height: 1.4; }
+    .tzhint { display: flex; align-items: flex-start; gap: 5px; font-size: var(--os-fs-2xs); color: var(--os-text-muted); line-height: 1.4; }
+    .tzhint i { color: var(--ch); font-size: 13px; line-height: 1.3; flex: 0 0 auto; }
+    .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+    .swatch { width: 24px; height: 24px; border-radius: var(--os-radius-sm); cursor: pointer; border: 1px solid var(--os-border-color); }
+    .swatch.active { box-shadow: 0 0 0 2px var(--ch); border-color: var(--ch); }
+    .swatch.def { border-style: dashed; border-width: 1.5px; }
+    .toggle { display: inline-flex; align-items: center; gap: var(--os-sp-xs); cursor: pointer; font-size: var(--os-fs-sm); color: var(--os-text); }
+    .toggle input { accent-color: var(--ch); cursor: pointer; width: 16px; height: 16px; }
+    .fb-btn { background: none; border: 0; cursor: pointer; color: var(--os-text-secondary); font: inherit; font-size: var(--os-fs-sm); padding: var(--os-sp-xs) var(--os-sp-sm); border-radius: var(--os-radius-sm); display: inline-flex; align-items: center; gap: 5px; }
+    .fb-btn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+    .fb-btn.danger:hover { color: var(--os-cError); }
+    .fb-btn.primary { background: var(--ch); color: var(--ch-fg); }
+    .fb-btn.primary:hover { opacity: 0.9; color: var(--ch-fg); }
+
+    /* Recurring-delete chooser */
+    .delsheet {
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color);
+      border-radius: var(--os-radius-lg); box-shadow: var(--os-shadow-xl);
+      padding: var(--os-sp-md); width: min(340px, 86vw); display: flex; flex-direction: column; gap: var(--os-sp-xs);
+    }
+    .delhead { font-weight: var(--os-weight-medium); font-size: var(--os-fs-md); }
+    .delsub { font-size: var(--os-fs-2xs); color: var(--os-text-muted); margin-bottom: var(--os-sp-xs); }
+    .delopt {
+      text-align: left; background: var(--os-bg); border: 1px solid var(--os-border-color);
+      border-radius: var(--os-radius-sm); padding: var(--os-sp-sm); cursor: pointer; font: inherit;
+      font-size: var(--os-fs-sm); color: var(--os-text); display: flex; flex-direction: column; gap: 2px;
+      transition: border-color 120ms, color 120ms;
+    }
+    .delopt:hover { border-color: var(--ch); }
+    .delopt small { color: var(--os-text-muted); font-size: var(--os-fs-2xs); }
+    .delopt.danger:hover { border-color: var(--os-cError); color: var(--os-cError); }
+    .delopt.danger:hover small { color: var(--os-cError); }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import {
+      frame, html, render, useState, useEffect, useRef, useMemo, useLayoutEffect,
+      useFramePush, Modal, Overlay, applyChannel,
+    } from "/lib/js/framelib.js";
+
+    const SESSION = Math.random().toString(36).slice(2);
+    const DOW_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+    const DOW_1 = ["S","M","T","W","T","F","S"];
+    const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const PALETTES = ["c1","c2","c3","c4","c5","c6","c7","c8","c9","c10","c11","c12"];
+    const DURATIONS = [[0,"No set length"],[15,"15 min"],[30,"30 min"],[45,"45 min"],[60,"1 hr"],[90,"1.5 hr"],[120,"2 hr"],[180,"3 hr"],[240,"4 hr"],[480,"8 hr"]];
+    const HOUR_PX = 44;
+    const SLOT_MIN = 30;   // visual block height for a timed event with no set duration
+    const VIEWER_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; } })();
+
+    // ---- date helpers (LOCAL time — never toISOString, which is UTC) --------------------
+    const pad2 = (n) => String(n).padStart(2, "0");
+    function isoOf(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+    function parseIso(s) { const [y, m, dd] = s.split("-").map(Number); return new Date(y, m - 1, dd); }
+    function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+    function startOfDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+    function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+    function fmtMinutes(m) {
+      const mm0 = ((m % 1440) + 1440) % 1440;
+      const h = Math.floor(mm0 / 60), mm = mm0 % 60, ap = h < 12 ? "AM" : "PM", h12 = h % 12 === 0 ? 12 : h % 12;
+      return mm === 0 ? `${h12} ${ap}` : `${h12}:${pad2(mm)} ${ap}`;
+    }
+    const toMin = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+    const durLabel = (m) => (DURATIONS.find(([v]) => v === m) || [, m + " min"])[1];
+
+    // ---- timezone math (dependency-free, via Intl) -------------------------------------
+    function tzOffsetMs(instant, tz) {
+      try {
+        const dtf = new Intl.DateTimeFormat("en-US", {
+          timeZone: tz, hourCycle: "h23",
+          year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+        });
+        const p = {}; for (const { type, value } of dtf.formatToParts(instant)) p[type] = value;
+        return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - instant.getTime();
+      } catch { return 0; }
+    }
+    function zonedWallToInstant(y, mo, d, h, mi, tz) {
+      const guess = Date.UTC(y, mo, d, h, mi, 0);
+      let off = tzOffsetMs(new Date(guess), tz);
+      off = tzOffsetMs(new Date(guess - off), tz);
+      return new Date(guess - off);
+    }
+    function tzCityLabel(tz) { return (tz || "").split("/").pop().replace(/_/g, " ") || tz; }
+    function tzOffsetLabel(tz) {
+      const off = Math.round(tzOffsetMs(new Date(), tz) / 60000);
+      const sign = off >= 0 ? "+" : "-", a = Math.abs(off), hh = Math.floor(a / 60), mm = a % 60;
+      return `GMT${sign}${hh}${mm ? ":" + pad2(mm) : ""}`;
+    }
+
+    function paletteVars(palette) {
+      const p = palette || "c1";
+      return { "--ch": `var(--os-${p})`, "--ch-fg": `var(--os-${p}-fg)`, "--ch-muted": `var(--os-${p}-muted)` };
+    }
+    // Per-event accent override; undefined → inherit the space accent set on .app.
+    function evVars(ev) {
+      if (!ev.color) return undefined;
+      return { "--ch": `var(--os-${ev.color})`, "--ch-fg": `var(--os-${ev.color}-fg)`, "--ch-muted": `var(--os-${ev.color}-muted)` };
+    }
+    function recurLabel(days) {
+      if (days.length === 7) return "Every day";
+      if (days.length === 5 && [1,2,3,4,5].every((d) => days.includes(d))) return "Weekdays";
+      if (days.length === 2 && days.includes(0) && days.includes(6)) return "Weekends";
+      return days.slice().sort((a,b)=>a-b).map((d) => DOW_SHORT[d]).join(", ");
+    }
+    function openLink(url) { if (url) { try { frame.openExternalUrl(url); } catch (_) {} } }
+
+    // ---- occurrence expansion (timezone-aware, bounded by recur start/until) ------------
+    // Map<localISO, occ[]> of occurrences in [start..endIncl] (local midnights). Timed events with
+    // a tz shift from author-zone wall time into the viewer's local zone (can move them to another
+    // local day); all-day / legacy-no-tz events float. Recurring events never occur before
+    // recur.start, and stop after recur.until (inclusive); "" until = forever.
+    function occurrencesInRange(events, start, endIncl) {
+      const map = new Map();
+      const startMs = startOfDay(start).getTime(), endMs = startOfDay(endIncl).getTime();
+      const inRange = (d) => { const t = startOfDay(d).getTime(); return t >= startMs && t <= endMs; };
+      const push = (day, occ) => { const k = isoOf(day); (map.get(k) || map.set(k, []).get(k)).push(occ); };
+      const padStart = addDays(start, -1), padEnd = addDays(endIncl, 1);
+
+      for (const ev of events) {
+        const timed = !!ev.time;
+        let h = 0, mi = 0;
+        if (timed) { const a = ev.time.split(":"); h = +a[0]; mi = +a[1]; }
+        // srcIso = the recurrence's own (author-zone) calendar day for this occurrence; it is what
+        // per-occurrence edits (skip / "delete from here") key on. localIso = the viewer-local day
+        // the occurrence actually lands on.
+        const place = (y, mo, d, srcIso) => {
+          if (!timed) { const day = new Date(y, mo, d); if (inRange(day)) push(day, { ev, minutes: null, timeLabel: "", srcIso, localIso: isoOf(day) }); return; }
+          const inst = ev.tz ? zonedWallToInstant(y, mo, d, h, mi, ev.tz) : new Date(y, mo, d, h, mi);
+          if (!inRange(inst)) return;
+          const b = startOfDay(inst), m = inst.getHours() * 60 + inst.getMinutes();
+          push(b, { ev, minutes: m, timeLabel: fmtMinutes(m), srcIso, localIso: isoOf(b) });
+        };
+
+        if (ev.recur) {
+          const rStart = ev.recur.start || "", rUntil = ev.recur.until || "", rSkip = ev.recur.skip || [];
+          for (let d = new Date(padStart); d <= padEnd; d = addDays(d, 1)) {
+            if (!ev.recur.days.includes(d.getDay())) continue;
+            const iso = isoOf(d);
+            if (rStart && iso < rStart) continue;          // never before the series start day
+            if (rUntil && iso > rUntil) continue;          // stop after the end day
+            if (rSkip.length && rSkip.includes(iso)) continue;   // individually-removed day
+            place(d.getFullYear(), d.getMonth(), d.getDate(), iso);
+          }
+        } else if (ev.date) {
+          const dd = parseIso(ev.date);
+          place(dd.getFullYear(), dd.getMonth(), dd.getDate(), ev.date);
+        }
+      }
+      for (const arr of map.values()) {
+        arr.sort((a, b) => (a.minutes == null ? -1 : b.minutes == null ? 1 : a.minutes - b.minutes) || a.ev.title.localeCompare(b.ev.title));
+      }
+      return map;
+    }
+    const occAt = (map, d) => map.get(isoOf(d)) || [];
+
+    // ---- size → layout mode ------------------------------------------------------------
+    function useLayoutMode() {
+      const ref = useRef(null);
+      const [mode, setMode] = useState("roomy");
+      useLayoutEffect(() => {
+        const el = ref.current; if (!el) return;
+        const measure = () => { const r = el.getBoundingClientRect(); setMode(r.width >= 380 && r.height >= 300 ? "roomy" : "compact"); };
+        measure();
+        const ro = new ResizeObserver(measure); ro.observe(el);
+        return () => ro.disconnect();
+      }, []);
+      return [ref, mode];
+    }
+
+    // ---- ranges ------------------------------------------------------------------------
+    function monthGridRange(anchor) {
+      const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+      const start = addDays(first, -first.getDay());
+      return { start, end: addDays(start, 41) };
+    }
+    function weekRange(anchor) { const start = addDays(startOfDay(anchor), -anchor.getDay()); return { start, end: addDays(start, 6) }; }
+
+    // ---- event editor modal ------------------------------------------------------------
+    function blankEvent(dateIso) {
+      return { id: "", title: "", date: dateIso || isoOf(new Date()), time: "", tz: "", dur: 0, color: "", url: "", note: "", recur: null };
+    }
+    function EventModal({ initial, spacePalette, occDate, onClose, onSave, onDelete }) {
+      const todayIso = isoOf(new Date());
+      const [confirmDel, setConfirmDel] = useState(false);
+      const [title, setTitle] = useState(initial.title);
+      const [repeats, setRepeats] = useState(!!initial.recur);
+      const [date, setDate] = useState(initial.date || todayIso);
+      const [days, setDays] = useState(initial.recur ? initial.recur.days.slice() : []);
+      // A series starts on its creation day; preserve the original start when editing.
+      const [start] = useState(initial.recur && initial.recur.start ? initial.recur.start : todayIso);
+      const [forever, setForever] = useState(initial.recur ? !initial.recur.until : false);
+      const [until, setUntil] = useState(initial.recur && initial.recur.until ? initial.recur.until : isoOf(addDays(parseIso(start > todayIso ? start : todayIso), 90)));
+      const [time, setTime] = useState(initial.time || "");
+      const [dur, setDur] = useState(initial.dur || 0);
+      const [color, setColor] = useState(initial.color || "");
+      const [url, setUrl] = useState(initial.url || "");
+      const [note, setNote] = useState(initial.note || "");
+      const titleRef = useRef(null);
+      useEffect(() => { titleRef.current && titleRef.current.focus(); }, []);
+
+      const urlValid = !url || /^(https?:\/\/|mailto:|tel:)/i.test(url.trim());
+      const valid = title.trim() && urlValid && (repeats ? (days.length > 0 && (forever || (until && until >= start))) : !!date);
+      function toggleDay(d) { setDays((ds) => ds.includes(d) ? ds.filter((x) => x !== d) : [...ds, d]); }
+      function save() {
+        if (!valid) return;
+        onSave({
+          id: initial.id || "",
+          title: title.trim(),
+          recur: repeats ? { days: days.slice().sort((a, b) => a - b), start, until: forever ? "" : until, skip: (initial.recur && initial.recur.skip) || [] } : null,
+          date: repeats ? "" : date,
+          time,
+          tz: time ? VIEWER_TZ : "",
+          dur: time ? dur : 0,
+          color,
+          url: url.trim(),
+          note: note.trim(),
+        });
+      }
+
+      // One-time events delete outright; recurring events open the 3-way chooser.
+      function clickDelete() { if (initial.recur) setConfirmDel(true); else onDelete("all"); }
+      const actions = html`
+        ${initial.id ? html`<button class="fb-btn danger" onClick=${clickDelete}><i class="ph-light ph-trash-simple"></i>Delete</button>` : null}
+        <span style="flex:1"></span>
+        <button class="fb-btn" onClick=${onClose}>Cancel</button>
+        <button class="fb-btn primary" disabled=${!valid} onClick=${save}>${initial.id ? "Save" : "Add event"}</button>`;
+
+      return html`<${Modal} title=${initial.id ? "Edit event" : "New event"} onClose=${onClose} actions=${actions}>
+        <div class="form">
+          <div class="field">
+            <label>Title</label>
+            <input ref=${titleRef} type="text" value=${title} maxlength="140" placeholder="e.g. Team standup"
+              onInput=${(e) => setTitle(e.target.value)} onKeyDown=${(e) => { if (e.key === "Enter") save(); }} />
+          </div>
+          <div class="field">
+            <label>When</label>
+            <div class="seg">
+              <button class=${!repeats ? "active" : ""} onClick=${() => setRepeats(false)}>One time</button>
+              <button class=${repeats ? "active" : ""} onClick=${() => setRepeats(true)}>Repeats weekly</button>
+            </div>
+          </div>
+          ${repeats ? html`
+            <div class="field">
+              <label>On these days</label>
+              <div class="dows">
+                ${DOW_SHORT.map((nm, d) => html`<button key=${d} title=${nm}
+                  class=${"dpill" + (days.includes(d) ? " on" : "")} onClick=${() => toggleDay(d)}>${DOW_1[d]}</button>`)}
+              </div>
+              <span class="hint">Starts ${sameDay(parseIso(start), new Date()) ? "today" : parseIso(start).toLocaleDateString(undefined, { month: "short", day: "numeric" })}${days.length ? " · " + recurLabel(days) : ""}${time ? " at " + fmtMinutes(toMin(time)) : ""}</span>
+            </div>
+            <div class="field">
+              <label>Ends</label>
+              <div class="ends">
+                <input type="date" value=${until} min=${start} disabled=${forever} onInput=${(e) => setUntil(e.target.value)} />
+                <label class="toggle"><input type="checkbox" checked=${forever} onChange=${(e) => setForever(e.target.checked)} /><span>Repeats forever</span></label>
+              </div>
+              ${!forever && until && until < start ? html`<span class="hint" style="color:var(--os-cError)">End date can't be before the start.</span>` : null}
+            </div>
+          ` : html`
+            <div class="field">
+              <label>Date</label>
+              <input type="date" value=${date} onInput=${(e) => setDate(e.target.value)} />
+            </div>
+          `}
+          <div class="row2">
+            <div class="field">
+              <label>Time ${html`<span class="hint" style="text-transform:none;letter-spacing:0">(optional)</span>`}</label>
+              <input type="time" value=${time} onInput=${(e) => setTime(e.target.value)} />
+            </div>
+            <div class="field">
+              <label>Length</label>
+              <select value=${dur} disabled=${!time} onChange=${(e) => setDur(Number(e.target.value))}>
+                ${DURATIONS.map(([v, lbl]) => html`<option key=${v} value=${v}>${lbl}</option>`)}
+              </select>
+            </div>
+          </div>
+          ${time ? html`<div class="tzhint">
+            <i class="ph-light ph-globe-hemisphere-west"></i>
+            <span>Set in <strong>your</strong> time zone — ${tzCityLabel(VIEWER_TZ)} (${tzOffsetLabel(VIEWER_TZ)}).
+              Everyone sees it shifted to their own local time.</span>
+          </div>` : null}
+          <div class="field">
+            <label>Color</label>
+            <div class="swatches">
+              <div class=${"swatch def" + (!color ? " active" : "")} title="Space color (default)"
+                style=${{ background: `var(--os-${spacePalette || "c1"})` }} onClick=${() => setColor("")}></div>
+              ${PALETTES.map((p) => html`<div key=${p} title=${p}
+                class=${"swatch" + (color === p ? " active" : "")} style=${{ background: `var(--os-${p})` }}
+                onClick=${() => setColor(p)}></div>`)}
+            </div>
+          </div>
+          <div class="field">
+            <label>Link ${html`<span class="hint" style="text-transform:none;letter-spacing:0">(optional)</span>`}</label>
+            <div class="urlrow">
+              <input type="url" value=${url} placeholder="https://…" onInput=${(e) => setUrl(e.target.value)} />
+              <button class="iconbtn" title="Open link" disabled=${!url || !urlValid} onClick=${() => openLink(url.trim())}><i class="ph-light ph-arrow-square-out"></i></button>
+            </div>
+            ${url && !urlValid ? html`<span class="hint" style="color:var(--os-cError)">Use a full https://, mailto:, or tel: link.</span>` : null}
+          </div>
+          <div class="field">
+            <label>Note ${html`<span class="hint" style="text-transform:none;letter-spacing:0">(optional)</span>`}</label>
+            <textarea value=${note} maxlength="1000" placeholder="Details…" onInput=${(e) => setNote(e.target.value)}></textarea>
+          </div>
+        </div>
+        ${confirmDel ? html`<${Overlay} onClose=${() => setConfirmDel(false)}>
+          <div class="delsheet" onClick=${(e) => e.stopPropagation()}>
+            <div class="delhead">Delete recurring event</div>
+            <div class="delsub">“${title.trim() || initial.title}”${occDate ? " · " + parseIso(occDate).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : ""}</div>
+            <button class="delopt" onClick=${() => onDelete("one")}>
+              <span>Only this day</span>
+              ${occDate ? html`<small>${parseIso(occDate).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</small>` : null}
+            </button>
+            <button class="delopt" onClick=${() => onDelete("forward")}>
+              <span>This and all future events</span>
+              <small>Ends the series the day before this one</small>
+            </button>
+            <button class="delopt danger" onClick=${() => onDelete("all")}>
+              <span>The entire recurring event</span>
+              <small>Removes every occurrence</small>
+            </button>
+            <div style="display:flex;justify-content:flex-end;margin-top:var(--os-sp-2xs)">
+              <button class="fb-btn" onClick=${() => setConfirmDel(false)}>Cancel</button>
+            </div>
+          </div>
+        </${Overlay}>` : null}
+      </${Modal}>`;
+    }
+
+    // ---- read-only event peek ----------------------------------------------------------
+    function localMinutesOf(ev) {
+      if (!ev.time) return null;
+      const [h, mi] = ev.time.split(":").map(Number);
+      if (!ev.tz) return h * 60 + mi;
+      const ref = ev.recur ? new Date() : parseIso(ev.date);
+      const inst = zonedWallToInstant(ref.getFullYear(), ref.getMonth(), ref.getDate(), h, mi, ev.tz);
+      return inst.getHours() * 60 + inst.getMinutes();
+    }
+    function EventPeek({ ev, onClose }) {
+      const tmin = localMinutesOf(ev);
+      const timeStr = tmin == null ? "" : (ev.dur ? `${fmtMinutes(tmin)} – ${fmtMinutes(tmin + ev.dur)}` : fmtMinutes(tmin));
+      const whenLine = (ev.recur
+        ? recurLabel(ev.recur.days) + (ev.recur.until ? " · until " + parseIso(ev.recur.until).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "")
+        : parseIso(ev.date).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })) + (timeStr ? " · " + timeStr : "");
+      const foreign = ev.time && ev.tz && ev.tz !== VIEWER_TZ;
+      const actions = html`
+        ${ev.url ? html`<button class="fb-btn primary" onClick=${() => openLink(ev.url)}><i class="ph-light ph-arrow-square-out"></i>Open link</button>` : null}
+        <span style="flex:1"></span><button class="fb-btn" onClick=${onClose}>Close</button>`;
+      return html`<${Modal} title=${ev.title} onClose=${onClose} actions=${actions}>
+        <div class="form" style="gap:var(--os-sp-xs)">
+          <div style=${{ display: "flex", alignItems: "center", gap: "6px", color: "var(--os-text-secondary)" }}>
+            ${ev.recur ? html`<i class="ph-light ph-repeat"></i>` : html`<i class="ph-light ph-calendar-blank"></i>`}
+            <span>${whenLine}</span>
+          </div>
+          ${foreign ? html`<div class="tzhint"><i class="ph-light ph-globe-hemisphere-west"></i>
+            <span>Shown in your time zone. Set in ${tzCityLabel(ev.tz)} (${tzOffsetLabel(ev.tz)}).</span></div>` : null}
+          ${ev.url ? html`<div class="tzhint"><i class="ph-light ph-link"></i><span style="word-break:break-all">${ev.url}</span></div>` : null}
+          ${ev.note ? html`<div class="hint" style="font-size:var(--os-fs-sm);white-space:pre-wrap">${ev.note}</div>` : null}
+        </div>
+      </${Modal}>`;
+    }
+
+    // ---- settings modal ----------------------------------------------------------------
+    function SettingsModal({ settings, onClose, onSave }) {
+      const [palette, setPalette] = useState(settings.palette);
+      const [isPublic, setIsPublic] = useState(settings.isPublic);
+      const actions = html`<span style="flex:1"></span>
+        <button class="fb-btn" onClick=${onClose}>Cancel</button>
+        <button class="fb-btn primary" onClick=${() => onSave({ palette, isPublic })}>Save</button>`;
+      return html`<${Modal} title="Calendar settings" onClose=${onClose} actions=${actions}>
+        <div class="form">
+          <div class="field">
+            <label>Who can see this calendar</label>
+            <label class="toggle">
+              <input type="checkbox" checked=${isPublic} onChange=${(e) => setIsPublic(e.target.checked)} />
+              <span>Public — anyone with the link can view it</span>
+            </label>
+            <span class="hint">${isPublic
+              ? "Anyone who can open this frame sees the calendar (read-only). Only space editors can change events."
+              : "Only members of this space can see the calendar. People outside the space get a “private” notice."}</span>
+          </div>
+          <div class="field">
+            <label>Default accent</label>
+            <div class="swatches">
+              ${PALETTES.map((p) => html`<div key=${p} title=${p}
+                class=${"swatch" + (palette === p ? " active" : "")} style=${{ background: `var(--os-${p})` }}
+                onClick=${() => setPalette(p)}></div>`)}
+            </div>
+            <span class="hint">Events without their own color use this accent.</span>
+          </div>
+        </div>
+      </${Modal}>`;
+    }
+
+    // ---- day overflow popover ("+N more", month view) ----------------------------------
+    function DayPopover({ date, occs, onClose, onPick }) {
+      return html`<${Overlay} onClose=${onClose}>
+        <div onClick=${(e) => e.stopPropagation()} style=${{
+          background: "var(--os-bg-surface)", border: "1px solid var(--os-border-color)",
+          borderRadius: "var(--os-radius-lg)", boxShadow: "var(--os-shadow-xl)",
+          padding: "var(--os-sp-sm)", width: "min(320px, 86vw)", maxHeight: "70vh", overflow: "auto",
+        }}>
+          <div style=${{ fontWeight: "var(--os-weight-medium)", marginBottom: "var(--os-sp-xs)" }}>
+            ${date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+          </div>
+          ${occs.map((o, i) => html`<div key=${o.ev.id + i} class="ag-row clickable" style=${evVars(o.ev)} onClick=${() => onPick(o.ev, o.srcIso, o.localIso)}>
+            <span class="at">${o.minutes != null ? o.timeLabel : "All day"}</span>
+            <span class="atitle">${o.ev.title}</span>
+            ${o.ev.url ? html`<i class="linkico ph-light ph-link"></i>` : null}
+            ${o.ev.recur ? html`<i class="rep ph-light ph-repeat"></i>` : null}
+          </div>`)}
+        </div>
+      </${Overlay}>`;
+    }
+
+    // ---- month grid --------------------------------------------------------------------
+    function MonthGrid({ anchor, occByIso, today, canEdit, onDayClick, onEventClick, onOverflow }) {
+      const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+      const gridStart = addDays(first, -first.getDay());
+      const weeks = [];
+      for (let w = 0; w < 6; w++) { const days = []; for (let i = 0; i < 7; i++) days.push(addDays(gridStart, w * 7 + i)); weeks.push(days); }
+      const visibleWeeks = weeks.filter((wk) => wk.some((d) => d.getMonth() === anchor.getMonth()));
+      const MAX_CHIPS = 3;
+      return html`<div class="gridwrap">
+        <div class="dow">${DOW_SHORT.map((d, i) => html`<div key=${i}>${d}</div>`)}</div>
+        <div class="weeks">
+          ${visibleWeeks.map((wk, wi) => html`<div class="week" key=${wi}>
+            ${wk.map((d) => {
+              const inMonth = d.getMonth() === anchor.getMonth();
+              const isToday = sameDay(d, today);
+              const occs = occAt(occByIso, d);
+              const shown = occs.slice(0, MAX_CHIPS);
+              const extra = occs.length - shown.length;
+              return html`<div key=${isoOf(d)}
+                class=${"cell" + (inMonth ? "" : " dim") + (isToday ? " today" : "") + (canEdit ? " editable" : "")}
+                onClick=${canEdit ? () => onDayClick(d) : null}>
+                <div class="cell-head"><span class="dnum">${d.getDate()}</span></div>
+                <div class="evs">
+                  ${shown.map((o, i) => html`<div key=${o.ev.id + i} class="chip clickable" title=${o.ev.title} style=${evVars(o.ev)}
+                    onClick=${(e) => { e.stopPropagation(); onEventClick(o.ev, o.srcIso, o.localIso); }}>
+                    ${o.ev.recur ? html`<i class="rep ph-light ph-repeat"></i>` : null}
+                    ${o.minutes != null ? html`<span class="t">${o.timeLabel}</span>` : null}
+                    <span class="lbl">${o.ev.title}</span>
+                    ${o.ev.url ? html`<i class="linkico ph-light ph-link"></i>` : null}
+                  </div>`)}
+                  ${extra > 0 ? html`<div class="more" onClick=${(e) => { e.stopPropagation(); onOverflow(d, occs); }}>+${extra} more</div>` : null}
+                </div>
+              </div>`;
+            })}
+          </div>`)}
+        </div>
+      </div>`;
+    }
+
+    // ---- week (time grid) --------------------------------------------------------------
+    function layoutDay(timed) {
+      const items = timed.map((o) => { const b = o.ev.dur > 0 ? o.ev.dur : SLOT_MIN; return { o, start: o.minutes, end: Math.min(1440, o.minutes + b), blockMin: b }; });
+      const out = [];
+      let i = 0;
+      while (i < items.length) {
+        let j = i, maxEnd = items[i].end;
+        const cluster = [items[i]];
+        while (j + 1 < items.length && items[j + 1].start < maxEnd) { j++; cluster.push(items[j]); maxEnd = Math.max(maxEnd, items[j].end); }
+        const laneEnds = [];
+        for (const it of cluster) {
+          let placed = false;
+          for (let l = 0; l < laneEnds.length; l++) { if (it.start >= laneEnds[l]) { it.lane = l; laneEnds[l] = it.end; placed = true; break; } }
+          if (!placed) { it.lane = laneEnds.length; laneEnds.push(it.end); }
+        }
+        for (const it of cluster) { it.lanes = laneEnds.length; out.push(it); }
+        i = j + 1;
+      }
+      return out;
+    }
+    function WeekView({ anchor, occByIso, today, now, canEdit, scrollToken, onSlotClick, onAllDayClick, onEventClick }) {
+      const bodyRef = useRef(null);
+      const start = addDays(startOfDay(anchor), -anchor.getDay());
+      const days = []; for (let i = 0; i < 7; i++) days.push(addDays(start, i));
+      // Center on the current time when this week contains today (on mount, and again whenever
+      // "Today" is pressed — scrollToken bumps); otherwise rest the view at ~7am.
+      useEffect(() => {
+        const el = bodyRef.current; if (!el) return;
+        const hasToday = days.some((d) => sameDay(d, now));
+        const focusMin = hasToday ? Math.max(0, now.getHours() * 60 + now.getMinutes() - 90) : 7 * 60;
+        el.scrollTop = (focusMin / 60) * HOUR_PX;
+      }, [scrollToken]);
+      const hours = []; for (let h = 0; h < 24; h++) hours.push(h);
+      return html`<div class="weekwrap" style=${{ "--gutter": "48px" }}>
+        <div class="wk-head">
+          <div class="corner"></div>
+          ${days.map((d) => html`<div key=${isoOf(d)} class=${"wk-dcol" + (sameDay(d, today) ? " today" : "")}>
+            <span class="wd">${DOW_SHORT[d.getDay()]}</span><span class="dn">${d.getDate()}</span>
+          </div>`)}
+        </div>
+        <div class="wk-allday">
+          <div class="lbl">all-day</div>
+          ${days.map((d) => {
+            const all = occAt(occByIso, d).filter((o) => o.minutes == null);
+            return html`<div key=${isoOf(d)} class=${"wk-adcol" + (canEdit ? " editable" : "")}
+              onClick=${canEdit ? () => onAllDayClick(d) : null}>
+              ${all.map((o, i) => html`<div key=${o.ev.id + i} class="chip clickable" title=${o.ev.title} style=${evVars(o.ev)}
+                onClick=${(e) => { e.stopPropagation(); onEventClick(o.ev, o.srcIso, o.localIso); }}>
+                ${o.ev.recur ? html`<i class="rep ph-light ph-repeat"></i>` : null}<span class="lbl">${o.ev.title}</span>
+                ${o.ev.url ? html`<i class="linkico ph-light ph-link"></i>` : null}
+              </div>`)}
+            </div>`;
+          })}
+        </div>
+        <div class="wk-body" ref=${bodyRef}>
+          <div class="wk-grid" style=${{ height: 24 * HOUR_PX + "px" }}>
+            <div class="wk-gutter">
+              ${hours.map((h) => html`<div key=${h} class="wk-hourlabel"><span>${h === 0 ? "" : fmtMinutes(h * 60)}</span></div>`)}
+            </div>
+            ${days.map((d) => {
+              const timed = occAt(occByIso, d).filter((o) => o.minutes != null);
+              const laid = layoutDay(timed);
+              const isToday = sameDay(d, now);
+              const nowMin = now.getHours() * 60 + now.getMinutes();
+              return html`<div key=${isoOf(d)} class=${"wk-col" + (canEdit ? " editable" : "") + (sameDay(d, today) ? " today" : "")}
+                onClick=${canEdit ? (e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const min = Math.floor(((e.clientY - rect.top) / HOUR_PX) * 60 / 30) * 30;
+                  onSlotClick(d, Math.max(0, Math.min(1410, min)));
+                } : null}>
+                ${isToday ? html`<div class="nowline" style=${{ top: (nowMin / 60) * HOUR_PX + "px" }}></div>` : null}
+                ${laid.map(({ o, start: s, lane, lanes, blockMin }, i) => html`<div key=${o.ev.id + i}
+                  class="wk-ev clickable" title=${o.ev.title} style=${{
+                    top: (s / 60) * HOUR_PX + "px",
+                    height: Math.max(14, (blockMin / 60) * HOUR_PX - 2) + "px",
+                    left: `calc(${(lane / lanes) * 100}% + 1px)`,
+                    width: `calc(${100 / lanes}% - 2px)`,
+                    ...(evVars(o.ev) || {}),
+                  }}
+                  onClick=${(e) => { e.stopPropagation(); onEventClick(o.ev, o.srcIso, o.localIso); }}>
+                  <span class="et">${o.timeLabel}</span> <span class="en">${o.ev.title}${o.ev.url ? html` <i class="linkico ph-light ph-link"></i>` : null}</span>
+                </div>`)}
+              </div>`;
+            })}
+          </div>
+        </div>
+      </div>`;
+    }
+
+    // ---- agenda (small sizes) ----------------------------------------------------------
+    function Agenda({ occByIso, today, canEdit, onEventClick, onAdd }) {
+      const DAYS_AHEAD = 60;
+      const buckets = [];
+      for (let i = 0; i < DAYS_AHEAD; i++) {
+        const d = addDays(today, i);
+        const occs = occAt(occByIso, d);
+        if (occs.length) buckets.push({ d, occs });
+      }
+      if (!buckets.length) {
+        return html`<div class="agenda"><div class="ag-empty">
+          <i class="ph-light ph-calendar-blank"></i>
+          <span>Nothing coming up.</span>
+          ${canEdit ? html`<button class="fb-btn primary" onClick=${onAdd}><i class="ph-light ph-plus"></i>Add event</button>` : null}
+        </div></div>`;
+      }
+      return html`<div class="agenda">
+        ${buckets.map(({ d, occs }) => html`<div class="ag-day" key=${isoOf(d)}>
+          <div class=${"ag-date" + (sameDay(d, today) ? " is-today" : "")}>
+            <span class="dow2">${DOW_SHORT[d.getDay()]}</span>
+            <span class="num2">${sameDay(d, today) ? "Today" : `${MONTHS[d.getMonth()].slice(0,3)} ${d.getDate()}`}</span>
+          </div>
+          ${occs.map((o, i) => html`<div key=${o.ev.id + i} style=${evVars(o.ev)}
+            class=${"ag-row" + (canEdit || o.ev.note || o.ev.recur || o.ev.url || o.ev.time ? " clickable" : "")}
+            onClick=${() => onEventClick(o.ev, o.srcIso, o.localIso)}>
+            <span class="at">${o.minutes != null ? o.timeLabel : "All day"}</span>
+            <span class="atitle">${o.ev.title}</span>
+            ${o.ev.url ? html`<i class="linkico ph-light ph-link"></i>` : null}
+            ${o.ev.recur ? html`<i class="rep ph-light ph-repeat"></i>` : null}
+          </div>`)}
+        </div>`)}
+      </div>`;
+    }
+
+    // ---- main app ----------------------------------------------------------------------
+    function App() {
+      const [data, setData] = useState(null);
+      const [viewMode, setViewMode] = useState("month");
+      const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
+      const [editing, setEditing] = useState(null);
+      const [editOcc, setEditOcc] = useState(null);   // { srcIso, localIso } of the clicked occurrence
+      const [peeking, setPeeking] = useState(null);
+      const [showSettings, setShowSettings] = useState(false);
+      const [overflow, setOverflow] = useState(null);
+      const [today, setToday] = useState(() => startOfDay(new Date()));
+      const [now, setNow] = useState(() => new Date());
+      const [weekScroll, setWeekScroll] = useState(0);   // bump to re-scroll the week grid to "now"
+      const [rootRef, mode] = useLayoutMode();
+
+      async function refresh() { const s = await frame.api("api/state").catch(() => null); if (s) setData(s); }
+      useEffect(() => { refresh(); }, []);
+
+      useEffect(() => {
+        frame.localStorageGetItem("view").then((v) => { if (v === "month" || v === "week") setViewMode(v); }).catch(() => {});
+      }, []);
+      function chooseView(v) { setViewMode(v); frame.localStorageSetItem("view", v).catch(() => {}); }
+
+      useEffect(() => {
+        if (data && data.settings) applyChannel(document.body, "var(--os-" + (data.settings.palette || "c1") + ")");
+      }, [data && data.settings && data.settings.palette]);
+
+      useEffect(() => {
+        const t = setInterval(() => { const n = new Date(); setNow(n); setToday((cur) => sameDay(cur, n) ? cur : startOfDay(n)); }, 60_000);
+        return () => clearInterval(t);
+      }, []);
+
+      useFramePush({ cal_changed: (d) => { if (!d || d.by !== SESSION) refresh(); } });
+
+      const events = (data && data.events) || [];
+      const effective = mode === "compact" ? "agenda" : viewMode;
+      const range = useMemo(() => {
+        if (effective === "agenda") return { start: today, end: addDays(today, 60) };
+        if (effective === "week") return weekRange(anchor);
+        return monthGridRange(anchor);
+      }, [effective, anchor.getTime(), today.getTime()]);
+      const occByIso = useMemo(() => occurrencesInRange(events, range.start, range.end), [events, range.start.getTime(), range.end.getTime()]);
+
+      if (!data) return html`<div class="app" ref=${rootRef}></div>`;
+      const { me, settings } = data;
+      const isEditor = me.is_sfi_editor;
+      const vars = paletteVars(settings.palette);
+
+      if (data.private) {
+        return html`<div class="app" ref=${rootRef} style=${vars}>
+          <div class="locked">
+            <i class="ph-light ph-lock-simple"></i>
+            <span class="big">This calendar is private</span>
+            <span>Only members of this space can view it.</span>
+          </div>
+        </div>`;
+      }
+
+      function saveEvent(ev) {
+        const prev = data;
+        if (ev.id) setData({ ...data, events: events.map((e) => e.id === ev.id ? { ...e, ...ev } : e) });
+        setEditing(null);
+        frame.api("api/event", { event: ev, by: SESSION }).then(refresh)
+          .catch(async (err) => { setData(prev); await frame.alert((err && err.body && err.body.error) || "Could not save the event."); });
+      }
+      function deleteEvent(id) { setEditing(null); frame.api("api/event_delete", { id, by: SESSION }).then(refresh).catch(() => {}); }
+      // Delete options for a recurring event: "one" (just this day), "forward" (this day on), "all".
+      // A one-time event ignores `mode` and is removed outright.
+      function performDelete(mode) {
+        const ev = editing; if (!ev) return;
+        if (!ev.recur || mode === "all") { deleteEvent(ev.id); return; }
+        const srcIso = (editOcc && editOcc.srcIso) || ev.recur.start || isoOf(today);
+        if (mode === "one") {
+          const skip = [...new Set([...(ev.recur.skip || []), srcIso])];
+          saveEvent({ ...ev, recur: { ...ev.recur, skip } });
+        } else { // "forward" — end the series the day before this occurrence
+          const newUntil = isoOf(addDays(parseIso(srcIso), -1));
+          if (!ev.recur.start || newUntil < ev.recur.start) deleteEvent(ev.id);
+          else saveEvent({ ...ev, recur: { ...ev.recur, until: newUntil } });
+        }
+      }
+      function saveSettings(next) {
+        setShowSettings(false);
+        const prev = data;
+        setData({ ...data, settings: { ...settings, ...next } });
+        frame.api("api/settings", { settings: next, by: SESSION }).then(refresh).catch(() => setData(prev));
+      }
+      function onEventClick(ev, srcIso, localIso) {
+        if (isEditor) { setEditOcc(srcIso ? { srcIso, localIso } : null); setEditing(ev); }
+        else if (ev.note || ev.recur || ev.time || ev.url) setPeeking(ev);
+      }
+      function newOn(d, minutes) {
+        const e = blankEvent(isoOf(d));
+        if (minutes != null) e.time = `${pad2(Math.floor(minutes / 60))}:${pad2(minutes % 60)}`;
+        setEditOcc(null); setEditing(e);
+      }
+
+      function step(delta) {
+        setAnchor((a) => effective === "week" ? addDays(a, 7 * delta)
+          : startOfDay(new Date(a.getFullYear(), a.getMonth() + delta, 1)));
+      }
+      function goToday() { setAnchor(startOfDay(new Date())); setNow(new Date()); setWeekScroll((n) => n + 1); }
+
+      let title;
+      if (effective === "agenda") title = html`<span class="title">Upcoming</span>`;
+      else if (effective === "week") {
+        const ws = weekRange(anchor), we = ws.end;
+        const sameMonth = ws.start.getMonth() === we.getMonth();
+        const label = sameMonth
+          ? `${MONTHS[ws.start.getMonth()].slice(0,3)} ${ws.start.getDate()}–${we.getDate()}`
+          : `${MONTHS[ws.start.getMonth()].slice(0,3)} ${ws.start.getDate()} – ${MONTHS[we.getMonth()].slice(0,3)} ${we.getDate()}`;
+        title = html`<span class="title">${label}<span class="yr">${we.getFullYear()}</span></span>`;
+      } else title = html`<span class="title">${MONTHS[anchor.getMonth()]}<span class="yr">${anchor.getFullYear()}</span></span>`;
+
+      return html`<div class="app" ref=${rootRef} style=${vars}>
+        <div class="topbar">
+          ${title}
+          <div class="spacer"></div>
+          ${mode !== "compact" ? html`
+            <div class="vtoggle">
+              <button class=${viewMode === "month" ? "active" : ""} onClick=${() => chooseView("month")}>Month</button>
+              <button class=${viewMode === "week" ? "active" : ""} onClick=${() => chooseView("week")}>Week</button>
+            </div>
+            <button class="tbtn" title="Previous" onClick=${() => step(-1)}><i class="ph-light ph-caret-left"></i></button>
+            <button class="today-btn" onClick=${goToday}>Today</button>
+            <button class="tbtn" title="Next" onClick=${() => step(1)}><i class="ph-light ph-caret-right"></i></button>
+          ` : null}
+          ${isEditor ? html`
+            <button class="tbtn" title="Settings" onClick=${() => setShowSettings(true)}><i class="ph-light ph-gear-six"></i></button>
+            <button class="tbtn primary" title="Add event" onClick=${() => newOn(today)}><i class="ph-light ph-plus"></i></button>
+          ` : null}
+        </div>
+
+        ${effective === "agenda"
+          ? html`<${Agenda} occByIso=${occByIso} today=${today} canEdit=${isEditor}
+              onEventClick=${onEventClick} onAdd=${() => newOn(today)} />`
+          : effective === "week"
+          ? html`<${WeekView} anchor=${anchor} occByIso=${occByIso} today=${today} now=${now} canEdit=${isEditor} scrollToken=${weekScroll}
+              onSlotClick=${(d, min) => newOn(d, min)} onAllDayClick=${(d) => newOn(d)} onEventClick=${onEventClick} />`
+          : html`<${MonthGrid} anchor=${anchor} occByIso=${occByIso} today=${today} canEdit=${isEditor}
+              onDayClick=${(d) => newOn(d)} onEventClick=${onEventClick}
+              onOverflow=${(date, occs) => setOverflow({ date, occs })} />`}
+
+        ${editing ? html`<${EventModal} initial=${editing} spacePalette=${settings.palette} occDate=${editOcc ? editOcc.localIso : ""}
+          onClose=${() => setEditing(null)} onSave=${saveEvent} onDelete=${performDelete} />` : null}
+        ${peeking ? html`<${EventPeek} ev=${peeking} onClose=${() => setPeeking(null)} />` : null}
+        ${showSettings ? html`<${SettingsModal} settings=${settings}
+          onClose=${() => setShowSettings(false)} onSave=${saveSettings} />` : null}
+        ${overflow ? html`<${DayPopover} date=${overflow.date} occs=${overflow.occs}
+          onClose=${() => setOverflow(null)} onPick=${(ev, s, l) => { setOverflow(null); onEventClick(ev, s, l); }} />` : null}
+      </div>`;
+    }
+
+    render(html`<${App}/>`, document.body);
+  </script>
+</body>
+</html>
