@@ -19,6 +19,7 @@ declareTables([{
   schema: [
     { name: "name",  col_type: "text", nullable: false },
     { name: "email", col_type: "text", nullable: false },
+    { name: "phone", col_type: "text", nullable: true },
     { name: "role",  col_type: "text", nullable: false },
   ],
 }]);
@@ -63,6 +64,25 @@ function canEdit(peer: ReturnType<typeof parsePeerInfo>, prefs: Prefs): boolean 
   return true;
 }
 
+// The `phone` column was added after the first release. Tables bound by an older
+// version don't have it, so the owner (the binding owner) evolves the schema in place.
+// Once added the binding map persists, so `"phone" in colMap` short-circuits this on
+// every later request. Returns whether the column is available for this placement.
+async function ensurePhoneColumn(
+  peer: ReturnType<typeof parsePeerInfo>,
+  colMap: Record<string, string>,
+): Promise<boolean> {
+  if ("phone" in colMap) return true;
+  if (!peer.is_owner) return false; // only the binding owner can evolve the schema
+  try {
+    await table("members", peer.sfi_id).addColumn("phone", "text", { nullable: true });
+    return true;
+  } catch (e) {
+    log("member_manager: failed to add phone column — " + e);
+    return false;
+  }
+}
+
 // ----- HTTP handler ---------------------------------------------------------------------
 self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
@@ -82,6 +102,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
   const members = table("members", peer.sfi_id);
   const prefs = getPrefs(peer.sfi_id);
   const editable = canEdit(peer, prefs);
+  const hasPhone = await ensurePhoneColumn(peer, tables.byKey["members"].colIdByName);
 
   if (reqPath === "/api/state" && method === "GET") {
     return jsonReply(replyPort, 200, {
@@ -92,6 +113,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
         is_anon: peer.is_anon,
       },
       can_edit: editable,
+      has_phone: hasPhone,
     });
   }
 
@@ -115,17 +137,20 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
 
   if (reqPath === "/api/member" && method === "POST") {
     if (!editable) return jsonReply(replyPort, 403, { error: "editing is restricted to the frame owner" });
-    const v = parseJsonBody<{ row_id?: unknown; name?: unknown; email?: unknown; role?: unknown }>(body);
+    const v = parseJsonBody<{ row_id?: unknown; name?: unknown; email?: unknown; phone?: unknown; role?: unknown }>(body);
     if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
     const name = sanitizeText(v.name, 120);
     const email = sanitizeText(v.email, 200);
+    const phone = sanitizeText(v.phone, 40); // optional
     const role = sanitizeText(v.role, 80);
     if (!name) return jsonReply(replyPort, 400, { error: "name required" });
     if (!email) return jsonReply(replyPort, 400, { error: "email required" });
     if (!role) return jsonReply(replyPort, 400, { error: "role required" });
     if (!prefs.roles.includes(role)) return jsonReply(replyPort, 400, { error: "role not in allowed list" });
     const rowId = v.row_id ? String(v.row_id) : null;
-    const { row_id } = await members.upsert(rowId, { name, email, role });
+    const values: Record<string, unknown> = { name, email, role };
+    if (hasPhone) values.phone = phone; // only write phone once the column exists
+    const { row_id } = await members.upsert(rowId, values);
     return jsonReply(replyPort, 200, { row_id });
   }
 

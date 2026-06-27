@@ -59,15 +59,16 @@ function App() {
   const prefs = state.prefs;
   const viewer = state.viewer;
   const canEdit = state.can_edit;
+  const hasPhone = !!state.has_phone;
   const orgName = prefs.org_name || "Members";
 
   document.title = orgName + " · Member Manager";
 
   const showReadonlyNote = !canEdit && prefs.owner_only_edit && !viewer.is_anon;
 
-  async function addMember(name, email, role) {
+  async function addMember(name, email, phone, role) {
     try {
-      await frame.api("api/member", { name, email, role });
+      await frame.api("api/member", { name, email, phone, role });
     } catch (e) {
       await frame.alert(e.message || "failed");
     }
@@ -75,7 +76,7 @@ function App() {
 
   async function updateMember(row, patch) {
     try {
-      await frame.api("api/member", { row_id: row._row_id, name: row.name, email: row.email, role: row.role, ...patch });
+      await frame.api("api/member", { row_id: row._row_id, name: row.name, email: row.email, phone: row.phone || "", role: row.role, ...patch });
     } catch (e) {
       await frame.alert(e.message || "failed");
       loadMembers();
@@ -106,7 +107,7 @@ function App() {
       </div>
     </header>
 
-    ${canEdit && html`<${AddRow} roles=${prefs.roles} onAdd=${addMember} />`}
+    ${canEdit && html`<${AddRow} roles=${prefs.roles} hasPhone=${hasPhone} onAdd=${addMember} />`}
 
     ${showReadonlyNote && html`
       <p class="muted readonly-note">
@@ -121,6 +122,7 @@ function App() {
         members=${members}
         viewer=${viewer}
         canEdit=${canEdit}
+        hasPhone=${hasPhone}
         roles=${prefs.roles}
         onUpdate=${updateMember}
         onDelete=${delMember}
@@ -137,9 +139,10 @@ function App() {
   `;
 }
 
-function AddRow({ roles, onAdd }) {
+function AddRow({ roles, hasPhone, onAdd }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [role, setRole] = useState(roles[0] || "");
 
   useEffect(() => { if (!role && roles.length) setRole(roles[0]); }, [roles]);
@@ -148,17 +151,22 @@ function AddRow({ roles, onAdd }) {
     const n = name.trim();
     const em = email.trim();
     if (!n || !em || !role) return;
-    await onAdd(n, em, role);
+    await onAdd(n, em, phone.trim(), role);
     setName("");
     setEmail("");
+    setPhone("");
   }
 
   return html`
-    <section class="surface compose">
+    <section class="surface compose ${hasPhone ? "compose--phone" : ""}">
       <input type="text" placeholder="Full name" maxlength="120" autocomplete="off"
         value=${name} onInput=${(e) => setName(e.target.value)} />
       <input type="email" placeholder="email@example.com" maxlength="200" autocomplete="off"
         value=${email} onInput=${(e) => setEmail(e.target.value)} />
+      ${hasPhone && html`
+        <input type="tel" placeholder="phone (optional)" maxlength="40" autocomplete="off"
+          value=${phone} onInput=${(e) => setPhone(e.target.value)} />
+      `}
       <select value=${role} onChange=${(e) => setRole(e.target.value)}>
         ${roles.map((r) => html`<option key=${r} value=${r}>${r}</option>`)}
       </select>
@@ -167,7 +175,7 @@ function AddRow({ roles, onAdd }) {
   `;
 }
 
-function MemberList({ publicDisabled, members, viewer, canEdit, roles, onUpdate, onDelete }) {
+function MemberList({ publicDisabled, members, viewer, canEdit, hasPhone, roles, onUpdate, onDelete }) {
   if (publicDisabled) {
     return html`
       <div id="list" class="empty">
@@ -202,21 +210,29 @@ function MemberList({ publicDisabled, members, viewer, canEdit, roles, onUpdate,
   return html`
     <div id="list">
       ${members.map((m) => html`
-        <${MemberRow} key=${m._row_id} member=${m} canEdit=${canEdit} roles=${roles} onUpdate=${onUpdate} onDelete=${onDelete} />
+        <${MemberRow} key=${m._row_id} member=${m} canEdit=${canEdit} hasPhone=${hasPhone} roles=${roles} onUpdate=${onUpdate} onDelete=${onDelete} />
       `)}
     </div>
   `;
 }
 
-function MemberRow({ member, canEdit, roles, onUpdate, onDelete }) {
+function MemberRow({ member, canEdit, hasPhone, roles, onUpdate, onDelete }) {
   const knownRole = roles.includes(member.role);
+  const [showContact, setShowContact] = useState(false);
+  const phone = (member.phone || "").trim();
 
   async function editClick() {
     const name = await frame.prompt("Name", { defaultValue: member.name });
     if (name === null) return;
     const email = await frame.prompt("Email", { defaultValue: member.email });
     if (email === null) return;
-    onUpdate(member, { name: name.trim(), email: email.trim() });
+    const patch = { name: name.trim(), email: email.trim() };
+    if (hasPhone) {
+      const ph = await frame.prompt("Phone (optional)", { defaultValue: member.phone || "" });
+      if (ph === null) return;
+      patch.phone = ph.trim();
+    }
+    onUpdate(member, patch);
   }
 
   async function deleteClick() {
@@ -224,12 +240,27 @@ function MemberRow({ member, canEdit, roles, onUpdate, onDelete }) {
     onDelete(member);
   }
 
+  function emailClick() {
+    if (member.email) frame.openExternalUrl(`mailto:${member.email}`);
+  }
+
   return html`
     <div class="member">
       <div class="member__main">
         <div class="member__name">${member.name}</div>
-        <div class="member__meta">${member.email} · added ${fmtDate(member._created_at)}</div>
+        <div class="member__meta">
+          <button class="contact-link" title="Send email" onClick=${emailClick}>
+            <i class="ph-light ph-envelope-simple"></i>${member.email}
+          </button>
+          ${phone && html`
+            <button class="contact-link" title="Call or text" onClick=${() => setShowContact(true)}>
+              <i class="ph-light ph-phone"></i>${phone}
+            </button>
+          `}
+          <span class="meta-added">added ${fmtDate(member._created_at)}</span>
+        </div>
       </div>
+      ${showContact && html`<${ContactModal} name=${member.name} phone=${phone} onClose=${() => setShowContact(false)} />`}
       <div class="member__role">
         ${canEdit ? html`
           <select class="role-select" value=${member.role}
@@ -249,6 +280,38 @@ function MemberRow({ member, canEdit, roles, onUpdate, onDelete }) {
           </button>
         </div>
       `}
+    </div>
+  `;
+}
+
+function ContactModal({ name, phone, onClose }) {
+  function call() {
+    frame.openExternalUrl(`tel:${phone}`);
+    onClose();
+  }
+  function text() {
+    frame.openExternalUrl(`sms:${phone}`);
+    onClose();
+  }
+  return html`
+    <div class="overlay" onClick=${(e) => { if (e.target.classList.contains("overlay")) onClose(); }}>
+      <div class="surface contact-modal">
+        <div class="contact-modal__who">
+          <div class="contact-modal__name">${name}</div>
+          <div class="contact-modal__number">${phone}</div>
+        </div>
+        <div class="contact-modal__actions">
+          <button class="contact-action" onClick=${call}>
+            <i class="ph-light ph-phone-call"></i>
+            <span>Call</span>
+          </button>
+          <button class="contact-action" onClick=${text}>
+            <i class="ph-light ph-chat-text"></i>
+            <span>Text</span>
+          </button>
+        </div>
+        <button class="contact-cancel" onClick=${onClose}>cancel</button>
+      </div>
     </div>
   `;
 }

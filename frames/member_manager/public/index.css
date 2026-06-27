@@ -49,6 +49,10 @@ body {
   padding: var(--os-sp-md);
 }
 
+.compose--phone {
+  grid-template-columns: 1fr 1fr 1fr auto auto;
+}
+
 .compose input,
 .compose select {
   min-width: 0;
@@ -92,13 +96,55 @@ body {
 }
 
 .member__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--os-sp-sm);
   font-family: var(--os-font-mono);
   font-size: var(--os-fs-xs);
   color: var(--os-text-muted);
   margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+/* Inline, actionable contact links (mailto / call+text). Link-like, not chrome:
+   muted at rest, brightens to ink on hover, channel ring on keyboard focus. */
+.contact-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: none;
+  padding: 1px 3px;
+  margin-left: -3px;
+  border-radius: var(--os-radius-sm);
+  font: inherit;
+  color: var(--os-text-muted);
+  cursor: pointer;
+  transition: color var(--os-transition-fast);
+}
+
+.contact-link i {
+  font-size: 13px;
+  color: var(--os-text-subtle);
+  transition: color var(--os-transition-fast);
+}
+
+.contact-link:hover,
+.contact-link:hover i {
+  color: var(--os-text);
+}
+
+.contact-link:active {
+  color: var(--ch);
+}
+
+.contact-link:focus-visible {
+  outline: none;
+  box-shadow: var(--os-focus-ring);
+}
+
+.meta-added {
+  color: var(--os-text-subtle);
 }
 
 .member__role {
@@ -236,8 +282,102 @@ body {
   gap: var(--os-sp-sm);
 }
 
+/* Contact modal — call / text chooser for a member's phone number */
+.contact-modal {
+  width: 100%;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--os-sp-lg);
+  padding: var(--os-sp-lg);
+  text-align: center;
+  animation: contact-bloom 200ms var(--os-ease-spring) both;
+}
+
+.contact-modal__who {
+  display: flex;
+  flex-direction: column;
+  gap: var(--os-sp-xs);
+}
+
+.contact-modal__name {
+  font-size: var(--os-fs-md);
+  font-weight: var(--os-weight-semibold);
+  color: var(--os-text);
+}
+
+.contact-modal__number {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-fs-sm);
+  color: var(--os-text-muted);
+}
+
+.contact-modal__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--os-sp-md);
+}
+
+.contact-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--os-sp-xs);
+  padding: var(--os-sp-md);
+  border: none;
+  border-radius: var(--os-radius-md);
+  background: var(--ch);
+  color: var(--ch-fg);
+  font-size: var(--os-fs-sm);
+  font-weight: var(--os-weight-medium);
+  cursor: pointer;
+  transition: transform 80ms var(--os-ease-spring), filter var(--os-transition-fast);
+}
+
+.contact-action i {
+  font-size: 24px;
+}
+
+.contact-action:hover {
+  filter: brightness(1.08);
+}
+
+.contact-action:active {
+  transform: scale(0.97);
+}
+
+.contact-action:focus-visible {
+  outline: none;
+  box-shadow: var(--os-focus-ring);
+}
+
+.contact-cancel {
+  align-self: center;
+  border: none;
+  background: none;
+  padding: var(--os-sp-xs) var(--os-sp-sm);
+  font-size: var(--os-fs-sm);
+  color: var(--os-text-muted);
+  cursor: pointer;
+  transition: color var(--os-transition-fast);
+}
+
+.contact-cancel:hover {
+  color: var(--os-text);
+}
+
+@keyframes contact-bloom {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contact-modal { animation: none; }
+}
+
 @media (max-width: 540px) {
-  .compose {
+  .compose,
+  .compose--phone {
     grid-template-columns: 1fr;
   }
 }
