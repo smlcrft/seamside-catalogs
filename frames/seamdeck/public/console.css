@@ -1,0 +1,1047 @@
+/* console.css — the Seamdeck chassis, library, lobby, and results styles.
+   Game-SPECIFIC styles live inside each public/games/<id>.js. */
+     /* One dominant channel color = the device's identity (amber handheld). Set once at root. */
+     :root {
+         /* Accent = the SPACE color (set from applyChannel at mount). */
+         --ch: var(--os-c1);
+         --ch-fg: var(--os-c1-fg);
+         /* Chrome = the theme's INK tone, so it INVERTS with the theme: a dark
+  device on a light theme, a light device on a dark theme (like the
+  white Analogue Pocket). Labels/icons use the PAPER tone for contrast. */
+         --chrome: color-mix(in srgb, var(--os-text), var(--os-bg) 7%);
+         --chrome-deep: color-mix(in srgb, var(--chrome), #000 45%);
+         --bezel: color-mix(in srgb, var(--chrome), #000 42%);
+         /* All deck hardware (d-pad, action keys, home) shares ONE material — the
+  Analogue Pocket look is tone-on-tone: controls barely lighter than the
+  chassis, shaped by shadow, never by a different colour. */
+         --key: color-mix(in srgb, var(--os-text), var(--os-bg) 15%);
+         --key-hi: color-mix(in srgb, var(--os-text), var(--os-bg) 24%);
+         --chrome-text: color-mix(
+             in srgb,
+             var(--os-bg),
+             var(--os-text) 6%
+         );
+         --chrome-text-dim: color-mix(
+             in srgb,
+             var(--os-bg),
+             var(--os-text) 48%
+         );
+         /* Matte texture — both white AND black specks so it reads on either a dark
+  or light chrome, plus a top sheen and a bottom vignette. Theme-robust. */
+         --chrome-texture:
+             radial-gradient(
+                     rgba(255, 255, 255, 0.02) 1px,
+                     transparent 1.4px
+                 )
+                 0 0 / 3px 3px,
+             radial-gradient(rgba(0, 0, 0, 0.02) 1px, transparent 1.4px)
+                 1.5px 1.5px / 3px 3px,
+             radial-gradient(
+                 120% 90% at 50% 0%,
+                 rgba(255, 255, 255, 0.06),
+                 transparent 60%
+             ),
+             radial-gradient(
+                 130% 100% at 50% 100%,
+                 rgba(0, 0, 0, 0.26),
+                 transparent 55%
+             );
+     }
+     * {
+         box-sizing: border-box;
+     }
+     body {
+         margin: 0;
+         font-family: var(--os-font-sans);
+         background: var(--os-bg);
+         color: var(--os-text);
+         font-size: var(--os-fs-base);
+         min-height: 100vh;
+         -webkit-user-select: none;
+         user-select: none;
+         touch-action: manipulation;
+     }
+
+     /* ---- boot ---- */
+     .boot,
+     .waiting {
+         display: flex;
+         align-items: center;
+         justify-content: center;
+         flex-direction: column;
+         gap: var(--os-sp-md);
+         min-height: 100vh;
+         color: var(--os-text-muted);
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-sm);
+     }
+
+     /* ============================ CHASSIS ============================ */
+     /* NARROW (default) = the whole frame tile IS the handheld: shell fills edge
+to edge, screen grows to take most of it, deck fused at the bottom. */
+     .device {
+         display: flex;
+         flex-direction: column;
+         min-height: 100dvh;
+         height: 100dvh;
+         background: var(--chrome-texture), var(--chrome);
+         color: var(--chrome-text);
+     }
+     .body {
+         flex: 1;
+         min-height: 0;
+         display: flex;
+         flex-direction: column;
+         gap: var(--os-sp-sm);
+         padding: var(--os-sp-md) var(--os-sp-md) var(--os-sp-sm);
+     }
+     /* Screen sits behind a deep matte bezel with a thin inner lip (glass edge). */
+     .screen-bezel {
+         flex: 1;
+         min-height: 0;
+         display: flex;
+         background: var(--bezel);
+         border-radius: 14px;
+         padding: 10px;
+         box-shadow:
+             inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+             inset 0 2px 6px rgba(0, 0, 0, 0.7),
+             0 1px 1px rgba(255, 255, 255, 0.05);
+     }
+     .screen {
+         position: relative;
+         overflow: hidden;
+         flex: 1;
+         min-height: 0;
+         width: 100%;
+         background: var(--os-bg-inset);
+         border-radius: 6px;
+         display: flex;
+         align-items: center;
+         justify-content: center;
+         color: var(--os-text);
+         font-family: var(--os-font-mono);
+         box-shadow: 0 2px 10px color-mix(in srgb, #000, transparent 82%)
+             inset;
+     }
+               
+     /* ---- library ----
+NARROW = a tactile vertical list of cards (icon · name · status).
+WIDE   = a centered 4-column grid (see the media query). */
+     .library {
+         width: 100%;
+         height: 100%;
+         display: flex;
+         flex-direction: column;
+         justify-content: center;
+         padding: var(--os-sp-lg) var(--os-sp-md);
+         overflow-y: auto;
+     }
+     .cartridges {
+         display: flex;
+         flex-direction: column;
+         gap: var(--os-sp-sm);
+     }
+     .cart {
+         position: relative;
+         display: flex;
+         align-items: center;
+         gap: var(--os-sp-md);
+         padding: var(--os-sp-md);
+         border-radius: var(--os-radius-lg);
+         cursor: pointer;
+         background: color-mix(
+             in srgb,
+             var(--os-bg-surface),
+             transparent 34%
+         );
+         color: var(--os-text-secondary);
+         border: 1px solid transparent;
+         transition:
+             background var(--os-transition-fast),
+             color var(--os-transition-fast),
+             border-color var(--os-transition-fast),
+             transform 80ms ease-out;
+     }
+     .cart .game-ic {
+         font-size: 26px;
+         line-height: 1;
+         width: 32px;
+         text-align: center;
+         flex-shrink: 0;
+     }
+     .cart-title {
+         flex: 1;
+         font-size: var(--os-fs-md);
+         font-weight: var(--os-weight-medium);
+         letter-spacing: 0.005em;
+     }
+     .cart-status {
+         display: flex;
+         align-items: center;
+         gap: 5px;
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         letter-spacing: 0.14em;
+         text-transform: uppercase;
+         color: var(--os-text-muted);
+     }
+     .cart-status i {
+         font-size: 13px;
+     }
+     .cart:hover {
+         filter: brightness(1.05);
+     }
+     /* selection = a solid accent chip; contents invert to the accent's foreground */
+     .cart.sel {
+         background: var(--ch);
+         color: var(--ch-fg);
+         border-color: transparent;
+     }
+     .cart.sel .cart-status {
+         color: var(--ch-fg);
+         opacity: 0.85;
+     }
+     .cart.soon {
+         opacity: 0.5;
+     }
+     .cart.soon.sel {
+         opacity: 0.9;
+     }
+     /* presence on a game row: who's around + whether a session is live */
+     .cart-avs {
+         display: flex;
+         gap: 3px;
+     }
+     .av {
+         width: 17px;
+         height: 17px;
+         border-radius: 50%;
+         display: flex;
+         align-items: center;
+         justify-content: center;
+         background: var(--os-bg-surface);
+         border: 1px solid var(--os-border-color);
+         font-family: var(--os-font-mono);
+         font-size: 9px;
+         color: var(--os-text-secondary);
+         text-transform: uppercase;
+     }
+     .cart.sel .av {
+         border-color: transparent;
+     }
+     .cart-live {
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         letter-spacing: 0.14em;
+         text-transform: uppercase;
+         color: var(--os-text-muted);
+         display: flex;
+         align-items: center;
+         gap: 5px;
+     }
+     .cart-live::before {
+         content: "";
+         width: 6px;
+         height: 6px;
+         border-radius: 50%;
+         background: var(--os-text-subtle);
+     }
+     .cart-live.on {
+         color: var(--ch);
+     }
+     .cart-live.on::before {
+         background: var(--ch);
+         animation: blink 1.6s infinite;
+     }
+     .cart.sel .cart-live,
+     .cart.sel .cart-live.on {
+         color: var(--ch-fg);
+     }
+     .cart.sel .cart-live.on::before {
+         background: var(--ch-fg);
+     }
+     @keyframes blink {
+         0%,
+         100% {
+             opacity: 1;
+         }
+         50% {
+             opacity: 0.35;
+         }
+     }
+
+     /* join menu — pick a session or start your own */
+     .jmenu {
+         position: absolute;
+         inset: 0;
+         z-index: 5;
+         display: flex;
+         align-items: center;
+         justify-content: center;
+         background: color-mix(
+             in srgb,
+             var(--os-bg-inset),
+             transparent 20%
+         );
+         backdrop-filter: blur(2px);
+     }
+     .jmenu-panel {
+         min-width: min(270px, 84%);
+         display: flex;
+         flex-direction: column;
+         gap: var(--os-sp-xs);
+         background: var(--os-bg-surface);
+         border-radius: var(--os-radius-lg);
+         padding: var(--os-sp-md);
+         box-shadow: 0 14px 34px
+             color-mix(in srgb, #000, transparent 72%);
+     }
+     .jmenu-title {
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         letter-spacing: 0.18em;
+         text-transform: uppercase;
+         color: var(--os-text-subtle);
+         text-align: center;
+         margin-bottom: var(--os-sp-xs);
+     }
+     .jopt {
+         display: flex;
+         align-items: center;
+         justify-content: space-between;
+         gap: var(--os-sp-md);
+         padding: var(--os-sp-sm) var(--os-sp-md);
+         border-radius: var(--os-radius-md);
+         font-size: var(--os-fs-sm);
+         color: var(--os-text-secondary);
+         cursor: pointer;
+     }
+     .jopt.sel {
+         background: var(--ch);
+         color: var(--ch-fg);
+     }
+     .jopt-sub {
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         letter-spacing: 0.1em;
+         text-transform: uppercase;
+         opacity: 0.7;
+     }
+
+     /* ---- lobby (player select) ----
+NARROW = a stacked roster of seats. WIDE = a centered 2-column grid. */
+     .lobby {
+         width: 100%;
+         height: 100%;
+         display: flex;
+         flex-direction: column;
+         justify-content: center;
+         padding: var(--os-sp-lg) var(--os-sp-md);
+         gap: var(--os-sp-md);
+     }
+     .lobby-title {
+         display: flex;
+         align-items: center;
+         justify-content: center;
+         gap: 8px;
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         letter-spacing: 0.2em;
+         text-transform: uppercase;
+         color: var(--os-text-subtle);
+     }
+     .lobby-title i {
+         font-size: 15px;
+         color: var(--os-text-muted);
+     }
+     .seats {
+         display: flex;
+         flex-direction: column;
+         gap: var(--os-sp-xs);
+     }
+     .seat {
+         position: relative;
+         display: flex;
+         align-items: center;
+         gap: var(--os-sp-sm);
+         padding: var(--os-sp-sm) var(--os-sp-md);
+         border-radius: var(--os-radius-md);
+         cursor: default;
+         background: color-mix(
+             in srgb,
+             var(--os-bg-surface),
+             transparent 40%
+         );
+         color: var(--os-text-muted);
+         font-size: var(--os-fs-sm);
+         border: 1px solid transparent;
+         transition:
+             background var(--os-transition-fast),
+             color var(--os-transition-fast),
+             border-color var(--os-transition-fast);
+     }
+     .seat-no {
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         color: var(--os-text-subtle);
+         width: 1.2em;
+     }
+     .seat-name {
+         flex: 1;
+         display: flex;
+         align-items: center;
+         gap: var(--os-sp-xs);
+         color: var(--os-text);
+     }
+     .seat-empty {
+         flex: 1;
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         letter-spacing: 0.14em;
+         text-transform: uppercase;
+     }
+     .seat.filled {
+         background: color-mix(
+             in srgb,
+             var(--os-bg-surface),
+             transparent 12%
+         );
+     }
+     .seat.mine {
+         box-shadow: inset 0 0 0 1px
+             color-mix(in srgb, var(--ch), transparent 25%);
+         cursor: pointer;
+     }
+     .seat-host {
+         display: flex;
+         color: var(--ch);
+         font-size: 14px;
+     }
+     .lobby-foot {
+         display: flex;
+         align-items: center;
+         justify-content: center;
+         min-height: 34px;
+     }
+     .lobby-wait {
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         letter-spacing: 0.14em;
+         text-transform: uppercase;
+         color: var(--os-text-subtle);
+     }
+     .btn {
+         font: inherit;
+         font-size: var(--os-fs-sm);
+         font-weight: var(--os-weight-medium);
+         padding: 7px 14px;
+         border-radius: var(--os-radius-md);
+         cursor: pointer;
+         border: 1px solid transparent;
+         transition:
+             filter var(--os-transition-fast),
+             padding 60ms ease-out;
+     }
+     .btn.primary {
+         background: var(--ch);
+         color: var(--ch-fg);
+     }
+     .btn.primary:hover {
+         filter: brightness(1.08);
+     }
+     .btn.primary:active {
+         padding: 8px 14px 6px;
+     }
+     .btn.ghost {
+         background: transparent;
+         border-color: var(--os-border-color);
+         color: var(--os-text-secondary);
+     }
+     .btn.ghost:hover {
+         filter: brightness(1.08);
+         background: var(--os-bg-subtle);
+     }
+     /* CTA buttons carry the O glyph — the hardware hint for "this is what O presses" */
+     .btn.cta {
+         display: inline-flex;
+         align-items: center;
+         gap: 7px;
+     }
+     .btn.cta i {
+         font-size: 14px;
+         opacity: 0.75;
+     }
+
+     /* ---- playing — the game-agnostic screen furniture ----
+The console provides: .playing shell, .hud (turn + attempt dots), .field,
+.flash (+.perfect/.foul/.flash-sub), .meter (+fill/tick), .prompt, and
+.game-read. Game-SPECIFIC styles live inside each games/<id>.js. */
+     .playing {
+         position: relative;
+         width: 100%;
+         height: 100%;
+         display: flex;
+         flex-direction: column;
+     }
+     .hud {
+         display: flex;
+         justify-content: space-between;
+         align-items: center;
+         padding: var(--os-sp-xs) var(--os-sp-md);
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+     }
+     .turn {
+         letter-spacing: 0.12em;
+         text-transform: uppercase;
+         color: var(--os-text-subtle);
+     }
+     .turn.you {
+         color: var(--ch);
+     }
+     .attempt-dots {
+         display: flex;
+         gap: 4px;
+     }
+     .adot {
+         width: 5px;
+         height: 5px;
+         border-radius: 50%;
+         background: color-mix(in srgb, var(--os-text), transparent 82%);
+     }
+     .adot.used {
+         background: color-mix(in srgb, var(--os-text), transparent 55%);
+     }
+     .adot.now {
+         background: var(--ch);
+     }
+
+     .field {
+         position: relative;
+         flex: 1;
+         min-height: 0;
+         overflow: hidden;
+     }
+     /* a game's one-line readout (its target / instructions), top-center */
+     .game-read {
+         position: absolute;
+         top: 8px;
+         left: 50%;
+         transform: translateX(-50%);
+         white-space: nowrap;
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         color: var(--os-text-subtle);
+     }
+     .flash {
+         position: absolute;
+         top: 32%;
+         left: 50%;
+         transform: translate(-50%, -50%);
+         display: flex;
+         flex-direction: column;
+         align-items: center;
+         gap: 2px;
+         font-family: var(--os-font-mono);
+         font-weight: var(--os-weight-semibold);
+         font-size: var(--os-fs-xl);
+         letter-spacing: 0.04em;
+         color: var(--ch);
+     }
+     .flash.perfect {
+         color: var(--os-c5, var(--ch));
+     }
+     .flash.foul {
+         color: var(--os-cError, #c0392b);
+     }
+     .flash-sub {
+         font-size: var(--os-fs-xs);
+         font-weight: var(--os-weight-medium);
+         color: var(--os-text-muted);
+         letter-spacing: 0.1em;
+     }
+     .meter {
+         position: absolute;
+         left: var(--os-sp-md);
+         right: var(--os-sp-md);
+         bottom: var(--os-sp-sm);
+         height: 8px;
+         background: color-mix(in srgb, var(--os-text), transparent 88%);
+         border-radius: var(--os-radius-full);
+         overflow: hidden;
+     }
+     .meter-fill {
+         height: 100%;
+         background: var(--ch);
+         border-radius: var(--os-radius-full);
+     }
+     /* the aim mark — where the target sits on the power band. Ink, not accent,
+so it stays visible as the accent fill sweeps past it. */
+     .meter-tick {
+         position: absolute;
+         top: 0;
+         bottom: 0;
+         width: 2px;
+         margin-left: -1px;
+         background: var(--os-text);
+         opacity: 0.65;
+     }
+     .prompt {
+         position: absolute;
+         left: 0;
+         right: 0;
+         bottom: calc(var(--os-sp-sm) + 16px);
+         text-align: center;
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         color: var(--os-text-subtle);
+     }
+     .prompt b {
+         color: var(--ch);
+     }
+
+     /* ---- results ---- */
+     .results {
+         width: 100%;
+         height: 100%;
+         overflow-y: auto;
+         padding: var(--os-sp-md);
+         display: flex;
+         flex-direction: column;
+         gap: var(--os-sp-md);
+     }
+     .ranking {
+         display: flex;
+         flex-direction: column;
+         gap: 2px;
+     }
+     .rank {
+         display: flex;
+         align-items: center;
+         gap: var(--os-sp-sm);
+         padding: var(--os-sp-xs) var(--os-sp-sm);
+         border-radius: var(--os-radius-sm);
+         font-size: var(--os-fs-sm);
+     }
+     .rank.win {
+         background: color-mix(in srgb, var(--ch), transparent 78%);
+     }
+     .rank-pos {
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         color: var(--os-text-muted);
+         width: 22px;
+         display: flex;
+         justify-content: center;
+     }
+     .rank.win .rank-pos {
+         color: var(--ch);
+         font-size: var(--os-fs-md);
+     }
+     .rank-name {
+         flex: 1;
+         color: var(--os-text);
+     }
+     .rank-sum {
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         color: var(--os-text-muted);
+     }
+     .rank-pts {
+         font-family: var(--os-font-mono);
+         color: var(--os-text-secondary);
+         min-width: 30px;
+         text-align: right;
+     }
+
+     .initials {
+         display: flex;
+         align-items: center;
+         gap: var(--os-sp-sm);
+         padding: var(--os-sp-sm);
+         border-radius: var(--os-radius-md);
+         background: color-mix(in srgb, var(--ch), transparent 84%);
+     }
+     .initials-label {
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         letter-spacing: 0.1em;
+         color: var(--os-text-secondary);
+     }
+     .initials-input {
+         width: 68px;
+         text-align: center;
+         text-transform: uppercase;
+         letter-spacing: 0.3em;
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-md);
+         padding: 6px 8px;
+         background: var(--os-bg-inset);
+         border: 1px solid transparent;
+         border-radius: var(--os-radius-sm);
+         color: var(--os-text);
+     }
+     .initials-input:focus-visible {
+         outline: none;
+         border-color: var(--ch);
+     }
+
+     .lb {
+         display: flex;
+         flex-direction: column;
+         gap: 2px;
+     }
+     .lb-title {
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-2xs);
+         letter-spacing: 0.12em;
+         color: var(--os-text-subtle);
+         text-align: center;
+         margin-bottom: var(--os-sp-xs);
+     }
+     .lb-empty {
+         text-align: center;
+         font-size: var(--os-fs-sm);
+         color: var(--os-text-muted);
+         padding: var(--os-sp-sm);
+     }
+     .lb-row {
+         display: flex;
+         align-items: center;
+         gap: var(--os-sp-sm);
+         padding: 3px var(--os-sp-sm);
+         font-family: var(--os-font-mono);
+         font-size: var(--os-fs-sm);
+     }
+     .lb-rank {
+         color: var(--os-text-subtle);
+         width: 20px;
+     }
+     .lb-init {
+         flex: 1;
+         color: var(--os-text);
+         letter-spacing: 0.15em;
+     }
+     .lb-pts {
+         color: var(--ch);
+     }
+     .results-actions {
+         display: flex;
+         gap: var(--os-sp-sm);
+         justify-content: center;
+         margin-top: auto;
+         padding-top: var(--os-sp-sm);
+     }
+
+     /* ---- control deck ---- */
+     .deck {
+         flex-shrink: 0;
+         position: relative;
+         display: flex;
+         align-items: center;
+         justify-content: space-between;
+         gap: var(--os-sp-md);
+         padding: var(--os-sp-sm) var(--os-sp-md) var(--os-sp-md);
+         /* On a phone the deck breathes with the device — about a fifth of the
+  viewport instead of hugging its content, so thumbs get real estate.
+  Wide mode resets this (the controller is its own floating piece). */
+         min-height: clamp(132px, 20dvh, 190px);
+     }
+
+     /* Center "library" key — a wide Select/Start-style pill. Absolutely centered
+to the FRAME's width (the d-pad and button cluster aren't equal widths, so
+flex centering sat it slightly off-axis). Same key material but FLUSH with
+the deck (no travel shadow): it's a quiet system key, not a game button. */
+     .home {
+         position: absolute;
+         left: 50%;
+         /* centered by margin, NOT transform — the platform button styles
+            can set a transform on :active, which would replace a
+            translateX(-50%) and visibly jump the pill sideways */
+         margin-left: -31px; /* half of width */
+         display: flex;
+         align-items: center;
+         justify-content: center;
+         width: 62px;
+         height: 24px;
+         border-radius: var(--os-radius-full);
+         padding: 0;
+         cursor: pointer;
+         background: linear-gradient(
+             180deg,
+             var(--key-hi),
+             var(--key) 70%
+         );
+         border: 1px solid var(--chrome-deep);
+         color: var(--chrome-text-dim);
+         box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.07);
+         transition:
+             color var(--os-transition-fast),
+             box-shadow 70ms ease-out,
+             filter var(--os-transition-fast);
+     }
+     .home i {
+         font-size: 13px;
+     }
+     .home:hover {
+         color: var(--ch);
+         filter: brightness(1.1);
+     }
+     .home:active {
+         color: var(--ch);
+         box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+     }
+
+     /* D-pad — ONE moulded cross (Analogue Pocket). The face is a single SVG path
+(rounded plus) so there are no seams where bars would overlap; it wears the
+SAME material as the action keys. The 3×3 grid holds only transparent
+hit-targets on top — the whole cross rockers on press (see .dpad tilt in JS). */
+     .dpad {
+         position: relative;
+         display: grid;
+         grid-template-columns: repeat(3, 32px);
+         grid-template-rows: repeat(3, 32px);
+         gap: 0;
+         filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.45));
+         transform-origin: center;
+         transition: transform 110ms ease-out;
+     }
+     .dpad-face {
+         position: absolute;
+         inset: 0;
+         width: 100%;
+         height: 100%;
+         z-index: 0;
+     }
+     .dpad .key {
+         position: relative;
+         z-index: 1;
+         width: 32px;
+         height: 32px;
+         background: none;
+         border: none;
+         box-shadow: none;
+         border-radius: 0;
+     }
+     .dpad .up {
+         grid-area: 1 / 2;
+     }
+     .dpad .left {
+         grid-area: 2 / 1;
+     }
+     .dpad .right {
+         grid-area: 2 / 3;
+     }
+     .dpad .down {
+         grid-area: 3 / 2;
+     }
+
+     /* Classic offset button plate (experimental — delete the two `top` lines to
+flatten it back out): I rides high, O sits low, tucked a touch closer. */
+     .ab {
+         display: flex;
+         align-items: center;
+         gap: var(--os-sp-sm);
+     }
+     .ab .B {
+         position: relative;
+         top: -20px;
+     }
+     .ab .A {
+         position: relative;
+         top: 20px;
+         left: -5px;
+     }
+     .ab .key {
+         width: 50px;
+         height: 50px;
+         border-radius: var(--os-radius-full);
+         background: radial-gradient(
+             circle at 50% 34%,
+             var(--key-hi),
+             var(--key)
+         );
+         border: 1px solid var(--chrome-deep);
+         /* tall "wall" beneath the cap = chunky travel; collapses on press */
+         box-shadow:
+             0 2px 0 var(--chrome-deep),
+             0 4px 7px rgba(0, 0, 0, 0.4),
+             inset 0 1px 1px rgba(255, 255, 255, 0.08);
+         transition:
+             transform 70ms ease-out,
+             box-shadow 70ms ease-out,
+             filter var(--os-transition-fast);
+     }
+     .ab .key i {
+         font-size: 20px;
+         color: var(--chrome-text-dim);
+     }
+     .ab .A i {
+         color: var(--ch);
+         font-size: 22px;
+     } /* circle glyph carries the space accent */
+     .ab .key:hover {
+         filter: brightness(1.1);
+     }
+     /* A physical cap does NOT move down as a unit — it presses INTO the housing.
+Keep the cap where it is; collapse the travel wall and sink the face with an
+inner shadow so it reads as depressed in place. */
+     .ab .key.pressed {
+         transform: none;
+         box-shadow:
+             0 1px 0 var(--chrome-deep),
+             inset 0 3px 6px rgba(0, 0, 0, 0.6),
+             0 0 11px color-mix(in srgb, var(--ch), transparent 55%);
+         filter: brightness(0.96);
+     }
+
+     /* hardware key base */
+     .key {
+         display: flex;
+         align-items: center;
+         justify-content: center;
+         width: 40px;
+         height: 40px;
+         background: var(--key);
+         color: var(--chrome-text-dim);
+         border: 1px solid var(--chrome-deep);
+         border-radius: var(--os-radius-sm);
+         font: inherit;
+         cursor: pointer;
+         padding: 0;
+         transition:
+             filter var(--os-transition-fast),
+             transform 60ms ease-out,
+             box-shadow 90ms ease-out;
+         touch-action: none;
+     }
+     .key i {
+         line-height: 1;
+         pointer-events: none;
+     }
+     .key:hover {
+         filter: brightness(1.12);
+     }
+     /* the d-pad's only press feedback is the whole cross rocking (see .dpad tilt) —
+the arms are transparent hit-targets, so nothing per-arm changes. */
+     .dpad .key:hover {
+         filter: none;
+     }
+
+     /* WIDE = "NES in front of a TV": a standalone TV cabinet up top, a SEPARATE
+controller floating below it, both dark-chrome pieces sitting in the room. */
+     @media (min-width: 720px) {
+         .device {
+             background: var(--os-bg);
+             color: var(--os-text);
+             justify-content: center;
+             align-items: center;
+             height: auto;
+             min-height: 100dvh;
+             padding: var(--os-sp-2xl);
+             gap: var(--os-sp-xl);
+         }
+         .body {
+             flex: none;
+             min-height: 0;
+             width: auto;
+             align-items: center;
+             background: none;
+             padding: 0;
+             gap: var(--os-sp-xl);
+         }
+         /* The TV cabinet. display:block (NOT flex) is what fixes the collapse — the
+  screen then sizes purely from width × aspect-ratio instead of being crushed
+  to its content height by the flex cross-axis. */
+         .screen-bezel {
+             display: block;
+             flex: none;
+             width: min(720px, 92vw);
+             background: var(--chrome-texture), var(--chrome);
+             padding: var(--os-sp-lg);
+             border-radius: var(--os-radius-xl);
+             box-shadow:
+                 inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+                 0 18px 48px rgba(0, 0, 0, 0.35);
+         }
+         .screen {
+             flex: none;
+             width: 100%;
+             height: auto;
+             aspect-ratio: 4 / 3;
+             border-radius: 10px;
+         }
+         /* the controller: its own dark-chrome shell, sized by its contents —
+  so the pill goes back IN flow here (it helps define the shell's width;
+  absolute frame-centering is a handheld concern). */
+         .deck {
+             min-height: 0;
+             background: var(--chrome-texture), var(--chrome);
+             color: var(--chrome-text);
+             border-radius: var(--os-radius-xl);
+             padding: var(--os-sp-lg) var(--os-sp-2xl);
+             gap: var(--os-sp-2xl);
+             box-shadow:
+                 inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+                 0 12px 28px rgba(0, 0, 0, 0.3);
+         }
+         .home {
+             position: static;
+             margin-left: 0;
+         }
+
+         /* library → a centered 4-column grid of square cartridges */
+         .cartridges {
+             display: grid;
+             grid-template-columns: repeat(4, 1fr);
+             gap: var(--os-sp-lg);
+             width: 100%;
+             max-width: 560px;
+             margin: 0 auto;
+             align-content: center;
+         }
+         .cart {
+             flex-direction: column;
+             text-align: center;
+             justify-content: center;
+             gap: var(--os-sp-sm);
+             padding: var(--os-sp-lg) var(--os-sp-sm);
+             aspect-ratio: 1 / 1;
+         }
+         .cart .game-ic {
+             font-size: 42px;
+             width: auto;
+         }
+         .cart-title {
+             flex: none;
+             font-size: var(--os-fs-sm);
+         }
+         .cart-status {
+             position: absolute;
+             top: 9px;
+             right: 11px;
+         }
+         .cart-status .cart-caret {
+             display: none;
+         }
+
+         /* lobby → a centered 2-column seat grid */
+         .seats {
+             display: grid;
+             grid-template-columns: repeat(2, 1fr);
+             gap: var(--os-sp-sm);
+             width: 100%;
+             max-width: 560px;
+             margin: 0 auto;
+         }
+     }
+
+     @media (prefers-reduced-motion: reduce) {
+         .key,
+         .dpad,
+         .ab .key,
+         .home {
+             transition: none;
+         }
+     }
