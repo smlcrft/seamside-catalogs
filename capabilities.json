@@ -18,7 +18,7 @@
           "v1/chat/completions"
         ]
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/capabilities/openai.json",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/capabilities/openai.json",
       "package_sha256": "179ae90141f712e966bc2760384ab49306998939340522fcacce275f7808f85b",
       "app_version_min": "0.1.7"
     }

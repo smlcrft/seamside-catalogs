@@ -34,10 +34,10 @@ The build script:
 
 ## Hosting
 
-The Tandem client can fetch the manifest from any HTTPS URL. The default URLs assume the repo is hosted on GitHub at `smlcrft/tandem-catalogs` and served via `raw.githubusercontent.com`:
+The Tandem client can fetch the manifest from any HTTPS URL. The default URLs assume the repo is hosted on GitHub at `smlcrft/seamside-catalogs` and served via `raw.githubusercontent.com`:
 
-- Manifest: `https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/frames.json`
-- Package:  `https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/<dir_id>.tar.gz`
+- Manifest: `https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/frames.json`
+- Package:  `https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/<dir_id>.tar.gz`
 
 If you fork this repo to another host, change `BASE_URL` near the top of [`scripts/build_catalogs.py`](scripts/build_catalogs.py) and rebuild. Both the manifest URL and every embedded `package_url` are derived from that single constant.
 

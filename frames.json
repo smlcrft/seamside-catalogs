@@ -23,7 +23,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/calendar.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/calendar.tar.gz",
       "package_sha256": "8583aeb42a19faab8c50c534663fb9dfb00bce1a8b6a6167a3de27fd7ab25714",
       "app_version_min": "0.1.7"
     },
@@ -46,7 +46,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/checklist.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/checklist.tar.gz",
       "package_sha256": "822161401633a93ffc18eced9aa0092b8dd598ff8cd820b10a4347b1ab84f3f1",
       "app_version_min": "0.1.7"
     },
@@ -69,7 +69,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/community_home.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_home.tar.gz",
       "package_sha256": "e6be11fe764a92181cf214efd669cb1b35caae6b2a8bf2ba917a3e493791ec10",
       "app_version_min": "0.1.7"
     },
@@ -92,7 +92,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/community_library.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_library.tar.gz",
       "package_sha256": "b007c1452a6425f258d46576a5ad49c76cdb9a2b878700020ccd49045f1efa97",
       "app_version_min": "0.1.7"
     },
@@ -115,7 +115,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/discussion_channel.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/discussion_channel.tar.gz",
       "package_sha256": "24807507c5e9b3d08b7f7464531cd032bc07370a4d550cd8049bb4e98c6fbc3f",
       "app_version_min": "0.1.7"
     },
@@ -138,7 +138,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/file_folder.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/file_folder.tar.gz",
       "package_sha256": "f019ba606779d4dc9b804295c608f424de5254b56fe7d5c962fe8a64998f4e87",
       "app_version_min": "0.1.7"
     },
@@ -161,7 +161,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/game_ascii_runner.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_ascii_runner.tar.gz",
       "package_sha256": "7b97124eaf9a888cef39151bee3c5baa9caf008370b75251b5b26f7dc181ac88",
       "app_version_min": "0.1.7"
     },
@@ -184,7 +184,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/game_dice_roller.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_dice_roller.tar.gz",
       "package_sha256": "cae1116857bc7c1f08fe7747dfda0a42c8734a0df2948440a36af1c9e6348ed1",
       "app_version_min": "0.1.7"
     },
@@ -207,7 +207,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/game_pancake_stacker.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_pancake_stacker.tar.gz",
       "package_sha256": "c37ac5ac0a901b60049472170a6b8acf9961ad2a79e9ef517c631637c5cec41c",
       "app_version_min": "0.1.7"
     },
@@ -233,7 +233,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/garden_gnome.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/garden_gnome.tar.gz",
       "package_sha256": "7844c2176a5f342cd6e39fb0a071ea43e02e7602e3e46b3a6d790eac832ad0e8",
       "app_version_min": "0.1.7"
     },
@@ -256,7 +256,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/help_desk.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/help_desk.tar.gz",
       "package_sha256": "858090f55412949c36fc5fcc324b8a1b75e0a86b366366f6a7043f3f6c7eee92",
       "app_version_min": "0.1.7"
     },
@@ -282,7 +282,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/market_weather.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/market_weather.tar.gz",
       "package_sha256": "bdc58b4a7942c204e011db35f6eb689c8196513e1acf157a40eac878034c0498",
       "app_version_min": "0.1.7"
     },
@@ -305,7 +305,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/member_manager.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/member_manager.tar.gz",
       "package_sha256": "6a8636722795dfaf8640fedef56171b9a4892da9898310fcd41467f68bdcf0cc",
       "app_version_min": "0.1.8"
     },
@@ -328,7 +328,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/member_reachout.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/member_reachout.tar.gz",
       "package_sha256": "a83e2416a35b1e4ebc591a02633a3ad6a3d3a138d3361df3350dd6833ae40f42",
       "app_version_min": "0.1.8"
     },
@@ -351,7 +351,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/outpost.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/outpost.tar.gz",
       "package_sha256": "8f4c06e2b1ab6c4a2fd74c5702ef4ec5cc3bd297e7cdbb5cc8de9844d633e0a9",
       "app_version_min": "0.1.8"
     },
@@ -374,7 +374,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/roundtable.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roundtable.tar.gz",
       "package_sha256": "4b2c329a885dfa8354a5134bd7be24a302c99268886653c6df923bdc004e75fb",
       "app_version_min": "0.1.7"
     },
@@ -397,7 +397,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/seamdeck.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/seamdeck.tar.gz",
       "package_sha256": "b6fd8a35e48ddba85a2e8a6d03d7c0823e94987fe07f96c28cd5720ac78083ed",
       "app_version_min": "0.1.8"
     },
@@ -420,7 +420,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/slideshow.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/slideshow.tar.gz",
       "package_sha256": "4bef2c7fab369d20c4bf1812f6af03c545dfe9c935a494d3baaebd108b40e56a",
       "app_version_min": "0.1.7"
     },
@@ -467,7 +467,7 @@
         ],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/space_radio.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/space_radio.tar.gz",
       "package_sha256": "211a9b3dcf0f5f997800ebd6f314e1a285f25467b6264468097dbc08914d12c8",
       "app_version_min": "0.1.8"
     },
@@ -490,7 +490,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/watercolor_studio.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/watercolor_studio.tar.gz",
       "package_sha256": "8ef1cf57dfa52a38acac75483516ce6c1227e104504abac5f6e766c602e695d3"
     },
     {
@@ -515,7 +515,7 @@
         "web": [],
         "web_scripts": []
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main/packages/frames/weather_api.tar.gz",
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/weather_api.tar.gz",
       "package_sha256": "7029697ae40f286740fe00278c05eda07d0057c8b9604a3d02158c72bdfa419b",
       "app_version_min": "0.1.7"
     }

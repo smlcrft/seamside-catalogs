@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build catalog manifests for tandem-catalogs.
+Build catalog manifests for seamside-catalogs.
 
 Walks `frames/` and `capabilities/`, builds tarballs for frames (single-file
 copies for capabilities) into `packages/`, computes sha256 of each package,
@@ -37,7 +37,7 @@ FRAMES_OUT    = REPO_ROOT / "frames.json"
 CAPS_OUT      = REPO_ROOT / "capabilities.json"
 
 # Change this in one place when the hosting URL or branch changes.
-BASE_URL = "https://raw.githubusercontent.com/smlcrft/tandem-catalogs/main"
+BASE_URL = "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main"
 
 # Catalog-level metadata (the wrapper around the items list). Add an optional
 # "about_url" key here to point clients at an about page for the catalog — it is
