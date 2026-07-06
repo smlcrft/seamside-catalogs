@@ -181,7 +181,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     if (sessionsOf(sfi).length >= 12) return jsonReply(replyPort, 409, { error: "too many sessions" });
     standUpEverywhere(sfi, client_id);
     const session: Session = {
-      session_id: crypto.randomUUID(), game, phase: "lobby",
+      session_id: crypto.randomUUID(), game_id: game, phase: "lobby",
       round_id: 0, turn_index: 0, seed: null, deadline: null, started_at: Date.now(),
       seats: [{
         seat_no: 1, display_name: playerName(b, peer), initials: null, client_id,
@@ -207,18 +207,18 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     const requested = Number(b?.seat_no);
     let seat_no: number;
     if (Number.isInteger(requested) && requested >= 1 && requested <= 6 && !taken.has(requested)) {
-      seat = requested;
+      seat_no = requested;
     } else {
-      seat = 1;
-      while (taken.has(seat)) seat++;
+      seat_no = 1;
+      while (taken.has(seat_no)) seat_no++;
     }
     session.seats.push({
-      seat, display_name: playerName(b, peer), initials: null, client_id,
+      seat_no, display_name: playerName(b, peer), initials: null, client_id,
       runs: null, x: null, y: null, heading: 0, note: "",
     });
     session.seats.sort((a, b2) => a.seat_no - b2.seat_no);
     pushState(sfi);
-    return jsonReply(replyPort, 200, { ok: true, seat_no: seat });
+    return jsonReply(replyPort, 200, { ok: true, seat_no });
   }
 
   // Stand up (from everywhere — a client holds at most one seat anyway).

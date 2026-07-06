@@ -384,7 +384,7 @@
       "name": "Seamdeck",
       "description": "A tiny game console for your space. The frame is the whole device: a handheld on narrow screens, a TV + controller on wide ones. Members open sessions of little Phosphor-icon games (shot put, regatta, hot slice), join each other's lobbies, take turns or race in realtime, and chase the shared high-score board. Controls: D-pad via arrows/WASD, O = primary, I = secondary/back. It's also a template \u2014 each game is a self-contained two-file cartridge, and the console gives every cartridge lobbies, turn rotation, realtime racing, spectators, results, and high scores for free, so forking it into your own console is mostly writing games.",
       "icon": "",
-      "modified_at": "2026-07-02T00:00:00Z",
+      "modified_at": "2026-07-06T00:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 480,
@@ -398,7 +398,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/seamdeck.tar.gz",
-      "package_sha256": "b6fd8a35e48ddba85a2e8a6d03d7c0823e94987fe07f96c28cd5720ac78083ed",
+      "package_sha256": "34d174d6a53b38c3468f087dc6270cd57c2b8261cd0009e8baf12a3274ed8ec8",
       "app_version_min": "0.1.8"
     },
     {
