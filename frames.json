@@ -24,7 +24,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/calendar.tar.gz",
-      "package_sha256": "8583aeb42a19faab8c50c534663fb9dfb00bce1a8b6a6167a3de27fd7ab25714",
+      "package_sha256": "824a829bcf470988e126d20fecf5358ba09b4971a8b563315ae557d481f0ee78",
       "app_version_min": "0.1.7"
     },
     {
@@ -47,7 +47,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/checklist.tar.gz",
-      "package_sha256": "822161401633a93ffc18eced9aa0092b8dd598ff8cd820b10a4347b1ab84f3f1",
+      "package_sha256": "90f0b130f0764e298739ede391e4d39b1a9ea9cd88de79b87bc6fb850e057416",
       "app_version_min": "0.1.7"
     },
     {
@@ -70,7 +70,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_home.tar.gz",
-      "package_sha256": "e6be11fe764a92181cf214efd669cb1b35caae6b2a8bf2ba917a3e493791ec10",
+      "package_sha256": "6ec4de3b8ac514ea0d7b6a78b0443caa0e785473047abce6b7be9249e41ef11c",
       "app_version_min": "0.1.7"
     },
     {
@@ -93,7 +93,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_library.tar.gz",
-      "package_sha256": "b007c1452a6425f258d46576a5ad49c76cdb9a2b878700020ccd49045f1efa97",
+      "package_sha256": "a3b05f93c5268888ed5a0f3449153c350887d0c3316d36c2608b287ff7c93a7d",
       "app_version_min": "0.1.7"
     },
     {
@@ -116,7 +116,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/discussion_channel.tar.gz",
-      "package_sha256": "24807507c5e9b3d08b7f7464531cd032bc07370a4d550cd8049bb4e98c6fbc3f",
+      "package_sha256": "c2860ff80bb18e44da4f78eddf0636d2ccc778d9f8ce792fc6e43100c560435f",
       "app_version_min": "0.1.7"
     },
     {
@@ -139,7 +139,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/file_folder.tar.gz",
-      "package_sha256": "f019ba606779d4dc9b804295c608f424de5254b56fe7d5c962fe8a64998f4e87",
+      "package_sha256": "4c7d418183da75f946cb1da6b091463d03f60ca35f4079a007372a803f349146",
       "app_version_min": "0.1.7"
     },
     {
@@ -162,7 +162,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_ascii_runner.tar.gz",
-      "package_sha256": "7b97124eaf9a888cef39151bee3c5baa9caf008370b75251b5b26f7dc181ac88",
+      "package_sha256": "1b0609ca51b4a6b8c904ddca22c00984064560dbae86d6b6a66d701bb5250ee8",
       "app_version_min": "0.1.7"
     },
     {
@@ -185,7 +185,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_dice_roller.tar.gz",
-      "package_sha256": "cae1116857bc7c1f08fe7747dfda0a42c8734a0df2948440a36af1c9e6348ed1",
+      "package_sha256": "65b528fc97eaa83d2805f028bad733324190164d0523492b25ba22b82f74fe68",
       "app_version_min": "0.1.7"
     },
     {
@@ -208,7 +208,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_pancake_stacker.tar.gz",
-      "package_sha256": "c37ac5ac0a901b60049472170a6b8acf9961ad2a79e9ef517c631637c5cec41c",
+      "package_sha256": "283bc17a071579cfc5bc18eacee8a3fb3caf80a8de91c767608dc3dd9b074501",
       "app_version_min": "0.1.7"
     },
     {
@@ -234,7 +234,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/garden_gnome.tar.gz",
-      "package_sha256": "7844c2176a5f342cd6e39fb0a071ea43e02e7602e3e46b3a6d790eac832ad0e8",
+      "package_sha256": "c8d2cb90309a5aa20bfa965739aaa13c9b8ffbf8ac72cfe3d7de51b555fdec4e",
       "app_version_min": "0.1.7"
     },
     {
@@ -257,7 +257,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/help_desk.tar.gz",
-      "package_sha256": "858090f55412949c36fc5fcc324b8a1b75e0a86b366366f6a7043f3f6c7eee92",
+      "package_sha256": "dab95fe34df871d1579fb754e7c12b02dccabf1daf74019df30f943ca85fc2c6",
       "app_version_min": "0.1.7"
     },
     {
@@ -283,7 +283,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/market_weather.tar.gz",
-      "package_sha256": "bdc58b4a7942c204e011db35f6eb689c8196513e1acf157a40eac878034c0498",
+      "package_sha256": "86567527664d41d2ca487f0dd01ab8af156bb70d087a79c4af4da023a2e471ce",
       "app_version_min": "0.1.7"
     },
     {
@@ -306,7 +306,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/member_manager.tar.gz",
-      "package_sha256": "6a8636722795dfaf8640fedef56171b9a4892da9898310fcd41467f68bdcf0cc",
+      "package_sha256": "85cc48693c30b4239b1eeeeac86ce1970846b8963dae79f9c4474a27837e127d",
       "app_version_min": "0.1.8"
     },
     {
@@ -329,7 +329,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/member_reachout.tar.gz",
-      "package_sha256": "a83e2416a35b1e4ebc591a02633a3ad6a3d3a138d3361df3350dd6833ae40f42",
+      "package_sha256": "25acc132d888dec2443d62d0aeac2f9c4354c81c76b94fdc2b6e8fd9e0becbc9",
       "app_version_min": "0.1.8"
     },
     {
@@ -352,7 +352,30 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/outpost.tar.gz",
-      "package_sha256": "8f4c06e2b1ab6c4a2fd74c5702ef4ec5cc3bd297e7cdbb5cc8de9844d633e0a9",
+      "package_sha256": "724828422399cbb2beba411b14aa3d7a8e32d08d059d5185fc0a2fe663666a7b",
+      "app_version_min": "0.1.8"
+    },
+    {
+      "kind": "Frames",
+      "id": "roadmap",
+      "name": "Roadmap",
+      "description": "A simple, robust project roadmapping tool \u2014 one roadmap per placement. Set a project name, overview, and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in-progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Collapsed milestone headers still show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days-remaining and overdue color-coding. A milestone can only be marked done once all its tasks are complete. Everything is stored in a lightweight per-placement SQLite database on the host and pushed live to every viewer; non-members get a read-only view.",
+      "icon": "",
+      "modified_at": "2026-07-08T00:05:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 720,
+        "default_height_px": 640,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": []
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roadmap.tar.gz",
+      "package_sha256": "2d31abbbee92491a7795edad72c5fd4468dced246b62d730ded5285faf5f1249",
       "app_version_min": "0.1.8"
     },
     {
@@ -375,7 +398,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roundtable.tar.gz",
-      "package_sha256": "4b2c329a885dfa8354a5134bd7be24a302c99268886653c6df923bdc004e75fb",
+      "package_sha256": "8ea3cdd15eafd484dc109fd5b67201283fcc6bec9aa333bd1cfc6d32db7ee1a2",
       "app_version_min": "0.1.7"
     },
     {
@@ -398,7 +421,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/seamdeck.tar.gz",
-      "package_sha256": "34d174d6a53b38c3468f087dc6270cd57c2b8261cd0009e8baf12a3274ed8ec8",
+      "package_sha256": "702eada7381fec7b3800016f81165d70ba6889d9579f018c4ca49daefc19c3e3",
       "app_version_min": "0.1.8"
     },
     {
@@ -421,7 +444,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/slideshow.tar.gz",
-      "package_sha256": "4bef2c7fab369d20c4bf1812f6af03c545dfe9c935a494d3baaebd108b40e56a",
+      "package_sha256": "23d972ed55bb781c36f9456aab7dc265be936fd44d79a6633fdf14e5e7fa1940",
       "app_version_min": "0.1.7"
     },
     {
@@ -468,7 +491,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/space_radio.tar.gz",
-      "package_sha256": "211a9b3dcf0f5f997800ebd6f314e1a285f25467b6264468097dbc08914d12c8",
+      "package_sha256": "957392ec6fae132bce205aab19179ce66273e1656af7996b63511b6cbb9fd545",
       "app_version_min": "0.1.8"
     },
     {
@@ -491,7 +514,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/watercolor_studio.tar.gz",
-      "package_sha256": "8ef1cf57dfa52a38acac75483516ce6c1227e104504abac5f6e766c602e695d3"
+      "package_sha256": "fdcc48a89b0c6aa8d2d6da5bfdb91bfc1912632936a28443652783f8e41eeea1"
     },
     {
       "kind": "Frames",
@@ -516,7 +539,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/weather_api.tar.gz",
-      "package_sha256": "7029697ae40f286740fe00278c05eda07d0057c8b9604a3d02158c72bdfa419b",
+      "package_sha256": "56b56d71258f3877755ca195d74756fbfb8a7553cd58d43f2f588fc38a69406b",
       "app_version_min": "0.1.7"
     }
   ]

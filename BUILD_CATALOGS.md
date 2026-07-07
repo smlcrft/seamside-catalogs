@@ -12,17 +12,20 @@ Both manifests are **generated artifacts**. Edit the source in [`frames/`](frame
 ## Quick start
 
 ```sh
+python3 -m pip install -r scripts/requirements.txt   # one-time: installs Zopfli (see "Reproducible packages")
 python3 scripts/build_catalogs.py
 git add frames.json capabilities.json packages/ frames/ capabilities/
 git commit -m "rebuild catalogs"
 git push
 ```
 
+The build depends on **Zopfli** (pinned in [`scripts/requirements.txt`](scripts/requirements.txt)); it exits with an install hint if the package is missing.
+
 The build script:
 
 1. Walks [`frames/`](frames/). For each subdirectory that has a `frame.json` and does not start with `_` or `.`:
    - **Rejects (excludes from the manifest + exits non-zero) any frame that carries a top-level `data/` or `_todos/` folder.** These are user- or author-specific — `data/` is per-host runtime state and `_todos/` is author scratch — and must never be checked into a catalog entry. A catalog frame ships only its code; the installer provisions `data/` per host. If the build stops here, delete the offending folder from the frame source and rebuild.
-   - Builds a deterministic gzipped tarball at `packages/frames/<dir_id>.tar.gz`. Mtimes, uids, gids, and gzip header timestamps are all zeroed so rebuilds with no source changes produce byte-identical artifacts (stable sha256 across rebuilds).
+   - Builds a deterministic gzipped tarball at `packages/frames/<dir_id>.tar.gz`. Mtimes, uids, gids, and gzip header timestamps are all zeroed, and the gzip step uses **Zopfli** (not stdlib gzip) so the compressed bytes don't vary by platform — rebuilds with no source changes produce byte-identical artifacts and a stable sha256 **on any machine** (see [Reproducible packages](#reproducible-packages)).
    - Excludes `data/`, `.DS_Store`, `__pycache__`, and `.git` from each tarball. `data/` is per-host runtime state and is preserved separately by the Tandem installer.
    - Computes the sha256 of the tarball.
    - Reads `frame.json` and emits an entry in `frames.json` with `name`, `description`, `icon`, `modified_at`, the lightweight `frame_preview` (frame_type, default sizes, capability deps), a `package_url` pointing at the GitHub raw URL, and the recorded sha256.
@@ -42,6 +45,16 @@ The Tandem client can fetch the manifest from any HTTPS URL. The default URLs as
 If you fork this repo to another host, change `BASE_URL` near the top of [`scripts/build_catalogs.py`](scripts/build_catalogs.py) and rebuild. Both the manifest URL and every embedded `package_url` are derived from that single constant.
 
 A Tandem user installs the catalog by entering the `frames.json` URL into the **Caps panel → Catalogs → Frame catalog URLs** (comma-separated, multiple allowed). The client then fetches the manifest, surfaces every item under Conjure, and downloads the matching `.tar.gz` on install — verifying the recorded sha256 before extracting.
+
+## Reproducible packages
+
+Every package's integrity is a `sha256` of its `.tar.gz`, so the build must produce **byte-identical** tarballs from identical source — otherwise every rebuild rewrites unrelated packages and their hashes for no real change.
+
+The tar layer is already normalized (entry `mtime`/`uid`/`gid` zeroed, sorted entries, `data/`·`.DS_Store`·`__pycache__`·`.git` excluded). The subtle part is the **gzip** layer: the Python stdlib `gzip`/`zlib` deflate output is **not stable across zlib versions** — it changed between zlib 1.2.x and 1.3, and passing explicit `compresslevel`/`memLevel`/`strategy` does not reproduce old output. So the same frame compressed on macOS (one zlib) vs Linux/CI (another zlib) yields different bytes and a different sha256, even though nothing in the frame changed.
+
+To make the artifact independent of the host toolchain, the build compresses with **[Zopfli](https://github.com/google/zopfli)** — a deterministic, from-scratch deflate whose output depends only on the input, not on the platform's zlib. It also compresses slightly smaller than zlib. The dependency is pinned in [`scripts/requirements.txt`](scripts/requirements.txt) (`zopfli==0.4.3`); pinning the version keeps the bytes stable over time as well as across machines. `build_catalogs.py` hard-errors (rather than silently falling back to stdlib gzip) if Zopfli isn't installed, so a rebuild can't accidentally reintroduce platform-dependent output.
+
+If you ever bump the pinned Zopfli version and its output differs, that's a one-time rebuild of every package; commit it deliberately.
 
 ## Manifest schema (wire format)
 

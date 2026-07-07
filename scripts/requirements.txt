@@ -1,0 +1,8 @@
+# Build dependencies for scripts/build_catalogs.py
+#
+# Zopfli is a deterministic deflate implementation. It's used instead of the
+# Python stdlib gzip so that packaged frame tarballs (.tar.gz) are byte-identical
+# no matter which platform or zlib version builds them — the stdlib gzip output
+# drifts between zlib releases, which changes each package's sha256 for no real
+# content change. The version is pinned so the bytes stay stable over time too.
+zopfli==0.4.3

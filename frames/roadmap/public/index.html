@@ -1,0 +1,882 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Roadmap</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c4); }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      max-width: 860px; margin: 0 auto; min-height: 100%;
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-lg));
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+    }
+
+    /* ---- Header / titlebar ---------------------------------------------------------- */
+    header { display: flex; flex-direction: column; gap: var(--os-sp-sm); }
+    .titlebar { display: flex; align-items: center; gap: var(--os-sp-sm); }
+    .titlebar > .flag { font-size: 22px; color: var(--ch); line-height: 1; }
+    .proj { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .proj-name, .proj-name input {
+      font-size: var(--os-fs-xl); font-weight: var(--os-weight-semibold);
+      letter-spacing: -0.01em; color: var(--os-text);
+    }
+    .proj-name input {
+      width: 100%; font-family: inherit; background: transparent; border: 0;
+      border-radius: var(--os-radius-sm); padding: 1px 4px; margin-left: -4px;
+      color: inherit; outline: none;
+    }
+    .proj-name input:focus, .proj-name input:hover { background: var(--os-bg-surface); }
+    .proj-name .placeholder { color: var(--os-text-muted); }
+    .mode {
+      flex: 0 0 auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-family: var(--os-font-mono); text-transform: lowercase; white-space: nowrap;
+    }
+    .gear {
+      flex: 0 0 auto; background: none; border: 0; cursor: pointer; padding: 4px;
+      font-size: 18px; line-height: 0; color: var(--os-text-subtle); border-radius: var(--os-radius-sm);
+      transition: color 150ms, background 150ms;
+    }
+    .gear:hover { color: var(--ch); background: var(--os-bg-subtle); }
+    .gear:active { transform: scale(0.92); }
+
+    .links { display: flex; flex-wrap: wrap; gap: var(--os-sp-xs); }
+    .link-chip {
+      display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+      font-size: var(--os-fs-xs); color: var(--os-text-secondary);
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-full); padding: 3px 9px 3px 8px;
+      transition: border-color 150ms, color 150ms, background 150ms;
+    }
+    .link-chip:hover { color: var(--ch); border-color: var(--ch); background: var(--os-bg-elevated); }
+    .link-chip:active { transform: translateY(0.5px); }
+    .link-chip i { font-size: 13px; line-height: 0; }
+
+    /* ---- Tabs ----------------------------------------------------------------------- */
+    .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--os-border-color-subtle); }
+    .tab {
+      background: none; border: 0; cursor: pointer; padding: 6px 10px 8px;
+      font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium); color: var(--os-text-muted);
+      display: inline-flex; align-items: center; gap: 5px; position: relative;
+      border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 150ms;
+    }
+    .tab i { font-size: 15px; line-height: 0; }
+    .tab:hover { color: var(--os-text-secondary); }
+    .tab.on { color: var(--ch); }
+
+    /* ---- Milestone card ------------------------------------------------------------- */
+    .lane { display: flex; flex-direction: column; gap: var(--os-sp-sm); }
+    .ms {
+      border: 1px solid var(--os-border-color-subtle); border-radius: var(--os-radius-md);
+      background: var(--os-bg-surface); overflow: hidden;
+    }
+    .ms.bucket { background: var(--os-bg-inset); }
+    .ms.done { opacity: 0.72; }
+    .ms.drop-into { border-color: var(--ch); box-shadow: inset 0 0 0 1px var(--ch); }
+
+    .ms-head {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      padding: var(--os-sp-xs) var(--os-sp-sm); cursor: pointer; user-select: none;
+    }
+    .ms-head:hover { background: var(--os-bg-subtle); }
+    .chev {
+      flex: 0 0 auto; color: var(--os-text-subtle); font-size: 14px; line-height: 0;
+      transition: transform 160ms var(--os-ease-spring, ease); display: flex;
+    }
+    .chev.open { transform: rotate(90deg); }
+    .ms-icon { flex: 0 0 auto; color: var(--os-text-subtle); font-size: 15px; line-height: 0; }
+    .ms.bucket .ms-icon { color: var(--os-text-muted); }
+
+    .ms-title { flex: 0 1 auto; min-width: 0; font-size: var(--os-fs-md); font-weight: var(--os-weight-medium); }
+    .ms-title.static { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ms-title input {
+      font: inherit; font-weight: var(--os-weight-medium); background: transparent; border: 0;
+      border-radius: var(--os-radius-sm); padding: 1px 4px; margin: -1px -4px; color: inherit;
+      outline: none; width: 100%; min-width: 8ch;
+    }
+    .ms-title input:hover, .ms-title input:focus { background: var(--os-bg-elevated); }
+
+    .ms-spacer { flex: 1 1 auto; }
+
+    .metrics { flex: 0 0 auto; display: flex; align-items: center; gap: 9px; font-family: var(--os-font-mono); }
+    .metric { display: inline-flex; align-items: center; gap: 3px; font-size: var(--os-fs-2xs); color: var(--os-text-muted); }
+    .pip { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+    .pip.u { border: 1.5px solid var(--os-text-subtle); }
+    .pip.p { background: var(--ch); }
+    .pip.c { background: var(--os-cSuccess); }
+    .burn { display: inline-flex; align-items: center; gap: 3px; font-size: var(--os-fs-2xs); color: var(--os-text-subtle); }
+    .burn i { font-size: 12px; line-height: 0; color: var(--os-cWarn); }
+
+    .chip {
+      flex: 0 0 auto; font-size: var(--os-fs-2xs); font-family: var(--os-font-mono);
+      padding: 2px 7px; border-radius: var(--os-radius-full); white-space: nowrap;
+      border: 1px solid transparent;
+    }
+    .chip.soon { color: var(--os-cWarn); background: var(--os-cWarn-muted); }
+    .chip.over { color: var(--os-cError); background: var(--os-cError-muted); }
+    .chip.calm { color: var(--os-text-muted); background: var(--os-bg-inset); }
+    .chip.done { color: var(--os-cSuccess); background: var(--os-cSuccess-muted); }
+
+    .ms-date {
+      flex: 0 0 auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-family: var(--os-font-mono);
+    }
+    .ms-date input {
+      font: inherit; font-family: var(--os-font-mono); font-size: var(--os-fs-2xs);
+      color: var(--os-text-secondary); background: var(--os-bg-inset);
+      border: 1px solid var(--os-border-color-subtle); border-radius: var(--os-radius-sm);
+      padding: 1px 4px; outline: none; color-scheme: light;
+    }
+    .ms-date input:hover { border-color: var(--os-border-color); }
+
+    .ms-check {
+      flex: 0 0 auto; background: none; border: 0; padding: 2px; cursor: pointer;
+      font-size: 19px; line-height: 0; display: flex; color: var(--os-text-subtle);
+      transition: transform 120ms cubic-bezier(0.22,1,0.36,1), color 150ms;
+    }
+    .ms-check:hover:not(:disabled) { color: var(--os-cSuccess); }
+    .ms-check:active:not(:disabled) { transform: scale(0.88); }
+    .ms-check.on { color: var(--os-cSuccess); }
+    .ms-check.locked { opacity: 0.4; cursor: default; }
+    .ms-check.locked:hover { color: var(--os-text-subtle); }
+    .ms-del {
+      flex: 0 0 auto; background: none; border: 0; padding: 3px; cursor: pointer;
+      font-size: 15px; line-height: 0; display: flex; color: var(--os-text-subtle);
+      opacity: 0; transition: opacity 150ms, color 150ms; border-radius: var(--os-radius-sm);
+    }
+    .ms:hover .ms-del { opacity: 0.85; }
+    .ms-del:hover { color: var(--os-cError); }
+    .ms-del.armed { opacity: 1; color: var(--os-cError); background: var(--os-cError-muted); }
+
+    /* ---- Task rows ------------------------------------------------------------------ */
+    .tasks {
+      display: flex; flex-direction: column; gap: 1px;
+      padding: 2px var(--os-sp-sm) var(--os-sp-xs); border-top: 1px solid var(--os-border-color-subtle);
+    }
+    .tasks.empty-drop { min-height: 30px; }
+    .task {
+      display: flex; align-items: center; gap: 6px; padding: 2px 3px;
+      border-radius: var(--os-radius-sm); transition: background 120ms; min-width: 0;
+      user-select: none; -webkit-user-select: none;   /* mousedown-drag must not start a text selection */
+    }
+    .task:hover { background: var(--os-bg-subtle); }
+    .task.dragging { opacity: 0.35; }
+    /* Placement helper: a flat channel line, never a rounded corner. */
+    .task.drop-target { box-shadow: inset 0 2px 0 var(--ch); border-radius: 0; }
+    .task.drop-end { box-shadow: inset 0 -2px 0 var(--ch); border-radius: 0; }
+    .tasks.drop-empty { box-shadow: inset 0 2px 0 var(--ch); }
+
+    .grip {
+      flex: 0 0 auto; cursor: grab; color: var(--os-text-subtle); opacity: 0;
+      transition: opacity 120ms; font-size: 14px; line-height: 0; display: flex; touch-action: none;
+      -webkit-user-drag: element;   /* WebKit: mark the handle as the drag source */
+    }
+    .task:hover .grip { opacity: 0.9; }
+    .grip:active { cursor: grabbing; }
+    .read-only .grip { display: none; }
+
+    .tstatus {
+      flex: 0 0 auto; background: none; border: 0; padding: 1px; cursor: pointer;
+      font-size: 17px; line-height: 0; display: flex; color: var(--os-text-subtle);
+      transition: transform 120ms cubic-bezier(0.22,1,0.36,1), filter 150ms;
+    }
+    .tstatus:hover:not(:disabled) { filter: brightness(1.12); }
+    .tstatus:active:not(:disabled) { transform: scale(0.86); }
+    .tstatus:disabled { cursor: default; }
+    .tstatus.s1 { color: var(--ch); }
+    .tstatus.s2 { color: var(--os-cSuccess); }
+
+    .ttext { flex: 1 1 auto; min-width: 0; font-size: var(--os-fs-sm); line-height: 1.35; }
+    .ttext.s1 { color: var(--os-text); }
+    .ttext.s2 { color: var(--os-text-muted); }
+    .ttext.s2 input, .ttext.s2 .static { text-decoration: line-through; }
+    .ttext input {
+      width: 100%; font: inherit; color: inherit; background: transparent; border: 0;
+      border-radius: var(--os-radius-sm); padding: 1px 3px; margin: -1px -3px; outline: none;
+      user-select: text; -webkit-user-select: text;
+    }
+    .ttext input:focus { background: var(--os-bg-elevated); box-shadow: 0 0 0 1.5px var(--ch); }
+    .ttext .static { padding: 1px 3px; word-break: break-word; user-select: text; -webkit-user-select: text; }
+    .tby { font-size: var(--os-fs-2xs); color: var(--os-text-subtle); white-space: nowrap; flex: 0 0 auto; }
+    .tby.s1 { color: var(--ch); }
+
+    .ttrash {
+      flex: 0 0 auto; background: none; border: 0; cursor: pointer; padding: 2px;
+      font-size: 13px; line-height: 0; color: var(--os-text-subtle); opacity: 0;
+      transition: opacity 120ms, color 150ms; display: flex; border-radius: var(--os-radius-sm);
+    }
+    .task:hover .ttrash { opacity: 0.8; }
+    .ttrash:hover { color: var(--os-cError); }
+    .ttrash.armed { opacity: 1; color: var(--os-cError); }
+    .read-only .ttrash, .read-only .tstatus { pointer-events: none; }
+
+    .task-new {
+      display: flex; align-items: center; gap: 6px; padding: 3px; margin-top: 1px;
+    }
+    .task-new i { color: var(--os-text-subtle); font-size: 15px; line-height: 0; }
+    .task-new input {
+      flex: 1; font: inherit; font-size: var(--os-fs-sm); color: var(--os-text);
+      background: transparent; border: 0; outline: none; padding: 1px 3px;
+    }
+    .task-new input::placeholder { color: var(--os-text-muted); }
+
+    /* ---- Add milestone / show completed / dividers ---------------------------------- */
+    .row-actions { display: flex; align-items: center; gap: var(--os-sp-sm); flex-wrap: wrap; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+      font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium); color: var(--os-text-secondary);
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-md); padding: 5px 11px; transition: border-color 150ms, color 150ms;
+    }
+    .btn:hover { color: var(--ch); border-color: var(--ch); }
+    .btn:active { transform: translateY(0.5px); }
+    .btn i { font-size: 15px; line-height: 0; }
+    .btn.ghost { background: none; color: var(--os-text-muted); }
+
+    .lane-label {
+      font-size: var(--os-fs-2xs); text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--os-text-subtle); font-weight: var(--os-weight-medium); margin: var(--os-sp-xs) 2px -2px;
+    }
+    .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-lg); }
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: color-mix(in srgb, var(--os-c4-muted) 30%, transparent);
+      border: 1px solid var(--os-c4-muted); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+    }
+    .banner i { color: var(--ch); font-size: 16px; }
+
+    /* ---- Timeline ------------------------------------------------------------------- */
+    .timeline { display: flex; flex-direction: column; }
+    .tl-row { display: flex; gap: var(--os-sp-sm); }
+    .tl-rail { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; width: 18px; }
+    .tl-node {
+      width: 11px; height: 11px; border-radius: 50%; margin-top: 4px; flex: 0 0 auto;
+      background: var(--os-bg); border: 2px solid var(--ch);
+    }
+    .tl-node.over { border-color: var(--os-cError); background: var(--os-cError-muted); }
+    .tl-node.done { border-color: var(--os-text-subtle); background: var(--os-text-subtle); }
+    .tl-line { flex: 1 1 auto; width: 2px; background: var(--os-border-color-subtle); margin: 3px 0; min-height: 8px; }
+    .tl-card {
+      flex: 1 1 auto; min-width: 0; padding: 0 0 var(--os-sp-md); display: flex; flex-direction: column; gap: 5px;
+    }
+    .tl-card.done { opacity: 0.6; }
+    .tl-head { display: flex; align-items: baseline; gap: var(--os-sp-sm); flex-wrap: wrap; }
+    .tl-date { font-size: var(--os-fs-2xs); font-family: var(--os-font-mono); color: var(--os-text-muted); flex: 0 0 auto; }
+    .tl-title { font-size: var(--os-fs-md); font-weight: var(--os-weight-medium); flex: 0 1 auto; min-width: 0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tl-sub { display: flex; align-items: center; gap: var(--os-sp-md); flex-wrap: wrap; }
+    .bar {
+      flex: 1 1 140px; max-width: 260px; height: 7px; border-radius: var(--os-radius-full);
+      overflow: hidden; display: flex; background: var(--os-bg-inset); min-width: 90px;
+    }
+    .bar .seg { height: 100%; }
+    .bar .seg.u { background: color-mix(in srgb, var(--os-text-subtle) 45%, transparent); }
+    .bar .seg.p { background: var(--ch); }
+    .bar .seg.c { background: var(--os-cSuccess); }
+    .tl-counts { display: flex; align-items: center; gap: 9px; }
+
+    /* ---- Settings modal ------------------------------------------------------------- */
+    .set-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--os-sp-md); }
+    .set-field > label { font-size: var(--os-fs-xs); font-weight: var(--os-weight-medium); color: var(--os-text-secondary); }
+    .set-input {
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text); background: var(--os-bg);
+      border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
+      padding: 6px 9px; outline: none; width: 100%;
+    }
+    .set-input:focus { border-color: var(--ch); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ch) 25%, transparent); }
+    textarea.set-input { resize: vertical; min-height: 52px; line-height: 1.4; }
+    .swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+    .swatch { width: 22px; height: 22px; border-radius: var(--os-radius-full); border: 2px solid transparent; cursor: pointer; padding: 0; }
+    .swatch.on { border-color: var(--os-text); }
+    .swatch:active { transform: scale(0.9); }
+    .link-edit { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+    .link-edit .set-input { flex: 1 1 auto; }
+    .link-edit .set-input.lbl { flex: 0 0 34%; }
+    .link-edit button {
+      flex: 0 0 auto; background: none; border: 0; cursor: pointer; color: var(--os-text-subtle);
+      font-size: 16px; line-height: 0; padding: 3px; display: flex; border-radius: var(--os-radius-sm);
+    }
+    .link-edit button:hover { color: var(--os-cError); }
+    .hint { font-size: var(--os-fs-2xs); color: var(--os-text-muted); margin-top: 2px; }
+
+    /* Squircle toggle (track radius 8 / thumb radius 5). */
+    .toggle-row { display: flex; align-items: flex-start; gap: 10px; }
+    .toggle-text { font-size: var(--os-fs-sm); color: var(--os-text-secondary); line-height: 1.4; }
+    .switch {
+      position: relative; flex: 0 0 auto; width: 38px; height: 22px; padding: 0; margin-top: 1px;
+      border-radius: 8px; border: 1px solid var(--os-border-color); background: var(--os-bg-inset);
+      cursor: pointer; transition: background 160ms, border-color 160ms;
+    }
+    .switch.on { background: var(--ch); border-color: var(--ch); }
+    .switch:active { transform: scale(0.96); }
+    .switch .knob {
+      position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 5px;
+      background: var(--os-bg-surface); box-shadow: 0 1px 2px rgba(0,0,0,0.18);
+      transition: left 160ms cubic-bezier(0.22,1,0.36,1), background 160ms;
+    }
+    .switch.on .knob { left: 18px; background: var(--os-bg); }
+
+    /* Private (public viewing off) message for non-members. */
+    .private-msg {
+      margin: auto; display: flex; flex-direction: column; align-items: center; gap: 8px;
+      text-align: center; padding: var(--os-sp-xl);
+    }
+    .private-msg > i { font-size: 34px; color: var(--os-text-subtle); line-height: 0; }
+    .private-title { font-size: var(--os-fs-lg); font-weight: var(--os-weight-medium); color: var(--os-text-secondary); }
+    .private-msg .hint { max-width: 34ch; }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import {
+      frame, html, render, useState, useEffect, useRef, useMemo,
+      useFramePush, Modal, applyChannel,
+    } from "/lib/js/framelib.js";
+
+    const DAY = 86400000;
+    const NEXT = { 0: 1, 1: 2, 2: 0 };
+    const STATUS_ICON = ["ph-circle", "ph-circle-half", "ph-check-circle"];
+    const STATUS_LABEL = ["unstarted", "in progress", "complete"];
+
+    // ---- date helpers -------------------------------------------------------------------
+    const pad = (n) => String(n).padStart(2, "0");
+    function isoDate(ms) {
+      if (!ms) return "";
+      const d = new Date(ms);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }
+    function fmtDate(ms) {
+      if (!ms) return "";
+      const d = new Date(ms);
+      const now = new Date();
+      const sameYear = d.getFullYear() === now.getFullYear();
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
+    }
+    function dateToMs(str) {
+      if (!str) return null;
+      const t = new Date(str + "T12:00:00").getTime();
+      return Number.isFinite(t) ? t : null;
+    }
+    function daysLeft(target) {
+      if (!target) return null;
+      return Math.ceil((target - Date.now()) / DAY);
+    }
+
+    // ---- metrics ------------------------------------------------------------------------
+    function metricsFor(tasks) {
+      let u = 0, p = 0, c = 0, earliest = Infinity;
+      for (const t of tasks) {
+        if (t.state === 2) c++; else if (t.state === 1) p++; else u++;
+        if (t.created_ms && t.created_ms < earliest) earliest = t.created_ms;
+      }
+      const total = u + p + c;
+      const daysActive = earliest === Infinity ? 0 : Math.max(1, (Date.now() - earliest) / DAY);
+      const burn = daysActive ? c / daysActive : 0;
+      return { u, p, c, total, burn, allDone: u === 0 && p === 0 };
+    }
+
+    // Chip describing time-to-deadline (or completion).
+    function DeadlineChip({ ms, completed }) {
+      if (completed) return html`<span class="chip done">done</span>`;
+      if (!ms) return null;
+      const d = daysLeft(ms);
+      if (d < 0) return html`<span class="chip over">${-d}d over</span>`;
+      if (d === 0) return html`<span class="chip soon">due today</span>`;
+      if (d <= 3) return html`<span class="chip soon">${d}d left</span>`;
+      return html`<span class="chip calm">in ${d}d</span>`;
+    }
+
+    function Metrics({ m }) {
+      return html`
+        <span class="metrics">
+          <span class="metric" title="unstarted"><span class="pip u"></span>${m.u}</span>
+          <span class="metric" title="in progress"><span class="pip p"></span>${m.p}</span>
+          <span class="metric" title="complete"><span class="pip c"></span>${m.c}</span>
+          ${m.c > 0 ? html`<span class="burn" title="tasks completed per day">
+            <i class="ph-light ph-fire"></i>${m.burn.toFixed(1)}/d</span>` : null}
+        </span>`;
+    }
+
+    // Find the row the cursor sits above, for drop positioning (scoped to one list).
+    function dragAfter(container, y) {
+      const rows = [...container.querySelectorAll(".task:not(.dragging)")];
+      let closest = null, closestOffset = Number.NEGATIVE_INFINITY;
+      for (const row of rows) {
+        const box = row.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closestOffset) { closestOffset = offset; closest = row; }
+      }
+      return closest;
+    }
+
+    function App() {
+      const [me, setMe] = useState(null);
+      const [meta, setMeta] = useState({ name: "", overview: "", accent: "c4", links: [], public_view: false });
+      const [milestones, setMilestones] = useState([]);
+      const [tasks, setTasks] = useState([]);
+      const [tab, setTab] = useState("board");
+      const [collapsed, setCollapsed] = useState(() => new Set());
+      const [showDone, setShowDone] = useState(false);
+      const [settingsOpen, setSettingsOpen] = useState(false);
+      const [addingMs, setAddingMs] = useState(false);
+      const [msDraft, setMsDraft] = useState({ title: "", date: "" });
+      const [taskDraft, setTaskDraft] = useState({});   // milestone_id -> text
+      const [armedMs, setArmedMs] = useState(null);
+      const [armedTask, setArmedTask] = useState(null);
+      const [isPrivate, setIsPrivate] = useState(false);
+      const [loaded, setLoaded] = useState(false);
+
+      const isEditor = !!me?.is_sfi_editor;
+
+      function setAll(snap) {
+        if (!snap) return;
+        if (snap.meta) setMeta(snap.meta);
+        if (snap.milestones) setMilestones(snap.milestones);
+        if (snap.tasks) setTasks(snap.tasks);
+      }
+      async function refresh() {
+        const snap = await frame.api("api/state").catch(() => null);
+        setLoaded(true);
+        if (snap && snap.private) { setIsPrivate(true); return; }
+        setIsPrivate(false);
+        setAll(snap);
+      }
+      useEffect(() => {
+        frame.api("api/whoami").then(setMe).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({ roadmap_changed: refresh });
+      useEffect(() => { applyChannel(document.body, "var(--os-" + (meta.accent || "c4") + ")"); }, [meta.accent]);
+
+      // group tasks by milestone
+      const byMs = useMemo(() => {
+        const map = new Map();
+        for (const t of tasks) {
+          if (!map.has(t.milestone_id)) map.set(t.milestone_id, []);
+          map.get(t.milestone_id).push(t);
+        }
+        for (const list of map.values()) list.sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+        return map;
+      }, [tasks]);
+
+      const real = milestones.filter((m) => m.kind === "milestone");
+      const buckets = ["backburner", "maybelater"].map((k) => milestones.find((m) => m.kind === k)).filter(Boolean);
+      const byTarget = (a, b) => (a.target_ms ?? Infinity) - (b.target_ms ?? Infinity) || a.sort_order - b.sort_order;
+      const active = real.filter((m) => !m.completed).sort(byTarget);
+      const done = real.filter((m) => m.completed).sort(byTarget);
+
+      // ---- mutations --------------------------------------------------------------------
+      const call = (path, body, method) => frame.api(path, body ?? {}, method).then(setAll);
+      async function saveMeta(patch) { await call("api/settings", patch); }
+      async function addTask(mid) {
+        const text = (taskDraft[mid] || "").trim();
+        if (!text) return;
+        setTaskDraft({ ...taskDraft, [mid]: "" });
+        await call("api/task/add", { milestone_id: mid, text }).catch(() => {});
+      }
+      async function cycleTask(t) {
+        if (!isEditor) return;
+        const next = NEXT[t.state];
+        setTasks(tasks.map((x) => x.id === t.id
+          ? { ...x, state: next, completed_ms: next === 2 ? Date.now() : 0,
+              actor_name: next === 0 ? "" : (me.user_name || "you") }
+          : x));
+        await call("api/task/" + t.id, { state: next }).catch(refresh);
+      }
+      async function saveTaskText(t, text) {
+        const v = text.trim();
+        if (v === t.text) return;
+        await call("api/task/" + t.id, { text: v }).catch(() => {});
+      }
+      async function delTask(t) {
+        if (armedTask !== t.id) { setArmedTask(t.id); setTimeout(() => setArmedTask((a) => a === t.id ? null : a), 2500); return; }
+        setArmedTask(null);
+        setTasks(tasks.filter((x) => x.id !== t.id));
+        await call("api/task/delete/" + t.id, {}, "POST").catch(refresh);
+      }
+      async function addMilestone() {
+        const title = msDraft.title.trim();
+        if (!title) { setAddingMs(false); return; }
+        setAddingMs(false); setMsDraft({ title: "", date: "" });
+        await call("api/milestone/add", { title, target_ms: dateToMs(msDraft.date) }).catch(() => {});
+      }
+      async function toggleMsDone(m, allDone) {
+        if (m.completed) return call("api/milestone/" + m.id, { completed: 0 });
+        if (!allDone) { await frame.alert("All tasks must be done before completing a milestone.", { title: "Not done yet" }); return; }
+        try { await call("api/milestone/" + m.id, { completed: 1 }); }
+        catch (e) {
+          let msg = "Couldn't complete this milestone.";
+          try { msg = JSON.parse(e?.body || "{}").error || msg; } catch (_) { /* keep default */ }
+          await frame.alert(msg, { title: "Hold on" }); refresh();
+        }
+      }
+      async function delMilestone(m, count) {
+        if (armedMs !== m.id) { setArmedMs(m.id); setTimeout(() => setArmedMs((a) => a === m.id ? null : a), 2500); return; }
+        setArmedMs(null);
+        if (count > 0 && !(await frame.confirm(`Delete “${m.title}” and its ${count} task${count === 1 ? "" : "s"}?`, { danger: true, okLabel: "Delete" }))) return;
+        await call("api/milestone/delete/" + m.id, {}, "POST").catch(() => {});
+      }
+
+      // ---- drag & drop ------------------------------------------------------------------
+      const dragTask = useRef(null);
+      function onDragOver(e, mid) {
+        if (dragTask.current == null) return;
+        e.preventDefault();
+        const container = e.currentTarget;
+        e.dataTransfer.dropEffect = "move";
+        // Only ever one list highlighted: wipe every hint, then paint this container.
+        clearDropHints();
+        container.closest(".ms")?.classList.add("drop-into");
+        const rows = [...container.querySelectorAll(".task:not(.dragging)")];
+        if (rows.length === 0) { container.classList.add("drop-empty"); return; }
+        const after = dragAfter(container, e.clientY);
+        if (after) after.classList.add("drop-target");           // line above the hovered row
+        else rows[rows.length - 1].classList.add("drop-end");    // line below the last row
+      }
+      function onDragLeave(e) {
+        const container = e.currentTarget;
+        // dragleave also fires when crossing INTO a child — ignore those.
+        if (container.contains(e.relatedTarget)) return;
+        container.closest(".ms")?.classList.remove("drop-into");
+        container.classList.remove("drop-empty");
+        container.querySelectorAll(".drop-target, .drop-end").forEach((n) => n.classList.remove("drop-target", "drop-end"));
+      }
+      function clearDropHints() {
+        document.querySelectorAll(".drop-into").forEach((n) => n.classList.remove("drop-into"));
+        document.querySelectorAll(".drop-empty").forEach((n) => n.classList.remove("drop-empty"));
+        document.querySelectorAll(".drop-target, .drop-end").forEach((n) => n.classList.remove("drop-target", "drop-end"));
+      }
+      async function onDrop(e, destMid) {
+        if (dragTask.current == null) return;
+        e.preventDefault();
+        const container = e.currentTarget;
+        const after = dragAfter(container, e.clientY);
+        const afterId = after ? Number(after.dataset.id) : null;
+        const dragId = dragTask.current;
+        clearDropHints();
+        const destIds = (byMs.get(destMid) || []).map((t) => t.id).filter((id) => id !== dragId);
+        const to = afterId == null ? destIds.length : destIds.indexOf(afterId);
+        destIds.splice(to < 0 ? destIds.length : to, 0, dragId);
+        // optimistic: reassign the dragged task locally
+        setTasks(tasks.map((t) => t.id === dragId ? { ...t, milestone_id: destMid } : t));
+        await call("api/tasks/reorder", { milestone_id: destMid, ids: destIds }).catch(refresh);
+      }
+
+      function toggleCollapse(id) {
+        const s = new Set(collapsed);
+        s.has(id) ? s.delete(id) : s.add(id);
+        setCollapsed(s);
+      }
+
+      if (!me || !loaded) return html`<div></div>`;
+
+      // Non-members with public viewing turned off (the default) see only this.
+      if (isPrivate) {
+        return html`
+          <main class="read-only">
+            <div class="private-msg">
+              <i class="ph-light ph-lock-simple"></i>
+              <div class="private-title">This roadmap is private</div>
+              <div class="hint">Ask a member of this space to share access with you.</div>
+            </div>
+          </main>`;
+      }
+
+      const mode = isEditor ? (me.is_owner ? "editor · owner" : "editor")
+        : me.is_sfi_member ? "viewer · read-only"
+        : (me.is_anon ? "anonymous · read-only" : "read-only");
+
+      // ---- milestone / bucket card ------------------------------------------------------
+      function MilestoneCard(m, opts = {}) {
+        const list = byMs.get(m.id) || [];
+        const mm = metricsFor(list);
+        const isBucket = m.kind !== "milestone";
+        const open = !collapsed.has(m.id);
+        const canComplete = !isBucket && (mm.total === 0 || mm.allDone);
+        return html`
+          <div class=${"ms" + (isBucket ? " bucket" : "") + (m.completed ? " done" : "")} key=${m.id}>
+            <div class="ms-head" onClick=${() => toggleCollapse(m.id)}>
+              <span class=${"chev" + (open ? " open" : "")}><i class="ph-light ph-caret-right"></i></span>
+              ${isBucket ? html`<i class=${"ms-icon ph-light " + (m.kind === "backburner" ? "ph-coffee" : "ph-lightbulb")}></i>` : null}
+              ${isBucket
+                ? html`<span class="ms-title static">${m.title}</span>`
+                : (isEditor
+                  ? html`<span class="ms-title"><input value=${m.title} maxlength="200"
+                      onClick=${(e) => e.stopPropagation()}
+                      onBlur=${(e) => { const v = e.target.value.trim(); if (v && v !== m.title) call("api/milestone/" + m.id, { title: v }); }}
+                      onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} /></span>`
+                  : html`<span class="ms-title static">${m.title}</span>`)}
+
+              <span class="ms-spacer"></span>
+              <${Metrics} m=${mm} />
+              ${!isBucket ? html`<${DeadlineChip} ms=${m.target_ms} completed=${!!m.completed} />` : null}
+              ${!isBucket ? (isEditor
+                ? html`<span class="ms-date" onClick=${(e) => e.stopPropagation()}>
+                    <input type="date" value=${isoDate(m.target_ms)}
+                      onChange=${(e) => call("api/milestone/" + m.id, { target_ms: dateToMs(e.target.value) })} />
+                  </span>`
+                : (m.target_ms ? html`<span class="ms-date">${fmtDate(m.target_ms)}</span>` : null)) : null}
+
+              ${!isBucket && isEditor ? html`
+                <button class=${"ms-check" + (m.completed ? " on" : (canComplete ? "" : " locked"))}
+                  title=${m.completed ? "Mark not complete" : (canComplete ? "Mark milestone complete" : "All tasks must be done before completing a milestone.")}
+                  onClick=${(e) => { e.stopPropagation(); toggleMsDone(m, canComplete); }}>
+                  <i class=${"ph-light " + (m.completed ? "ph-check-circle" : "ph-circle")}></i>
+                </button>` : null}
+              ${!isBucket && isEditor ? html`
+                <button class=${"ms-del" + (armedMs === m.id ? " armed" : "")} title=${armedMs === m.id ? "Click again to delete" : "Delete milestone"}
+                  onClick=${(e) => { e.stopPropagation(); delMilestone(m, mm.total); }}>
+                  <i class=${"ph-light " + (armedMs === m.id ? "ph-trash" : "ph-trash-simple")}></i>
+                </button>` : null}
+            </div>
+
+            ${open ? html`
+              <div class=${"tasks" + (list.length === 0 ? " empty-drop" : "")}
+                onDragOver=${isEditor ? (e) => onDragOver(e, m.id) : null}
+                onDragLeave=${isEditor ? onDragLeave : null}
+                onDrop=${isEditor ? (e) => onDrop(e, m.id) : null}>
+                ${list.map((t) => TaskRow(t))}
+                ${list.length === 0 && !isEditor ? html`<div class="empty" style="padding:var(--os-sp-sm)">No tasks.</div>` : null}
+                ${isEditor ? html`
+                  <div class="task-new">
+                    <i class="ph-light ph-plus"></i>
+                    <input placeholder="Add a task…" value=${taskDraft[m.id] || ""} maxlength="1000"
+                      onInput=${(e) => setTaskDraft({ ...taskDraft, [m.id]: e.target.value })}
+                      onKeyDown=${(e) => { if (e.key === "Enter") addTask(m.id); }}
+                      onBlur=${() => addTask(m.id)} />
+                  </div>` : null}
+              </div>` : null}
+          </div>`;
+      }
+
+      function TaskRow(t) {
+        return html`
+          <div class="task" key=${t.id} data-id=${t.id}>
+            ${isEditor ? html`
+              <span class="grip" draggable="true"
+                onDragStart=${(e) => {
+                  const row = e.currentTarget.closest(".task");
+                  dragTask.current = t.id; row.classList.add("dragging");
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", String(t.id));
+                  try { e.dataTransfer.setDragImage(row, 16, 12); } catch (_) { /* older webviews */ }
+                }}
+                onDragEnd=${(e) => { dragTask.current = null; e.currentTarget.closest(".task").classList.remove("dragging"); clearDropHints(); }}>
+                <i class="ph-light ph-dots-six-vertical"></i>
+              </span>` : null}
+            <button class=${"tstatus s" + t.state} disabled=${!isEditor} title=${STATUS_LABEL[t.state]}
+              onClick=${() => cycleTask(t)}>
+              <i class=${"ph-light " + STATUS_ICON[t.state]}></i>
+            </button>
+            <div class=${"ttext s" + t.state}>
+              ${isEditor
+                ? html`<input value=${t.text} maxlength="1000"
+                    onBlur=${(e) => saveTaskText(t, e.target.value)}
+                    onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />`
+                : html`<div class="static">${t.text}</div>`}
+            </div>
+            ${t.state !== 0 && t.actor_name ? html`
+              <span class=${"tby s" + t.state}>${t.state === 2 ? "✓ " : "→ "}${t.actor_name}</span>` : null}
+            ${isEditor ? html`
+              <button class=${"ttrash" + (armedTask === t.id ? " armed" : "")} title=${armedTask === t.id ? "Click again to delete" : "Delete"}
+                onClick=${() => delTask(t)}>
+                <i class=${"ph-light " + (armedTask === t.id ? "ph-trash" : "ph-x")}></i>
+              </button>` : null}
+          </div>`;
+      }
+
+      // ---- timeline ---------------------------------------------------------------------
+      function TimelineView() {
+        const scheduled = real.filter((m) => m.target_ms).sort(byTarget);
+        const unscheduled = active.filter((m) => !m.target_ms);
+        if (scheduled.length === 0 && unscheduled.length === 0) {
+          return html`<div class="empty">No milestones on the timeline yet.${isEditor ? " Add one from the Board." : ""}</div>`;
+        }
+        return html`
+          <div class="timeline">
+            ${scheduled.map((m, i) => {
+              const mm = metricsFor(byMs.get(m.id) || []);
+              const d = daysLeft(m.target_ms);
+              const over = !m.completed && d != null && d < 0;
+              const last = i === scheduled.length - 1 && unscheduled.length === 0;
+              const pct = mm.total ? { u: mm.u / mm.total * 100, p: mm.p / mm.total * 100, c: mm.c / mm.total * 100 } : { u: 0, p: 0, c: 0 };
+              return html`
+                <div class="tl-row" key=${m.id}>
+                  <div class="tl-rail">
+                    <div class=${"tl-node" + (m.completed ? " done" : over ? " over" : "")}></div>
+                    ${!last ? html`<div class="tl-line"></div>` : null}
+                  </div>
+                  <div class=${"tl-card" + (m.completed ? " done" : "")}>
+                    <div class="tl-head">
+                      <span class="tl-date">${fmtDate(m.target_ms)}</span>
+                      <span class="tl-title">${m.title}</span>
+                      <${DeadlineChip} ms=${m.target_ms} completed=${!!m.completed} />
+                    </div>
+                    <div class="tl-sub">
+                      <div class="bar" title=${`${mm.u} unstarted · ${mm.p} in progress · ${mm.c} complete`}>
+                        <div class="seg u" style=${`width:${pct.u}%`}></div>
+                        <div class="seg p" style=${`width:${pct.p}%`}></div>
+                        <div class="seg c" style=${`width:${pct.c}%`}></div>
+                      </div>
+                      <div class="tl-counts"><${Metrics} m=${mm} /></div>
+                    </div>
+                  </div>
+                </div>`;
+            })}
+            ${unscheduled.length ? html`
+              <div class="lane-label">unscheduled</div>
+              ${unscheduled.map((m) => {
+                const mm = metricsFor(byMs.get(m.id) || []);
+                return html`
+                  <div class="tl-row" key=${m.id}>
+                    <div class="tl-rail"><div class="tl-node" style="border-style:dashed"></div></div>
+                    <div class="tl-card">
+                      <div class="tl-head"><span class="tl-title">${m.title}</span></div>
+                      <div class="tl-sub"><div class="tl-counts"><${Metrics} m=${mm} /></div></div>
+                    </div>
+                  </div>`;
+              })}` : null}
+          </div>`;
+      }
+
+      // ---- render -----------------------------------------------------------------------
+      return html`
+        <main class=${isEditor ? "" : "read-only"}>
+          <header>
+            <div class="titlebar">
+              <i class="flag ph-light ph-signpost"></i>
+              <div class="proj">
+                ${isEditor
+                  ? html`<div class="proj-name"><input value=${meta.name} maxlength="160" placeholder="Untitled Roadmap"
+                      onBlur=${(e) => { const v = e.target.value.trim(); if (v !== meta.name) saveMeta({ name: v }); }}
+                      onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} /></div>`
+                  : html`<div class="proj-name"><span class=${meta.name ? "" : "placeholder"}>${meta.name || "Untitled Roadmap"}</span></div>`}
+              </div>
+              <span class="mode">${mode}</span>
+              ${isEditor ? html`<button class="gear" title="Project settings" onClick=${() => setSettingsOpen(true)}><i class="ph-light ph-gear-six"></i></button>` : null}
+            </div>
+
+            ${meta.links.length ? html`
+              <div class="links">
+                ${meta.links.map((l, i) => html`
+                  <button class="link-chip" key=${i} onClick=${() => frame.openExternalUrl(l.url)}>
+                    <i class="ph-light ph-arrow-square-out"></i>${l.label}
+                  </button>`)}
+              </div>` : null}
+
+            <nav class="tabs">
+              <button class=${"tab" + (tab === "board" ? " on" : "")} onClick=${() => setTab("board")}>
+                <i class="ph-light ph-rows"></i>Board</button>
+              <button class=${"tab" + (tab === "timeline" ? " on" : "")} onClick=${() => setTab("timeline")}>
+                <i class="ph-light ph-chart-line-up"></i>Timeline</button>
+            </nav>
+          </header>
+
+          ${tab === "timeline" ? TimelineView() : html`
+            <div class="lane">
+              ${active.length === 0 && !isEditor ? html`<div class="empty">No milestones yet.</div>` : null}
+              ${active.map((m) => MilestoneCard(m))}
+
+              ${isEditor ? html`
+                <div class="row-actions">
+                  ${addingMs ? html`
+                    <div class="ms" style="flex:1 1 auto">
+                      <div class="ms-head" style="cursor:default">
+                        <input class="set-input" style="flex:1 1 auto" placeholder="New milestone title…" autofocus value=${msDraft.title}
+                          onInput=${(e) => setMsDraft({ ...msDraft, title: e.target.value })}
+                          onKeyDown=${(e) => { if (e.key === "Enter") addMilestone(); if (e.key === "Escape") { setAddingMs(false); setMsDraft({ title: "", date: "" }); } }} />
+                        <span class="ms-date"><input type="date" value=${msDraft.date} onInput=${(e) => setMsDraft({ ...msDraft, date: e.target.value })} /></span>
+                        <button class="btn" onClick=${addMilestone}><i class="ph-light ph-check"></i>Add</button>
+                      </div>
+                    </div>`
+                    : html`<button class="btn ghost" onClick=${() => setAddingMs(true)}><i class="ph-light ph-plus"></i>Add milestone</button>`}
+                  ${done.length ? html`
+                    <button class="btn ghost" onClick=${() => setShowDone(!showDone)}>
+                      <i class=${"ph-light " + (showDone ? "ph-eye-slash" : "ph-check-circle")}></i>
+                      ${showDone ? "Hide" : "Show"} ${done.length} completed
+                    </button>` : null}
+                </div>` : null}
+
+              ${buckets.length ? html`<div class="lane-label">parked</div>` : null}
+              ${buckets.map((m) => MilestoneCard(m))}
+
+              ${showDone && done.length ? html`
+                <div class="lane-label">completed milestones</div>
+                ${done.map((m) => MilestoneCard(m))}` : null}
+            </div>`}
+
+          ${settingsOpen ? html`<${SettingsModal} meta=${meta} onSave=${saveMeta} onClose=${() => setSettingsOpen(false)} />` : null}
+        </main>`;
+    }
+
+    // ---- Settings modal (name / accent / links / public viewing) ------------------------
+    function SettingsModal({ meta, onSave, onClose }) {
+      const [name, setName] = useState(meta.name);
+      const [accent, setAccent] = useState(meta.accent || "c4");
+      const [links, setLinks] = useState(meta.links.length ? meta.links.map((l) => ({ ...l })) : []);
+      const [publicView, setPublicView] = useState(!!meta.public_view);
+
+      function setLink(i, patch) { setLinks(links.map((l, j) => j === i ? { ...l, ...patch } : l)); }
+      function addLink() { if (links.length < 12) setLinks([...links, { label: "", url: "" }]); }
+      function removeLink(i) { setLinks(links.filter((_, j) => j !== i)); }
+      async function save() {
+        const clean = links.map((l) => ({ label: (l.label || "").trim(), url: (l.url || "").trim() }))
+          .filter((l) => l.label && /^https?:\/\//i.test(l.url));
+        await onSave({ name: name.trim(), accent, links: clean, public_view: publicView ? 1 : 0 });
+        onClose();
+      }
+
+      return html`
+        <${Modal} title="Project settings" onClose=${onClose}
+          actions=${html`
+            <button class="btn" onClick=${onClose}>Cancel</button>
+            <button class="btn" style="border-color:var(--ch);color:var(--ch)" onClick=${save}><i class="ph-light ph-check"></i>Save</button>`}>
+          <div class="set-field">
+            <label>Project name</label>
+            <input class="set-input" value=${name} maxlength="160" onInput=${(e) => setName(e.target.value)} placeholder="e.g. Spring Launch" />
+          </div>
+          <div class="set-field">
+            <label>Accent color</label>
+            <div class="swatches">
+              ${Array.from({ length: 12 }, (_, i) => "c" + (i + 1)).map((c) => html`
+                <button class=${"swatch" + (accent === c ? " on" : "")} key=${c}
+                  style=${`background:var(--os-${c})`} title=${c} onClick=${() => setAccent(c)}></button>`)}
+            </div>
+          </div>
+          <div class="set-field">
+            <label>Quick links</label>
+            ${links.map((l, i) => html`
+              <div class="link-edit" key=${i}>
+                <input class="set-input lbl" value=${l.label} maxlength="80" placeholder="Label" onInput=${(e) => setLink(i, { label: e.target.value })} />
+                <input class="set-input" value=${l.url} maxlength="2048" placeholder="https://…" onInput=${(e) => setLink(i, { url: e.target.value })} />
+                <button title="Remove" onClick=${() => removeLink(i)}><i class="ph-light ph-x"></i></button>
+              </div>`)}
+            ${links.length < 12 ? html`<button class="btn ghost" style="margin-top:4px" onClick=${addLink}><i class="ph-light ph-plus"></i>Add link</button>` : null}
+            <div class="hint">Links open in your browser. Only http(s) links are saved.</div>
+          </div>
+          <div class="set-field">
+            <label>Public viewing</label>
+            <div class="toggle-row">
+              <button class=${"switch" + (publicView ? " on" : "")} role="switch" aria-checked=${publicView}
+                title=${publicView ? "Public viewing is on" : "Public viewing is off"}
+                onClick=${() => setPublicView(!publicView)}><span class="knob"></span></button>
+              <div class="toggle-text">
+                Anyone with a share link can view this roadmap.
+                <div class="hint">Non-members see milestones and tasks read-only — they can't make any changes. Off by default; the roadmap stays private.</div>
+              </div>
+            </div>
+          </div>
+        <//>`;
+    }
+
+    render(html`<${App}/>`, document.body);
+  </script>
+</body>
+</html>

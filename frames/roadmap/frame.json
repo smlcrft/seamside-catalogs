@@ -1,0 +1,18 @@
+{
+    "name": "Roadmap",
+    "description": "A simple, robust project roadmapping tool — one roadmap per placement. Set a project name, overview, and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in-progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Collapsed milestone headers still show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days-remaining and overdue color-coding. A milestone can only be marked done once all its tasks are complete. Everything is stored in a lightweight per-placement SQLite database on the host and pushed live to every viewer; non-members get a read-only view.",
+    "frame_type": "Tandem",
+    "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": []
+    },
+    "created_at": "2026-07-07T21:12:00Z",
+    "modified_at": "2026-07-08T00:05:00Z",
+    "app_version_min": "0.1.8",
+    "depends_on_capabilities": [],
+    "default_width_px": 720,
+    "default_height_px": 640,
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

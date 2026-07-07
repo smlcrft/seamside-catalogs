@@ -15,7 +15,6 @@ artifacts and a stable sha256.
 Usage:
     python3 scripts/build_catalogs.py
 """
-import gzip
 import base64
 import binascii
 import hashlib
@@ -26,6 +25,23 @@ import sys
 import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Reproducible gzip. The Python stdlib `gzip`/`zlib` deflate output is NOT stable
+# across zlib versions (it changed between 1.2.x and 1.3), so the same frame
+# recompresses to different bytes — and a different sha256 — on another platform.
+# Zopfli is a deterministic deflate implementation whose output does not depend on
+# the host zlib, so rebuilding anywhere yields byte-identical .tar.gz files. The
+# version is pinned in scripts/requirements.txt; see BUILD_CATALOGS.md.
+try:
+    import zopfli.gzip as zopfli_gzip
+except ModuleNotFoundError:
+    sys.exit(
+        "ERROR: build_catalogs.py needs the 'zopfli' package for reproducible, "
+        "platform-independent gzip output.\n"
+        "Install the pinned build dependency:\n"
+        "    python3 -m pip install -r scripts/requirements.txt\n"
+        "See BUILD_CATALOGS.md → Reproducible packages."
+    )
 
 REPO_ROOT     = Path(__file__).resolve().parent.parent
 FRAMES_DIR    = REPO_ROOT / "frames"
@@ -137,16 +153,16 @@ def build_frame_tarball(src_dir: Path, dest_tar: Path) -> None:
     # flattens single-top-level-dir tarballs, so this is the conventional
     # shape.
     #
-    # Deterministic build: write the tar to a buffer, then gzip with mtime=0
-    # and no embedded filename. tarfile.open("w:gz") would otherwise stamp
-    # the current time into the gzip header and make rebuilds non-idempotent.
+    # Deterministic build: write the tar to a buffer, then gzip it with Zopfli.
+    # tar entries are already normalized (mtime=0, uid/gid=0) by normalize_tarinfo;
+    # Zopfli emits a gzip stream with mtime=0 and no embedded filename, and — unlike
+    # stdlib gzip — its deflate bytes don't vary with the host zlib version, so the
+    # .tar.gz (and its sha256) is byte-identical on any machine that builds it.
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tar:
         tar.add(src_dir, arcname=src_dir.name, filter=normalize_tarinfo)
     raw_tar = buf.getvalue()
-    with open(dest_tar, "wb") as f:
-        with gzip.GzipFile(filename="", mode="wb", fileobj=f, mtime=0, compresslevel=6) as gz:
-            gz.write(raw_tar)
+    dest_tar.write_bytes(zopfli_gzip.compress(raw_tar))
 
 
 def stamp_iso_utc_now() -> str:
