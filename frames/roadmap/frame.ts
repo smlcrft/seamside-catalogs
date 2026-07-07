@@ -334,17 +334,28 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   // ----- Tasks --------------------------------------------------------------------------
   if (reqPath === "/api/task/add" && method === "POST") {
     if (!editorOnly()) return;
-    const v = parseJsonBody<{ milestone_id?: unknown; text?: unknown }>(body);
+    const v = parseJsonBody<{ milestone_id?: unknown; text?: unknown; texts?: unknown }>(body);
     const milestoneId = toIntOrNull(v?.milestone_id);
     if (milestoneId == null || !milestoneRow(sfiId, milestoneId)) {
       return jsonReply(replyPort, 400, { error: "bad milestone" });
     }
-    const text = sanitizeText(v?.text, MAX_TASK);
-    if (!text) return jsonReply(replyPort, 400, { error: "text required" });
-    db.prepare(
+    // `texts` (a pasted list → one task per line) takes precedence over the single
+    // `text` (which may itself be multi-line, from a Shift+Enter task — kept as one row).
+    let items: string[];
+    if (Array.isArray(v?.texts)) {
+      items = v.texts.map((x) => sanitizeText(x, MAX_TASK)).filter((s) => s.length > 0);
+    } else {
+      const t = sanitizeText(v?.text, MAX_TASK);
+      items = t ? [t] : [];
+    }
+    if (items.length === 0) return jsonReply(replyPort, 400, { error: "text required" });
+    const insert = db.prepare(
       "INSERT INTO tasks (sfi_id, milestone_id, text, state, sort_order, created_ms) VALUES (?, ?, ?, 0, ?, ?)",
-    ).run(sfiId, milestoneId, text, nextTaskOrder(sfiId, milestoneId), Date.now());
-    reconcileMilestone(sfiId, milestoneId); // a fresh (unstarted) task reopens a "done" milestone
+    );
+    const now = Date.now();
+    let order = nextTaskOrder(sfiId, milestoneId);
+    for (const text of items) insert.run(sfiId, milestoneId, text, order++, now);
+    reconcileMilestone(sfiId, milestoneId); // fresh (unstarted) tasks reopen a "done" milestone
     notify(sfiId);
     return ok();
   }

@@ -195,14 +195,30 @@
     .ttext { flex: 1 1 auto; min-width: 0; font-size: var(--os-fs-sm); line-height: 1.35; }
     .ttext.s1 { color: var(--os-text); }
     .ttext.s2 { color: var(--os-text-muted); }
-    .ttext.s2 input, .ttext.s2 .static { text-decoration: line-through; }
-    .ttext input {
-      width: 100%; font: inherit; color: inherit; background: transparent; border: 0;
-      border-radius: var(--os-radius-sm); padding: 1px 3px; margin: -1px -3px; outline: none;
+    .ttext.s2 .ttext-view { text-decoration: line-through; }
+    /* Collapsed: one line, ellipsis when it overflows. Click to open the editor (editors). */
+    .ttext-view {
+      display: block; width: 100%; padding: 1px 3px; margin: -1px -3px; border-radius: var(--os-radius-sm);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text;
+    }
+    .ttext-view:hover { background: var(--os-bg-elevated); }
+    /* Non-members can't edit, so show the whole task wrapped rather than truncated. */
+    .read-only .ttext-view {
+      cursor: default; white-space: normal; overflow: visible; overflow-wrap: anywhere;
       user-select: text; -webkit-user-select: text;
     }
-    .ttext input:focus { background: var(--os-bg-elevated); box-shadow: 0 0 0 1.5px var(--ch); }
-    .ttext .static { padding: 1px 3px; word-break: break-word; user-select: text; -webkit-user-select: text; }
+    .read-only .ttext-view:hover { background: transparent; }
+    /* Wrapping, auto-grown textarea. `display:block` is load-bearing: a default inline
+       textarea adds baseline/descender space, making a one-line edit taller than the
+       collapsed view and shifting the whole list on open. As a block it's pixel-identical
+       to .ttext-view for a single line and only grows taller when the text actually wraps. */
+    .ttext-edit {
+      display: block; width: 100%; min-height: 0; font: inherit; color: var(--os-text); line-height: 1.35;
+      background: var(--os-bg-elevated); border: 0; border-radius: var(--os-radius-sm);
+      padding: 1px 3px; margin: -1px -3px; outline: none; box-shadow: 0 0 0 1.5px var(--ch);
+      resize: none; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+      vertical-align: top; user-select: text; -webkit-user-select: text;
+    }
     .tby { font-size: var(--os-fs-2xs); color: var(--os-text-subtle); white-space: nowrap; flex: 0 0 auto; }
     .tby.s1 { color: var(--ch); }
 
@@ -217,14 +233,17 @@
     .read-only .ttrash, .read-only .tstatus { pointer-events: none; }
 
     .task-new {
-      display: flex; align-items: center; gap: 6px; padding: 3px; margin-top: 1px;
+      display: flex; align-items: flex-start; gap: 6px; padding: 3px; margin-top: 1px;
     }
-    .task-new i { color: var(--os-text-subtle); font-size: 15px; line-height: 0; }
-    .task-new input {
-      flex: 1; font: inherit; font-size: var(--os-fs-sm); color: var(--os-text);
-      background: transparent; border: 0; outline: none; padding: 1px 3px;
+    .task-new i { color: var(--os-text-subtle); font-size: 15px; line-height: 0; margin-top: 3px; }
+    .task-new-input {
+      display: block; flex: 1; min-width: 0; min-height: 0; font: inherit; font-size: var(--os-fs-sm);
+      color: var(--os-text); line-height: 1.35; vertical-align: top;
+      background: transparent; border: 0; outline: none; padding: 1px 3px; margin: 0;
+      resize: none; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+      user-select: text; -webkit-user-select: text;
     }
-    .task-new input::placeholder { color: var(--os-text-muted); }
+    .task-new-input::placeholder { color: var(--os-text-muted); }
 
     /* ---- Add milestone / show completed / dividers ---------------------------------- */
     .row-actions { display: flex; align-items: center; gap: var(--os-sp-sm); flex-wrap: wrap; }
@@ -336,7 +355,7 @@
 <body>
   <script type="module">
     import {
-      frame, html, render, useState, useEffect, useRef, useMemo,
+      frame, html, render, useState, useEffect, useLayoutEffect, useRef, useMemo,
       useFramePush, Modal, applyChannel,
     } from "/lib/js/framelib.js";
 
@@ -416,6 +435,72 @@
       return closest;
     }
 
+    // Grow a textarea to fit its content (single line by default, up to a cap then scroll).
+    // Empty → rest at the natural one-line height (avoids WebKit folding the placeholder
+    // into scrollHeight); with content → size to it. Frames override frame-prefs.css's
+    // `textarea { min-height: 5rem }` via .ttext-edit / .task-new-input (min-height: 0).
+    function sizeToContent(el) {
+      if (!el) return;
+      el.style.height = "auto";
+      if (el.value) el.style.height = Math.min(el.scrollHeight, 220) + "px";
+    }
+
+    // Split pasted / composed text into trimmed, non-empty lines.
+    function splitLines(text) {
+      return String(text).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    }
+
+    // Inline editor for an existing task: opens as a wrapping, auto-growing textarea so the
+    // full (possibly multi-line) text is visible. Enter saves, Shift+Enter adds a line,
+    // Escape cancels. Module-scope so it keeps focus across parent re-renders.
+    function TaskEditor({ task, onSave, onCancel }) {
+      const [val, setVal] = useState(task.text);
+      const ref = useRef(null);
+      const skip = useRef(false);
+      useLayoutEffect(() => sizeToContent(ref.current), [val]);
+      useEffect(() => {
+        const el = ref.current;
+        if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+      }, []);
+      return html`
+        <textarea ref=${ref} class="ttext-edit" rows="1" maxlength="1000" value=${val}
+          onInput=${(e) => setVal(e.target.value)}
+          onKeyDown=${(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.target.blur(); }
+            else if (e.key === "Escape") { e.preventDefault(); skip.current = true; onCancel(); }
+          }}
+          onBlur=${() => { if (!skip.current) onSave(val); }}></textarea>`;
+    }
+
+    // New-task composer: one line by default, auto-grows as content wraps or gains lines.
+    // Enter adds · Shift+Enter newline · pasting a multi-line block adds one task per line.
+    function NewTaskBox({ value, onValue, onEnter, onPasteLines }) {
+      const ref = useRef(null);
+      useLayoutEffect(() => sizeToContent(ref.current), [value]);
+      function onPaste(e) {
+        const text = e.clipboardData ? e.clipboardData.getData("text") : "";
+        if (!/\r?\n/.test(text)) return;                        // single line → normal paste
+        const el = e.target;
+        const start = el.selectionStart ?? value.length, end = el.selectionEnd ?? value.length;
+        const merged = value.slice(0, start) + text + value.slice(end);
+        const lines = splitLines(merged);
+        if (lines.length <= 1) return;                          // effectively one line → normal paste
+        e.preventDefault();
+        onPasteLines(lines);
+      }
+      return html`
+        <div class="task-new">
+          <i class="ph-light ph-plus"></i>
+          <textarea ref=${ref} class="task-new-input" rows="1" maxlength="1000" value=${value}
+            placeholder="Add a task…"
+            title="Enter to add · Shift+Enter for a new line · paste a list to add many"
+            onInput=${(e) => onValue(e.target.value)}
+            onKeyDown=${(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onEnter(); } }}
+            onPaste=${onPaste}
+            onBlur=${onEnter}></textarea>
+        </div>`;
+    }
+
     function App() {
       const [me, setMe] = useState(null);
       const [meta, setMeta] = useState({ name: "", overview: "", accent: "c4", links: [], public_view: false });
@@ -430,6 +515,7 @@
       const [taskDraft, setTaskDraft] = useState({});   // milestone_id -> text
       const [armedMs, setArmedMs] = useState(null);
       const [armedTask, setArmedTask] = useState(null);
+      const [editingTaskId, setEditingTaskId] = useState(null);
       const [isPrivate, setIsPrivate] = useState(false);
       const [loaded, setLoaded] = useState(false);
 
@@ -476,10 +562,15 @@
       const call = (path, body, method) => frame.api(path, body ?? {}, method).then(setAll);
       async function saveMeta(patch) { await call("api/settings", patch); }
       async function addTask(mid) {
-        const text = (taskDraft[mid] || "").trim();
+        const text = (taskDraft[mid] || "").trim();   // keeps internal newlines (Shift+Enter task)
         if (!text) return;
         setTaskDraft({ ...taskDraft, [mid]: "" });
         await call("api/task/add", { milestone_id: mid, text }).catch(() => {});
+      }
+      // Pasted multi-line block → one task per line.
+      async function addTasks(mid, lines) {
+        setTaskDraft({ ...taskDraft, [mid]: "" });
+        await call("api/task/add", { milestone_id: mid, texts: lines }).catch(() => {});
       }
       async function cycleTask(t) {
         if (!isEditor) return;
@@ -490,10 +581,10 @@
           : x));
         await call("api/task/" + t.id, { state: next }).catch(refresh);
       }
-      async function saveTaskText(t, text) {
-        const v = text.trim();
-        if (v === t.text) return;
-        await call("api/task/" + t.id, { text: v }).catch(() => {});
+      async function commitTaskEdit(t, val) {
+        setEditingTaskId(null);
+        const v = val.trim();
+        if (v && v !== t.text) await call("api/task/" + t.id, { text: v }).catch(() => {});
       }
       async function delTask(t) {
         if (armedTask !== t.id) { setArmedTask(t.id); setTimeout(() => setArmedTask((a) => a === t.id ? null : a), 2500); return; }
@@ -645,13 +736,10 @@
                 ${list.map((t) => TaskRow(t))}
                 ${list.length === 0 && !isEditor ? html`<div class="empty" style="padding:var(--os-sp-sm)">No tasks.</div>` : null}
                 ${isEditor ? html`
-                  <div class="task-new">
-                    <i class="ph-light ph-plus"></i>
-                    <input placeholder="Add a task…" value=${taskDraft[m.id] || ""} maxlength="1000"
-                      onInput=${(e) => setTaskDraft({ ...taskDraft, [m.id]: e.target.value })}
-                      onKeyDown=${(e) => { if (e.key === "Enter") addTask(m.id); }}
-                      onBlur=${() => addTask(m.id)} />
-                  </div>` : null}
+                  <${NewTaskBox} value=${taskDraft[m.id] || ""}
+                    onValue=${(val) => setTaskDraft({ ...taskDraft, [m.id]: val })}
+                    onEnter=${() => addTask(m.id)}
+                    onPasteLines=${(lines) => addTasks(m.id, lines)} />` : null}
               </div>` : null}
           </div>`;
       }
@@ -676,11 +764,10 @@
               <i class=${"ph-light " + STATUS_ICON[t.state]}></i>
             </button>
             <div class=${"ttext s" + t.state}>
-              ${isEditor
-                ? html`<input value=${t.text} maxlength="1000"
-                    onBlur=${(e) => saveTaskText(t, e.target.value)}
-                    onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />`
-                : html`<div class="static">${t.text}</div>`}
+              ${isEditor && editingTaskId === t.id
+                ? html`<${TaskEditor} task=${t} onSave=${(val) => commitTaskEdit(t, val)} onCancel=${() => setEditingTaskId(null)} />`
+                : html`<div class="ttext-view" title=${isEditor ? "Click to edit" : ""}
+                    onClick=${isEditor ? () => setEditingTaskId(t.id) : null}>${t.text}</div>`}
             </div>
             ${t.state !== 0 && t.actor_name ? html`
               <span class=${"tby s" + t.state}>${t.state === 2 ? "✓ " : "→ "}${t.actor_name}</span>` : null}

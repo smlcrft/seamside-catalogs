@@ -361,7 +361,7 @@
       "name": "Roadmap",
       "description": "A simple, robust project roadmapping tool \u2014 one roadmap per placement. Set a project name, overview, and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in-progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Collapsed milestone headers still show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days-remaining and overdue color-coding. A milestone can only be marked done once all its tasks are complete. Everything is stored in a lightweight per-placement SQLite database on the host and pushed live to every viewer; non-members get a read-only view.",
       "icon": "",
-      "modified_at": "2026-07-08T00:05:00Z",
+      "modified_at": "2026-07-08T02:20:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 720,
@@ -375,7 +375,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roadmap.tar.gz",
-      "package_sha256": "2d31abbbee92491a7795edad72c5fd4468dced246b62d730ded5285faf5f1249",
+      "package_sha256": "b3a948550637c511017f6bd2c0a1afa2cab64ff9ef20d215a1f59e0ace9a10bf",
       "app_version_min": "0.1.8"
     },
     {
