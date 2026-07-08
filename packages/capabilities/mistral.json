@@ -1,0 +1,100 @@
+{
+  "name": "mistral",
+  "description": "Mistral AI API — chat completions and text generation",
+  "category": "ai",
+  "modified_at": "2026-07-07T00:00:00Z",
+  "app_version_min": "0.1.10",
+  "source": "local_api",
+  "kind": "service",
+  "aliases": [
+    "mistral-ai",
+    "mixtral",
+    "codestral"
+  ],
+  "keywords": [
+    "ai",
+    "llm",
+    "chat",
+    "mistral",
+    "codestral",
+    "generation"
+  ],
+  "base_url": "https://api.mistral.ai",
+  "setup_steps": [
+    "New to using Mistral for AI? Here's how to do it..."
+  ],
+  "auth": {
+    "type": "bearer",
+    "setting": "api_key"
+  },
+  "headers": {
+    "content-type": "application/json"
+  },
+  "usage": "invoke('mistral', 'v1/chat/completions', { model: 'mistral-large-latest', messages: [{ role: 'user', content: 'Hello' }], max_tokens: 1024 })",
+  "methods": [
+    {
+      "name": "v1/chat/completions",
+      "description": "Send a chat completion request",
+      "params": [
+        "model",
+        "messages",
+        "max_tokens"
+      ]
+    }
+  ],
+  "settings": {
+    "api_key": {
+      "type": "secret",
+      "label": "API Key",
+      "required": true
+    }
+  },
+  "models_source": {
+    "url": "https://api.mistral.ai/v1/models",
+    "list_path": "data",
+    "value_key": "id",
+    "label_key": "id"
+  },
+  "models": {
+    "quick": "mistral-small-latest",
+    "standard": "mistral-large-latest",
+    "deep": "mistral-large-latest"
+  },
+  "protocols": {
+    "ai_chat": {
+      "method": "v1/chat/completions",
+      "max_output_tokens": 8192,
+      "features": ["tool_use", "streaming"],
+      "request": {
+        "model_field": "model",
+        "messages_field": "messages",
+        "system_mode": "first_message",
+        "max_tokens_field": "max_tokens",
+        "extra": { "stream": false }
+      },
+      "response": { "text_path": "choices[0].message.content" },
+      "tool_use": {
+        "request_tools_field": "tools",
+        "request_schema_key": "parameters",
+        "assistant_tool_use_style": "tool_calls",
+        "request_tool_wrapper": {
+          "type": "function",
+          "function": { "name": "$name", "description": "$description", "parameters": "$schema" }
+        },
+        "response_calls_path": "choices[0].message.tool_calls",
+        "call_id_field": "id",
+        "call_name_field": "function.name",
+        "call_args_field": "function.arguments",
+        "call_args_is_string": true,
+        "result_role": "tool",
+        "result_id_field": "tool_call_id"
+      }
+    }
+  },
+  "good_for": [
+    "framegen",
+    "modify",
+    "chat",
+    "text"
+  ]
+}

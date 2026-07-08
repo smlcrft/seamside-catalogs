@@ -133,6 +133,28 @@ Names starting with `_` or `.` are skipped, so prefix any work-in-progress dirs 
 2. Run `python3 scripts/build_catalogs.py`.
 3. Commit `capabilities.json`, `capabilities/<name>.json`, and `packages/capabilities/<name>.json`.
 
+### AI-model capabilities: `models` + `models_source`
+
+An AI capability does **not** enumerate models in its settings (enumerations rot). It
+declares two blocks — the app synthesizes the per-role model dropdowns from them (see the
+Tandem app's `design/ai-model-roles/README.md`):
+
+- **`models`** — curated, *tested* default model per codegen role (`quick` / `standard` /
+  `deep`). The only place a model id must be correct. Values are a model-id string, or
+  `{ "model": "...", "params": { ... } }` when the assignment needs request params.
+- **`models_source`** — where the live selectable list comes from: `{ "url", "list_path",
+  "value_key", "label_key", "filter_prefixes" }` (one declaration, all roles share it).
+  Omit it for providers with no models endpoint (e.g. a single fixed model).
+
+Capabilities using this shape need `app_version_min` ≥ `0.1.10`.
+
+**Validation:** `python3 scripts/validate_models.py` checks every `models` assignment
+(and every `pricing` key) against the provider's live models endpoint — export
+`<NAME>_API_KEY` env vars to enable the live checks. CI runs it on every push and weekly
+(`.github/workflows/validate-models.yml`; keys via repo secrets), so a provider retiring
+a model turns into a red build instead of silent rot. Run it after editing any `models`
+block.
+
 ## Updating an existing frame or capability
 
 Edit the source in place, bump `modified_at` in the `frame.json` / capability JSON, re-run the build, commit. The client uses `modified_at` against the locally-installed copy's `modified_at` to decide whether to show an update affordance.
