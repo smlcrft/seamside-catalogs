@@ -6,11 +6,29 @@
   "items": [
     {
       "kind": "Capabilities",
+      "id": "mistral",
+      "name": "mistral",
+      "description": "Mistral AI API \u2014 chat completions and text generation",
+      "icon": "",
+      "modified_at": "2026-07-07T00:00:00Z",
+      "frame_preview": null,
+      "capability_preview": {
+        "kind": "service",
+        "methods": [
+          "v1/chat/completions"
+        ]
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/capabilities/mistral.json",
+      "package_sha256": "b05c895efd5d18056e1f0228ca274518d434a3f174367d37bb5fcb6bd1bb65b5",
+      "app_version_min": "0.1.10"
+    },
+    {
+      "kind": "Capabilities",
       "id": "openai",
       "name": "openai",
       "description": "OpenAI API \u2014 GPT chat completions and text generation",
       "icon": "",
-      "modified_at": "2026-06-03T23:35:07Z",
+      "modified_at": "2026-07-07T00:00:00Z",
       "frame_preview": null,
       "capability_preview": {
         "kind": "service",
@@ -19,8 +37,26 @@
         ]
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/capabilities/openai.json",
-      "package_sha256": "179ae90141f712e966bc2760384ab49306998939340522fcacce275f7808f85b",
-      "app_version_min": "0.1.7"
+      "package_sha256": "41c5c4d5ff92c177fd1d2f3c4fd28d757d8d20eb1cc0e0d2664eb36ba452b76f",
+      "app_version_min": "0.1.10"
+    },
+    {
+      "kind": "Capabilities",
+      "id": "thaura",
+      "name": "thaura",
+      "description": "Thaura API \u2014 chat completions and text generation",
+      "icon": "",
+      "modified_at": "2026-07-07T00:00:00Z",
+      "frame_preview": null,
+      "capability_preview": {
+        "kind": "service",
+        "methods": [
+          "v1/chat/completions"
+        ]
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/capabilities/thaura.json",
+      "package_sha256": "c0cee03ed6c488fdbf8f9702a2937be1dfbceb63460196fb86adc0e006970c1c",
+      "app_version_min": "0.1.10"
     }
   ]
 }

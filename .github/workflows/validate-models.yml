@@ -1,0 +1,24 @@
+# Validate curated model assignments against each provider's live models
+# endpoint — on every push and weekly, so a provider retiring a model turns
+# into a red build instead of silent rot. See scripts/validate_models.py.
+name: validate-models
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC — catch mid-week provider retirements
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate model assignments
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          # THAURA has no models endpoint — nothing to validate against.
+        run: python3 scripts/validate_models.py
