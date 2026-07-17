@@ -288,7 +288,8 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
       // Adding an item counts as the author's own +1 — sharing an idea is itself a vote
       // for it. Other viewers will receive votes=1 / i_voted=false (their personal flag
       // gets corrected on receive based on whether they authored the item).
-      await t.votes.upsert(null, {
+      // One vote row per (item, user): key it by a stable id so it can never fork.
+      await t.votes.upsert(`${row_id}:${peer.user_id}`, {
         item_id: row_id, user_id: peer.user_id, user_name: userName, created_at: now,
       });
       const item = {
@@ -321,13 +322,13 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
       const row = await t.items.get(id);
       if (!row) return jsonReply(replyPort, 404, { error: "not found" });
       const userName = sanitizeText(peer.user_name, 80) || "user";
-      const { rows: existing } = await t.votes.query({
-        where: { item_id: id, user_id: peer.user_id }, limit: 1,
-      });
-      if (existing.length > 0) {
-        await t.votes.delete(existing[0]._row_id);
+      // One vote row per (item, user), keyed by a stable id — toggling is get→delete/upsert
+      // on that id, so concurrent votes can never fork it into two rows.
+      const voteId = `${id}:${peer.user_id}`;
+      if (await t.votes.get(voteId)) {
+        await t.votes.delete(voteId);
       } else {
-        await t.votes.upsert(null, {
+        await t.votes.upsert(voteId, {
           item_id: id, user_id: peer.user_id, user_name: userName, created_at: Date.now(),
         });
       }

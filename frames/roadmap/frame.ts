@@ -96,11 +96,13 @@ function isSafeUrl(u: string): boolean {
 // Project meta (name/overview/links/accent/public_view) lives in the per-placement
 // frameSettings store, which needs no seeding — getMeta reads keys with defaults.
 async function ensurePlacement(t: Tables): Promise<void> {
-  // Auto-create the two parking buckets once per placement.
+  // Auto-create the two parking buckets once per placement. Each bucket is unique
+  // by kind, so key its row by a stable id — a concurrent first-load then converges
+  // on one row instead of forking duplicate buckets (the query-then-upsert(null) race).
   for (const b of BUCKETS) {
-    const exists = await t.milestones.query({ where: { kind: b.kind }, limit: 1 });
-    if (exists.rows.length === 0) {
-      await t.milestones.upsert(null, {
+    const bucketId = `bucket:${b.kind}`;
+    if (!(await t.milestones.get(bucketId))) {
+      await t.milestones.upsert(bucketId, {
         kind: b.kind, title: b.title, target_ms: null,
         completed: 0, sort_order: b.sort_order, created_ms: Date.now(),
       });

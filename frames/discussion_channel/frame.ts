@@ -227,14 +227,13 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
       if (!mid || !icon || !REACTION_ICON_SET.has(icon)) return jsonReply(replyPort, 400, { error: "invalid" });
       if (!(await messages.get(mid))) return jsonReply(replyPort, 404, { error: "not found" });
       const userName = sanitizeText(peer.user_name, 80) || "user";
-      const { rows: existing } = await reactions.query({
-        where: { message_id: mid, user_id: peer.user_id, icon },
-        limit: 1,
-      });
-      if (existing.length > 0) {
-        await reactions.delete(existing[0]._row_id);
+      // One reaction row per (message, user, icon), keyed by a stable id — toggling is
+      // get→delete/upsert on that id, so concurrent taps can't fork it into duplicates.
+      const rxId = `${mid}:${peer.user_id}:${icon}`;
+      if (await reactions.get(rxId)) {
+        await reactions.delete(rxId);
       } else {
-        await reactions.upsert(null, {
+        await reactions.upsert(rxId, {
           message_id: mid, user_id: peer.user_id, user_name: userName,
           icon, created_at: Date.now(),
         });

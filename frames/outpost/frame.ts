@@ -397,11 +397,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     try { options = JSON.parse(post.poll_options as string); } catch { /* corrupt */ }
     const opt = clampInt(Number(v.option), 0, options.length - 1);
     if (Number(v.option) !== opt) return jsonReply(replyPort, 400, { error: "bad option" });
-    // One vote per (post, voter): re-voting replaces the previous choice.
-    const { rows: existing } = await t.votes.query({
-      where: { post_id: post._row_id, voter: vkey }, limit: 1,
-    });
-    await t.votes.upsert(existing[0]?._row_id ?? null, {
+    // One vote per (post, voter): a stable id makes re-voting an in-place replace
+    // (and blocks the concurrent-vote race that a query-then-upsert(null) would fork).
+    await t.votes.upsert(`${post._row_id}:${vkey}`, {
       post_id: post._row_id, voter: vkey, choice: opt,
     });
     pushToInstance(peer.sfi_id, { type: "outpost_changed" });
