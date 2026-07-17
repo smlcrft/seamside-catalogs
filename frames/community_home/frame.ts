@@ -13,25 +13,13 @@
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, serveHtmlShell, pushToInstance, parsePeerInfo,
-  parseJsonBody, declareTables, ensureTables, table,
+  parseJsonBody, declareTables, ensureTables, table, frameSettings,
 } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
 // LOCALTABLES — per-placement (no sfi_id columns needed).
 // ----------------------------------------------------------------------------------------
 declareTables([
-  {
-    key: "pages",
-    title: "Community Home Page",
-    description: "Title, tagline, and accent for this placement's landing page.",
-    local: true,
-    schema: [
-      { name: "title",      col_type: "text",    nullable: false, default_val: "" },
-      { name: "tagline",    col_type: "text",    nullable: false, default_val: "" },
-      { name: "accent",     col_type: "text",    nullable: false, default_val: "c1" },
-      { name: "updated_at", col_type: "integer", nullable: false, default_val: "0" },
-    ],
-  },
   {
     // Unified page-content table. Lets admins mix sections, links, and pub_frame embeds
     // in any order. The per-kind columns stay empty for kinds that don't use them.
@@ -54,6 +42,7 @@ declareTables([
 ]);
 
 type Tbl = ReturnType<typeof table>;
+type Settings = ReturnType<typeof frameSettings>;
 
 // ----------------------------------------------------------------------------------------
 // HELPERS
@@ -86,36 +75,40 @@ function clampStr(v: unknown, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-// The page row is a singleton per placement (LocalTables are placement-scoped).
-async function pageRow(pages: Tbl) {
-  const { rows } = await pages.query({ limit: 1 });
-  return rows[0] ?? null;
-}
+// Page-level settings (title / tagline / accent / updated_at) live in the
+// per-placement frameSettings store — one row per key, race-free. The default
+// "About us" block is seeded once, gated on the "seeded" setting marker.
+const SEED_BLOCK_ROW = "seed_about"; // fixed id so a concurrent first-load can't duplicate it
 
-async function ensurePage(pages: Tbl, blocks: Tbl): Promise<void> {
-  if (await pageRow(pages)) return;
-  await pages.upsert(null, {
-    title: "Welcome to our community",
-    tagline: "A place for updates, links, and news.",
-    accent: "c1", updated_at: Date.now(),
-  });
-  await blocks.upsert(null, {
+async function ensurePage(settings: Settings, blocks: Tbl): Promise<void> {
+  if (await settings.get("seeded")) return;
+  await settings.set("seeded", true);
+  await settings.set("title", "Welcome to our community");
+  await settings.set("tagline", "A place for updates, links, and news.");
+  await settings.set("accent", "c1");
+  await settings.set("updated_at", Date.now());
+  await blocks.upsert(SEED_BLOCK_ROW, {
     kind: "section", heading: "About us",
     body: "Tell visitors what your community is about. Use the edit panel on the left to change this text, update the title, pick an accent color, and add sections, links, or public-frame embeds in any order.",
     format: "text", sort_order: 0,
   });
 }
 
-async function getPage(pages: Tbl, blocks: Tbl) {
-  const page = await pageRow(pages);
+async function getPage(settings: Settings, blocks: Tbl) {
+  const [title, tagline, accent, updatedAt] = await Promise.all([
+    settings.get<string>("title"),
+    settings.get<string>("tagline"),
+    settings.get<string>("accent"),
+    settings.get<number>("updated_at"),
+  ]);
   const { rows } = await blocks.query({
     order_by: [{ col: "sort_order" }, { col: "_created_at" }],
   });
   return {
-    title: page?.title ?? "",
-    tagline: page?.tagline ?? "",
-    accent: page?.accent ?? "c1",
-    updated_at: page?.updated_at ?? 0,
+    title: title ?? "",
+    tagline: tagline ?? "",
+    accent: accent ?? "c1",
+    updated_at: updatedAt ?? 0,
     blocks: rows.map((r) => ({
       id: r._row_id, kind: r.kind, heading: r.heading, body: r.body, format: r.format,
       label: r.label, url: r.url, width: r.width, height: r.height, sort_order: r.sort_order,
@@ -123,13 +116,12 @@ async function getPage(pages: Tbl, blocks: Tbl) {
   };
 }
 
-async function touchPage(pages: Tbl): Promise<void> {
-  const page = await pageRow(pages);
-  if (page) await pages.upsert(page._row_id, { updated_at: Date.now() });
+async function touchPage(settings: Settings): Promise<void> {
+  await settings.set("updated_at", Date.now());
 }
 
-async function broadcast(sfiId: string, pages: Tbl, blocks: Tbl): Promise<void> {
-  pushToInstance(sfiId, { type: "ch_page_updated", sfi_id: sfiId, page: await getPage(pages, blocks) });
+async function broadcast(sfiId: string, settings: Settings, blocks: Tbl): Promise<void> {
+  pushToInstance(sfiId, { type: "ch_page_updated", sfi_id: sfiId, page: await getPage(settings, blocks) });
 }
 
 // ----------------------------------------------------------------------------------------
@@ -166,37 +158,36 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     // synced tables needs no code change here.
     const ready = ensureTables(peer);
     if (!ready.ready) return send({ error: "table not bound" }, 503);
-    const pages = table("pages", sfiId);
+    const settings = frameSettings(sfiId);
     const blocks = table("blocks", sfiId);
 
     // ----- public: fetch current page content (both anon and admin share this).
     if (reqPath === "/api/page" && method === "GET") {
-      await ensurePage(pages, blocks);
-      return send(await getPage(pages, blocks));
+      await ensurePage(settings, blocks);
+      return send(await getPage(settings, blocks));
     }
 
     // ----- admin routes — require a known user.
     if (reqPath.startsWith("/api/admin/")) {
       if (anon) return send({ error: "forbidden" }, 403);
-      await ensurePage(pages, blocks);
+      await ensurePage(settings, blocks);
 
       // Update top-level page settings (title / tagline / accent).
       if (reqPath === "/api/admin/page" && method === "PUT") {
         const data = parseJsonBody(body);
         if (!data) return send({ error: "invalid body" }, 400);
-        const page = await pageRow(pages);
-        if (!page) return send({ error: "page missing" }, 500);
         if (typeof data.title === "string") {
-          await pages.upsert(page._row_id, { title: clampStr(data.title, MAX_TITLE), updated_at: Date.now() });
+          await settings.set("title", clampStr(data.title, MAX_TITLE));
         }
         if (typeof data.tagline === "string") {
-          await pages.upsert(page._row_id, { tagline: clampStr(data.tagline, MAX_TAGLINE), updated_at: Date.now() });
+          await settings.set("tagline", clampStr(data.tagline, MAX_TAGLINE));
         }
         if (typeof data.accent === "string") {
           if (!VALID_ACCENTS.has(data.accent)) return send({ error: "invalid accent" }, 400);
-          await pages.upsert(page._row_id, { accent: data.accent, updated_at: Date.now() });
+          await settings.set("accent", data.accent);
         }
-        await broadcast(sfiId, pages, blocks);
+        await settings.set("updated_at", Date.now());
+        await broadcast(sfiId, settings, blocks);
         return send({ ok: true });
       }
 
@@ -230,8 +221,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
           await blocks.upsert(null, { kind: "pub_frame", heading, url, width, height, sort_order: order });
         }
 
-        await touchPage(pages);
-        await broadcast(sfiId, pages, blocks);
+        await touchPage(settings);
+        await broadcast(sfiId, settings, blocks);
         return send({ ok: true });
       }
 
@@ -269,8 +260,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
         if (data.height !== undefined) {
           await blocks.upsert(id, { height: clampDim(data.height, 320) });
         }
-        await touchPage(pages);
-        await broadcast(sfiId, pages, blocks);
+        await touchPage(settings);
+        await broadcast(sfiId, settings, blocks);
         return send({ ok: true });
       }
 
@@ -278,8 +269,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
         const id = blockMatch[1];
         if (!(await blocks.get(id))) return send({ error: "not found" }, 404);
         await blocks.delete(id);
-        await touchPage(pages);
-        await broadcast(sfiId, pages, blocks);
+        await touchPage(settings);
+        await broadcast(sfiId, settings, blocks);
         return send({ ok: true });
       }
 
@@ -294,7 +285,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
         for (let i = 0; i < ids.length; i++) {
           if (known.has(ids[i])) await blocks.upsert(ids[i], { sort_order: i });
         }
-        await broadcast(sfiId, pages, blocks);
+        await broadcast(sfiId, settings, blocks);
         return send({ ok: true });
       }
 

@@ -31,11 +31,12 @@
 import {
   log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance,
   frameDataDir, serveFileAtPath, sanitizeText, clampInt, toIntOrNull, path,
-  declareTables, ensureTables, table,
+  declareTables, ensureTables, table, frameSettings,
 } from "@frame-core";
 
 type Peer = ReturnType<typeof parsePeerInfo>;
 type Tbl = ReturnType<typeof table>;
+type Settings = ReturnType<typeof frameSettings>;
 
 // ----- Shapes ---------------------------------------------------------------------------
 type Kind = "thought" | "question" | "status" | "announcement";
@@ -81,17 +82,6 @@ function postDir(sfiId: string, postId: string): string {
 // ----- LocalTables ------------------------------------------------------------------------
 declareTables([
   {
-    key: "prefs",
-    title: "Outpost Prefs",
-    description: "Heading, tagline, and posting policy for this outpost.",
-    local: true,
-    schema: [
-      { name: "title",        col_type: "text", nullable: false, default_val: "Outpost" },
-      { name: "tagline",      col_type: "text", nullable: false, default_val: "" },
-      { name: "who_can_post", col_type: "text", nullable: false, default_val: "editors" },
-    ],
-  },
-  {
     key: "posts",
     title: "Outpost Posts",
     description: "Published posts for this outpost, newest first.",
@@ -131,23 +121,29 @@ declareTables([
   },
 ]);
 
-interface Tables { prefs: Tbl; posts: Tbl; media: Tbl; votes: Tbl; }
+interface Tables { settings: Settings; posts: Tbl; media: Tbl; votes: Tbl; }
 
-// The prefs row is a singleton per placement (LocalTables are placement-scoped).
+// Prefs live in the per-placement frameSettings key/value store — one row per key,
+// race-free (no query-then-insert), and extensible without a schema change.
 async function getPrefs(t: Tables): Promise<Prefs> {
-  const { rows } = await t.prefs.query({ limit: 1 });
-  const row = rows[0];
-  if (!row) return { ...DEFAULT_PREFS };
+  const [title, tagline, who] = await Promise.all([
+    t.settings.get<string>("title"),
+    t.settings.get<string>("tagline"),
+    t.settings.get<string>("who_can_post"),
+  ]);
   return {
-    title: (row.title as string) || DEFAULT_PREFS.title,
-    tagline: (row.tagline as string) ?? "",
-    who_can_post: row.who_can_post === "owner" ? "owner" : "editors",
+    title: title || DEFAULT_PREFS.title,
+    tagline: tagline ?? "",
+    who_can_post: who === "owner" ? "owner" : "editors",
   };
 }
 
 async function setPrefs(t: Tables, next: Prefs): Promise<void> {
-  const { rows } = await t.prefs.query({ limit: 1 });
-  await t.prefs.upsert(rows[0]?._row_id ?? null, next);
+  await Promise.all([
+    t.settings.set("title", next.title),
+    t.settings.set("tagline", next.tagline),
+    t.settings.set("who_can_post", next.who_can_post),
+  ]);
 }
 
 function rowToPost(r: any): PostRow {
@@ -281,7 +277,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   const ready = ensureTables(peer);
   if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
   const t: Tables = {
-    prefs: table("prefs", peer.sfi_id),
+    settings: frameSettings(peer.sfi_id),
     posts: table("posts", peer.sfi_id),
     media: table("media", peer.sfi_id),
     votes: table("votes", peer.sfi_id),

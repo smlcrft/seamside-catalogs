@@ -15,7 +15,7 @@
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, serveHtmlShell, pushToInstance, parsePeerInfo,
-  parseJsonBody, declareTables, ensureTables, table,
+  parseJsonBody, declareTables, ensureTables, table, frameSettings,
 } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
@@ -60,18 +60,9 @@ declareTables([
       { name: "created_at",     col_type: "integer", nullable: false, default_val: "0" },
     ],
   },
-  {
-    key: "meta",
-    title: "Help Desk Meta",
-    description: "Per-placement settings + one-time seed flag.",
-    local: true,
-    schema: [
-      { name: "seeded_at", col_type: "integer", nullable: false, default_val: "0" },
-      // Display name for this placement; empty = show the frame's defaults.
-      { name: "title",     col_type: "text",    nullable: true,  default_val: "" },
-    ],
-  },
 ]);
+// Per-placement settings (title, one-time seed marker) live in the built-in
+// frameSettings(sfi) key/value store — no bespoke "meta" table, no singleton race.
 
 // ----------------------------------------------------------------------------------------
 // HELPERS
@@ -126,23 +117,26 @@ async function listNotes(notes: Tbl, submissionId: string) {
   return rows.map(hydrateNote);
 }
 
-// Seed a default "Message" field the first time we see a placement. After the initial seed
-// the admin can delete or replace the field — subsequent requests won't re-seed.
-async function ensureDefaultFields(meta: Tbl, fields: Tbl): Promise<void> {
-  const seeded = await meta.query({ limit: 1 });
-  if (seeded.rows.length > 0) return;
-  await meta.upsert(null, { seeded_at: Date.now(), title: "" });
-  const existing = await fields.query({ limit: 1 });
-  if (existing.total > 0) return;
-  await fields.upsert(null, { label: "Message", type: "textarea", options_json: "[]", required: 0, sort_order: 0 });
+type Settings = ReturnType<typeof frameSettings>;
+
+// The default seed field uses a fixed id so a concurrent first-load can't create
+// duplicate "Message" fields. User-added fields keep random ids.
+const DEFAULT_FIELD_ROW = "default_message";
+
+// Seed a default "Message" field the first time we see a placement. The "seeded"
+// setting is the one-time marker — after the initial seed the admin can delete or
+// replace the field and subsequent requests won't re-seed.
+async function ensureDefaultFields(settings: Settings, fields: Tbl): Promise<void> {
+  if (await settings.get("seeded")) return;
+  await settings.set("seeded", true);
+  await fields.upsert(DEFAULT_FIELD_ROW, { label: "Message", type: "textarea", options_json: "[]", required: 0, sort_order: 0 });
 }
 
 const MAX_DESK_TITLE = 120;
 
 /// This placement's display name ("" = unset; UIs fall back to their defaults).
-async function getTitle(meta: Tbl): Promise<string> {
-  const { rows } = await meta.query({ limit: 1 });
-  return (rows[0]?.title as string) || "";
+async function getTitle(settings: Settings): Promise<string> {
+  return (await settings.get<string>("title", "")) || "";
 }
 
 // Route ids are opaque row-id strings (hex); a path segment must not contain '/'.
@@ -184,13 +178,13 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     const submissions = table("submissions", sfiId);
     const fieldsTbl   = table("field_configs", sfiId);
     const notesTbl    = table("notes", sfiId);
-    const metaTbl     = table("meta", sfiId);
+    const settings    = frameSettings(sfiId);
 
     // ----- public: fetch the form field config for this placement (anon or admin).
     // Includes the placement's display title so the public view can show it.
     if (reqPath === "/api/config" && method === "GET") {
-      await ensureDefaultFields(metaTbl, fieldsTbl);
-      return send({ fields: await listFields(fieldsTbl), title: await getTitle(metaTbl) });
+      await ensureDefaultFields(settings, fieldsTbl);
+      return send({ fields: await listFields(fieldsTbl), title: await getTitle(settings) });
     }
 
     // ----- public: anonymous submission endpoint.
@@ -239,7 +233,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     // ----- admin: everything past this point requires a known user.
     if (reqPath.startsWith("/api/admin/")) {
       if (anon) return send({ error: "forbidden" }, 403);
-      await ensureDefaultFields(metaTbl, fieldsTbl);
+      await ensureDefaultFields(settings, fieldsTbl);
 
       // Heartbeat — kept so the admin UI can ping cheaply; realtime is delivered via pushToInstance.
       if (reqPath === "/api/admin/register" && method === "POST") {
@@ -252,8 +246,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
         const data = parseJsonBody(body);
         if (!data || typeof data.title !== "string") return send({ error: "title required (string)" }, 400);
         const title = data.title.trim().slice(0, MAX_DESK_TITLE);
-        const { rows } = await metaTbl.query({ limit: 1 });
-        await metaTbl.upsert(rows[0]?._row_id ?? null, { title });
+        await settings.set("title", title);
         pushToInstance(sfiId, { type: "hd_title_changed", sfi_id: sfiId, title });
         return send({ ok: true, title });
       }

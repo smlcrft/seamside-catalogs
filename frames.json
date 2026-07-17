@@ -56,7 +56,7 @@
       "name": "Community Home",
       "description": "A minimal website builder for a community home page. Admins configure the title, color, sections, and links; anonymous visitors see the published public page.",
       "icon": "",
-      "modified_at": "2026-07-16T20:04:56Z",
+      "modified_at": "2026-07-17T19:47:22Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -70,7 +70,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_home.tar.gz",
-      "package_sha256": "5c7bde192c13d1d44ca39c81a1c1a436d49e52fcc4799ae0829743ca37a48fa0",
+      "package_sha256": "379c388323a0b6d4a67c43a4803a3784acf01e2014588d87ccec276e2ebfa7a8",
       "app_version_min": "0.1.12"
     },
     {
@@ -243,7 +243,7 @@
       "name": "Help Desk",
       "description": "Anonymous visitors submit a message with email (plus admin-configured fields); known users in the space see a realtime inbox of incoming correspondence.",
       "icon": "",
-      "modified_at": "2026-07-17T00:28:18Z",
+      "modified_at": "2026-07-17T19:39:24Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -257,7 +257,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/help_desk.tar.gz",
-      "package_sha256": "eeee389a906141e8134d203d439a750bd04b1724d5316dcbe8d50e65065fa524",
+      "package_sha256": "9e98c4d07f3c64a1075d9c01659c3a1544f482d3392a4cd1dbd882435ffdc33b",
       "app_version_min": "0.1.12"
     },
     {
@@ -338,7 +338,7 @@
       "name": "Outpost",
       "description": "A lightweight public posting board for sharing with the world. Space members (editors) publish short posts \u2014 a passing thought, an open question, a status update, an announcement, a quick poll, or an image / audio / video clip \u2014 and anyone with the frame's share link can read them. Each post shows its author and the time it was shared, and URLs in the text become clickable (opened safely in the reader's browser). Posts live entirely in the frame's own data folder: one subfolder per placement holds a encrypted LocalTable (posts, media rows, and poll votes \u2014 indexed so a large, active feed stays fast) plus a per-post subfolder for any attached media bytes. Local file only, no sync tables.",
       "icon": "",
-      "modified_at": "2026-07-16T20:04:56Z",
+      "modified_at": "2026-07-17T19:47:22Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 480,
@@ -352,7 +352,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/outpost.tar.gz",
-      "package_sha256": "ff8e4d677b38dc9ce64c647e13a18c618d0848775774d8c5ffe740e54ba72e88",
+      "package_sha256": "49e55e327f51349fe6b64e115ffec26971deef1e33564c9b34f6cafdc2cd2a95",
       "app_version_min": "0.1.12"
     },
     {
@@ -361,7 +361,7 @@
       "name": "Roadmap",
       "description": "A simple, robust project roadmapping tool \u2014 one roadmap per placement. Set a project name, overview, and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in-progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Collapsed milestone headers still show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days-remaining and overdue color-coding. A milestone can only be marked done once all its tasks are complete. Everything is stored in a lightweight per-placement encrypted LocalTable database on the host and pushed live to every viewer; non-members get a read-only view.",
       "icon": "",
-      "modified_at": "2026-07-16T20:04:56Z",
+      "modified_at": "2026-07-17T19:47:22Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 720,
@@ -375,7 +375,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roadmap.tar.gz",
-      "package_sha256": "0f09ec35a172822b2cf4b61e350c62a831e208fdaf384bc44cb078d0eb16c988",
+      "package_sha256": "838cd91e168946f868d4de15929d3bbdad747a94c3a2ec2613aed30f0195ee84",
       "app_version_min": "0.1.12"
     },
     {

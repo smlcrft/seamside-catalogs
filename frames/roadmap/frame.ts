@@ -30,25 +30,11 @@
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo,
   pushToInstance, sanitizeText, toIntOrNull, clampInt,
-  declareTables, ensureTables, table,
+  declareTables, ensureTables, table, frameSettings,
 } from "@frame-core";
 
 // ----- LocalTables (encrypted, per-placement — no sfi_id columns needed) ----------------
 declareTables([
-  {
-    key: "meta",
-    title: "Roadmap Meta",
-    description: "Project name, overview, links, and accent for this placement.",
-    local: true,
-    schema: [
-      { name: "name",        col_type: "text",    nullable: false, default_val: "" },
-      { name: "overview",    col_type: "text",    nullable: false, default_val: "" },
-      { name: "links_json",  col_type: "text",    nullable: false, default_val: "[]" },
-      { name: "accent",      col_type: "text",    nullable: false, default_val: "c4" },
-      { name: "updated_ms",  col_type: "integer", nullable: false, default_val: "0" },
-      { name: "public_view", col_type: "integer", nullable: false, default_val: "0" },
-    ],
-  },
   {
     key: "milestones",
     title: "Roadmap Milestones",
@@ -83,7 +69,8 @@ declareTables([
 ]);
 
 type Tbl = ReturnType<typeof table>;
-interface Tables { meta: Tbl; milestones: Tbl; tasks: Tbl; }
+type Settings = ReturnType<typeof frameSettings>;
+interface Tables { settings: Settings; milestones: Tbl; tasks: Tbl; }
 
 // ----- Constants ------------------------------------------------------------------------
 const MAX_NAME = 160;
@@ -105,15 +92,10 @@ function isSafeUrl(u: string): boolean {
   return /^https?:\/\//i.test(u.trim());
 }
 
-// ----- Meta + buckets bootstrap ---------------------------------------------------------
+// ----- Buckets bootstrap ----------------------------------------------------------------
+// Project meta (name/overview/links/accent/public_view) lives in the per-placement
+// frameSettings store, which needs no seeding — getMeta reads keys with defaults.
 async function ensurePlacement(t: Tables): Promise<void> {
-  const has = await t.meta.query({ limit: 1 });
-  if (has.rows.length === 0) {
-    await t.meta.upsert(null, {
-      name: "", overview: "", links_json: "[]", accent: "c4",
-      updated_ms: Date.now(), public_view: 0,
-    });
-  }
   // Auto-create the two parking buckets once per placement.
   for (const b of BUCKETS) {
     const exists = await t.milestones.query({ where: { kind: b.kind }, limit: 1 });
@@ -127,21 +109,20 @@ async function ensurePlacement(t: Tables): Promise<void> {
 }
 
 // ----- Readers --------------------------------------------------------------------------
-async function metaRow(t: Tables) {
-  const { rows } = await t.meta.query({ limit: 1 });
-  return rows[0] ?? null;
-}
-
 async function getMeta(t: Tables) {
-  const m = await metaRow(t);
-  let links: Array<{ label: string; url: string }> = [];
-  try { links = JSON.parse((m?.links_json as string) ?? "[]"); } catch { links = []; }
+  const [name, overview, accent, links, publicView] = await Promise.all([
+    t.settings.get<string>("name"),
+    t.settings.get<string>("overview"),
+    t.settings.get<string>("accent"),
+    t.settings.get<Array<{ label: string; url: string }>>("links"),
+    t.settings.get<boolean>("public_view"),
+  ]);
   return {
-    name: m?.name ?? "",
-    overview: m?.overview ?? "",
-    accent: VALID_ACCENTS.has((m?.accent as string) ?? "") ? m!.accent : "c4",
+    name: name ?? "",
+    overview: overview ?? "",
+    accent: VALID_ACCENTS.has(accent ?? "") ? accent : "c4",
     links: Array.isArray(links) ? links : [],
-    public_view: !!m?.public_view,
+    public_view: !!publicView,
   };
 }
 
@@ -223,7 +204,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   const ready = ensureTables(peer);
   if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
   const t: Tables = {
-    meta: table("meta", sfiId),
+    settings: frameSettings(sfiId),
     milestones: table("milestones", sfiId),
     tasks: table("tasks", sfiId),
   };
@@ -249,24 +230,20 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   // ----- Project settings: name / overview / links / accent -----------------------------
   if (reqPath === "/api/settings" && method === "POST") {
     if (!(await editorOnly())) return;
-    const m = await metaRow(t);
-    if (!m) return jsonReply(replyPort, 500, { error: "meta missing" });
-    const metaId = m._row_id;
     const v = parseJsonBody<{ name?: unknown; overview?: unknown; links?: unknown; accent?: unknown; public_view?: unknown }>(body);
     if (v?.public_view !== undefined) {
-      const on = (toIntOrNull(v.public_view) ?? 0) ? 1 : 0;
-      await t.meta.upsert(metaId, { public_view: on, updated_ms: Date.now() });
+      await t.settings.set("public_view", !!(toIntOrNull(v.public_view) ?? 0));
     }
     if (v?.name !== undefined) {
-      await t.meta.upsert(metaId, { name: sanitizeText(v.name, MAX_NAME), updated_ms: Date.now() });
+      await t.settings.set("name", sanitizeText(v.name, MAX_NAME));
     }
     if (v?.overview !== undefined) {
-      await t.meta.upsert(metaId, { overview: sanitizeText(v.overview, MAX_OVERVIEW), updated_ms: Date.now() });
+      await t.settings.set("overview", sanitizeText(v.overview, MAX_OVERVIEW));
     }
     if (v?.accent !== undefined) {
       const a = sanitizeText(v.accent, 4);
       if (!VALID_ACCENTS.has(a)) return jsonReply(replyPort, 400, { error: "invalid accent" });
-      await t.meta.upsert(metaId, { accent: a, updated_ms: Date.now() });
+      await t.settings.set("accent", a);
     }
     if (v?.links !== undefined) {
       const raw = Array.isArray(v.links) ? v.links : [];
@@ -274,8 +251,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
         label: sanitizeText(l?.label, MAX_LABEL),
         url: sanitizeText(l?.url, MAX_URL).trim(),
       })).filter((l) => l.label && l.url && isSafeUrl(l.url));
-      await t.meta.upsert(metaId, { links_json: JSON.stringify(links), updated_ms: Date.now() });
+      await t.settings.set("links", links);
     }
+    await t.settings.set("updated_ms", Date.now());
     notify(sfiId);
     return await ok();
   }
