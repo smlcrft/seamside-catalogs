@@ -18,23 +18,24 @@
 //                                           (Poll voting is a softer gate — any real Seamside
 //                                           user may vote, member or not, but NOT anonymous
 //                                           web viewers, who see results read-only.)
-//   data_storage:   storage-local-db      — one local SQLite database PER SFI at
-//                                           data/outposts/<sfi>/posts.db (posts / media rows /
-//                                           votes / prefs) so a large, active community's feed
-//                                           stays fast to index, page, and search. Attached media
-//                                           bytes still live as files in a <post_id>/ subfolder
-//                                           beside the db. Per-device — it does NOT sync to peers;
-//                                           the host serves its posts to viewers over HTTP.
+//   data_storage:   storage-local-db      — LocalTables (encrypted at rest, host-local, not
+//                                           peer-synced), scoped per placement: posts / media
+//                                           rows / votes / prefs. Attached media bytes still
+//                                           live as files in a <post_id>/ subfolder under
+//                                           data/outposts/<sfi>/. The host serves its posts
+//                                           to viewers over HTTP.
 //   view_realtime:  view-collaborative    — every mutation calls pushToInstance so all viewers
 //                                           of the placement refresh live.
-//   settings_scope: settings-per-sfi      — a separate db (and prefs row) per peer.sfi_id.
+//   settings_scope: settings-per-sfi      — tables (and the prefs row) are per peer.sfi_id.
 // ----------------------------------------------------------------------------------------
 import {
   log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance,
-  frameDataDir, serveFileAtPath, sanitizeText, clampInt, toIntOrNull, path, DatabaseSync,
+  frameDataDir, serveFileAtPath, sanitizeText, clampInt, toIntOrNull, path,
+  declareTables, ensureTables, table,
 } from "@frame-core";
 
 type Peer = ReturnType<typeof parsePeerInfo>;
+type Tbl = ReturnType<typeof table>;
 
 // ----- Shapes ---------------------------------------------------------------------------
 type Kind = "thought" | "question" | "status" | "announcement";
@@ -47,7 +48,7 @@ type Prefs = {
 };
 const DEFAULT_PREFS: Prefs = { title: "Outpost", tagline: "", who_can_post: "editors" };
 
-// A post row as read back from SQLite (poll_options is a JSON string or null).
+// A post as read back from the table (poll_options is a JSON string or null).
 type PostRow = {
   id: string; author: string; author_user_id: string; created_ms: number;
   kind: string; text: string; poll_options: string | null;
@@ -66,105 +67,95 @@ const MAX_OPTION_LEN = 120;
 const DEFAULT_PAGE = 15;   // posts per feed page
 const MAX_PAGE = 50;
 
-// ----- On-disk layout -------------------------------------------------------------------
-// data/outposts/<sfi_slug>/posts.db            — SQLite: prefs, posts, media rows, votes
-// data/outposts/<sfi_slug>/<post_id>/<media_id> — one file per attached media item (bytes)
+// ----- On-disk layout (media BYTES only; rows live in LocalTables) -----------------------
+// data/outposts/<sfi_slug>/<post_id>/<media_id> — one file per attached media item.
 const OUTPOSTS_DIR = path.join(frameDataDir(import.meta.url), "outposts");
 
 function sfiSlug(sfiId: string): string {
   return (sfiId || "").replace(/[^a-zA-Z0-9_-]/g, "_") || "default";
 }
-function storeDir(sfiId: string): string {
-  return path.join(OUTPOSTS_DIR, sfiSlug(sfiId));
-}
 function postDir(sfiId: string, postId: string): string {
-  return path.join(storeDir(sfiId), postId);
+  return path.join(OUTPOSTS_DIR, sfiSlug(sfiId), postId);
 }
 
-// ----- Per-SFI database handle (opened lazily, cached for the worker's lifetime) --------
-const SCHEMA = `
-  CREATE TABLE IF NOT EXISTS prefs (
-    id           INTEGER PRIMARY KEY CHECK (id = 1),
-    title        TEXT NOT NULL DEFAULT 'Outpost',
-    tagline      TEXT NOT NULL DEFAULT '',
-    who_can_post TEXT NOT NULL DEFAULT 'editors'
-  );
-  INSERT OR IGNORE INTO prefs (id) VALUES (1);
+// ----- LocalTables ------------------------------------------------------------------------
+declareTables([
+  {
+    key: "prefs",
+    title: "Outpost Prefs",
+    description: "Heading, tagline, and posting policy for this outpost.",
+    local: true,
+    schema: [
+      { name: "title",        col_type: "text", nullable: false, default_val: "Outpost" },
+      { name: "tagline",      col_type: "text", nullable: false, default_val: "" },
+      { name: "who_can_post", col_type: "text", nullable: false, default_val: "editors" },
+    ],
+  },
+  {
+    key: "posts",
+    title: "Outpost Posts",
+    description: "Published posts for this outpost, newest first.",
+    local: true,
+    schema: [
+      { name: "author",         col_type: "text",    nullable: false, default_val: "" },
+      { name: "author_user_id", col_type: "text",    nullable: false, default_val: "" },
+      { name: "created_ms",     col_type: "integer", nullable: false, default_val: "0" },
+      { name: "kind",           col_type: "text",    nullable: false, default_val: "thought" },
+      { name: "text",           col_type: "text",    nullable: false, default_val: "" },
+      { name: "poll_options",   col_type: "text",    nullable: true },  // JSON array of strings, or null if not a poll
+    ],
+  },
+  {
+    key: "media",
+    title: "Outpost Media",
+    description: "Attached-media metadata (bytes live as files beside the tables).",
+    local: true,
+    schema: [
+      { name: "post_id", col_type: "text",    nullable: false, default_val: "" },
+      { name: "name",    col_type: "text",    nullable: false, default_val: "" },
+      { name: "mime",    col_type: "text",    nullable: false, default_val: "" },
+      { name: "size",    col_type: "integer", nullable: false, default_val: "0" },
+      { name: "ord",     col_type: "integer", nullable: false, default_val: "0" },
+    ],
+  },
+  {
+    key: "votes",
+    title: "Outpost Votes",
+    description: "One poll vote per (post, voter); re-voting replaces the choice.",
+    local: true,
+    schema: [
+      { name: "post_id", col_type: "text",    nullable: false, default_val: "" },
+      { name: "voter",   col_type: "text",    nullable: false, default_val: "" },
+      { name: "choice",  col_type: "integer", nullable: false, default_val: "0" },
+    ],
+  },
+]);
 
-  CREATE TABLE IF NOT EXISTS posts (
-    id             TEXT PRIMARY KEY,
-    author         TEXT NOT NULL DEFAULT '',
-    author_user_id TEXT NOT NULL DEFAULT '',
-    created_ms     INTEGER NOT NULL,
-    kind           TEXT NOT NULL DEFAULT 'thought',
-    text           TEXT NOT NULL DEFAULT '',
-    poll_options   TEXT                       -- JSON array of strings, or NULL if not a poll
-  );
-  CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_ms DESC);
+interface Tables { prefs: Tbl; posts: Tbl; media: Tbl; votes: Tbl; }
 
-  CREATE TABLE IF NOT EXISTS media (
-    id      TEXT PRIMARY KEY,
-    post_id TEXT NOT NULL,
-    name    TEXT NOT NULL,
-    mime    TEXT NOT NULL,
-    size    INTEGER NOT NULL,
-    ord     INTEGER NOT NULL DEFAULT 0
-  );
-  CREATE INDEX IF NOT EXISTS idx_media_post ON media(post_id);
-
-  CREATE TABLE IF NOT EXISTS votes (
-    post_id TEXT NOT NULL,
-    voter   TEXT NOT NULL,
-    choice  INTEGER NOT NULL,
-    PRIMARY KEY (post_id, voter)
-  );
-  CREATE INDEX IF NOT EXISTS idx_votes_post ON votes(post_id);
-`;
-
-type Stmt = ReturnType<DatabaseSync["prepare"]>;
-type Handle = {
-  db: DatabaseSync;
-  prefsGet: Stmt; prefsSet: Stmt;
-  listRecent: Stmt; listBefore: Stmt;
-  getPost: Stmt; insertPost: Stmt; deletePost: Stmt;
-  getMedia: Stmt; countMedia: Stmt; insertMedia: Stmt; deleteMediaForPost: Stmt;
-  upsertVote: Stmt; deleteVotesForPost: Stmt;
-};
-
-const handles = new Map<string, Handle>();
-function handle(sfiId: string): Handle {
-  const slug = sfiSlug(sfiId);
-  const existing = handles.get(slug);
-  if (existing) return existing;
-
-  Deno.mkdirSync(storeDir(sfiId), { recursive: true });
-  const db = new DatabaseSync(path.join(storeDir(sfiId), "posts.db"));
-  db.exec(SCHEMA);
-  const cols = "id, author, author_user_id, created_ms, kind, text, poll_options";
-  const h: Handle = {
-    db,
-    prefsGet:   db.prepare("SELECT title, tagline, who_can_post FROM prefs WHERE id = 1"),
-    prefsSet:   db.prepare("UPDATE prefs SET title = ?, tagline = ?, who_can_post = ? WHERE id = 1"),
-    // Reverse-chronological pages: newest first, then keyset by created_ms for older pages.
-    listRecent: db.prepare(`SELECT ${cols} FROM posts ORDER BY created_ms DESC LIMIT ?`),
-    listBefore: db.prepare(`SELECT ${cols} FROM posts WHERE created_ms < ? ORDER BY created_ms DESC LIMIT ?`),
-    getPost:    db.prepare(`SELECT ${cols} FROM posts WHERE id = ?`),
-    insertPost: db.prepare("INSERT INTO posts (id, author, author_user_id, created_ms, kind, text, poll_options) VALUES (?, ?, ?, ?, ?, ?, ?)"),
-    deletePost: db.prepare("DELETE FROM posts WHERE id = ?"),
-    getMedia:   db.prepare("SELECT name, mime FROM media WHERE id = ? AND post_id = ?"),
-    countMedia: db.prepare("SELECT COUNT(*) AS n FROM media WHERE post_id = ?"),
-    insertMedia: db.prepare("INSERT INTO media (id, post_id, name, mime, size, ord) VALUES (?, ?, ?, ?, ?, ?)"),
-    deleteMediaForPost: db.prepare("DELETE FROM media WHERE post_id = ?"),
-    upsertVote: db.prepare("INSERT INTO votes (post_id, voter, choice) VALUES (?, ?, ?) ON CONFLICT(post_id, voter) DO UPDATE SET choice = excluded.choice"),
-    deleteVotesForPost: db.prepare("DELETE FROM votes WHERE post_id = ?"),
+// The prefs row is a singleton per placement (LocalTables are placement-scoped).
+async function getPrefs(t: Tables): Promise<Prefs> {
+  const { rows } = await t.prefs.query({ limit: 1 });
+  const row = rows[0];
+  if (!row) return { ...DEFAULT_PREFS };
+  return {
+    title: (row.title as string) || DEFAULT_PREFS.title,
+    tagline: (row.tagline as string) ?? "",
+    who_can_post: row.who_can_post === "owner" ? "owner" : "editors",
   };
-  handles.set(slug, h);
-  return h;
 }
 
-function getPrefs(sfiId: string): Prefs {
-  const row = handle(sfiId).prefsGet.get() as Partial<Prefs> | undefined;
-  return { ...DEFAULT_PREFS, ...(row || {}) };
+async function setPrefs(t: Tables, next: Prefs): Promise<void> {
+  const { rows } = await t.prefs.query({ limit: 1 });
+  await t.prefs.upsert(rows[0]?._row_id ?? null, next);
+}
+
+function rowToPost(r: any): PostRow {
+  return {
+    id: r._row_id, author: r.author, author_user_id: r.author_user_id,
+    created_ms: r.created_ms, kind: r.kind, text: r.text,
+    poll_options: (r.poll_options as string | null) ?? null,
+  };
 }
 
 // ----- Ids / validation -----------------------------------------------------------------
@@ -204,22 +195,29 @@ function publicMedia(m: MediaRow) {
 
 // Project a set of post rows into the public shape, scoping media + vote lookups to just
 // these ids (one grouped query each) so a page stays cheap regardless of total feed size.
-function projectPosts(h: Handle, rows: PostRow[], peer: Peer, vkey: string) {
+async function projectPosts(t: Tables, rows: PostRow[], peer: Peer, vkey: string) {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
-  const ph = ids.map(() => "?").join(",");
 
   const mediaByPost = new Map<string, MediaRow[]>();
-  for (const m of h.db.prepare(`SELECT id, post_id, name, mime, size FROM media WHERE post_id IN (${ph}) ORDER BY post_id, ord`).all(...ids) as MediaRow[]) {
+  const { rows: mediaRows } = await t.media.query({
+    where: { post_id: { in: ids } },
+    order_by: [{ col: "post_id" }, { col: "ord" }],
+  });
+  for (const r of mediaRows) {
+    const m: MediaRow = { id: r._row_id, post_id: r.post_id as string, name: r.name as string, mime: r.mime as string, size: r.size as number };
     (mediaByPost.get(m.post_id) ?? mediaByPost.set(m.post_id, []).get(m.post_id)!).push(m);
   }
+  // Poll tallies: COUNT(*) per (post, choice), done by the table layer.
   const countsByPost = new Map<string, Map<number, number>>();
-  for (const t of h.db.prepare(`SELECT post_id, choice, COUNT(*) AS c FROM votes WHERE post_id IN (${ph}) GROUP BY post_id, choice`).all(...ids) as { post_id: string; choice: number; c: number }[]) {
-    (countsByPost.get(t.post_id) ?? countsByPost.set(t.post_id, new Map()).get(t.post_id)!).set(Number(t.choice), Number(t.c));
+  for (const g of await t.votes.countBy(["post_id", "choice"], { where: { post_id: { in: ids } } })) {
+    const pid = g.post_id as string;
+    (countsByPost.get(pid) ?? countsByPost.set(pid, new Map()).get(pid)!).set(Number(g.choice), Number(g._count));
   }
   const myByPost = new Map<string, number>();
-  if (vkey) for (const r of h.db.prepare(`SELECT post_id, choice FROM votes WHERE voter = ? AND post_id IN (${ph})`).all(vkey, ...ids) as { post_id: string; choice: number }[]) {
-    myByPost.set(r.post_id, Number(r.choice));
+  if (vkey) {
+    const { rows: mine } = await t.votes.query({ where: { voter: vkey, post_id: { in: ids } } });
+    for (const r of mine) myByPost.set(r.post_id as string, Number(r.choice));
   }
 
   return rows.map((p) => {
@@ -248,22 +246,25 @@ function projectPosts(h: Handle, rows: PostRow[], peer: Peer, vkey: string) {
 }
 
 // One reverse-chronological page. `before` (a created_ms cursor) is null for the first page.
-function pagePayload(h: Handle, peer: Peer, vkey: string, before: number | null, limit: number) {
-  const rows = (before == null
-    ? h.listRecent.all(limit + 1)
-    : h.listBefore.all(before, limit + 1)) as PostRow[];
-  const has_more = rows.length > limit;
-  const page = has_more ? rows.slice(0, limit) : rows;
+async function pagePayload(t: Tables, peer: Peer, vkey: string, before: number | null, limit: number) {
+  const { rows } = await t.posts.query({
+    where: before == null ? undefined : { created_ms: { lt: before } },
+    order_by: [{ col: "created_ms", dir: "desc" }, { col: "_created_at", dir: "desc" }],
+    limit: limit + 1,
+  });
+  const posts = rows.map(rowToPost);
+  const has_more = posts.length > limit;
+  const page = has_more ? posts.slice(0, limit) : posts;
   return {
-    posts: projectPosts(h, page, peer, vkey),
+    posts: await projectPosts(t, page, peer, vkey),
     has_more,
     next_before: page.length ? page[page.length - 1].created_ms : null,
   };
 }
 
-function projectOne(h: Handle, id: string, peer: Peer, vkey: string) {
-  const row = h.getPost.get(id) as PostRow | undefined;
-  return row ? projectPosts(h, [row], peer, vkey)[0] : null;
+async function projectOne(t: Tables, id: string, peer: Peer, vkey: string) {
+  const row = await t.posts.get(id);
+  return row ? (await projectPosts(t, [rowToPost(row)], peer, vkey))[0] : null;
 }
 
 // ----- Networking -----------------------------------------------------------------------
@@ -275,11 +276,21 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
   }
 
-  // Identity + prefs + the FIRST page of the feed, in one round trip. ?voter= carries the
-  // anon device token; ?limit= lets a live-refresh re-request the range already on screen.
+  // Local tables are always ready; the gate stays so a future graduation to
+  // synced tables needs no code change here.
+  const ready = ensureTables(peer);
+  if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
+  const t: Tables = {
+    prefs: table("prefs", peer.sfi_id),
+    posts: table("posts", peer.sfi_id),
+    media: table("media", peer.sfi_id),
+    votes: table("votes", peer.sfi_id),
+  };
+
+  // Identity + prefs + the FIRST page of the feed, in one round trip. ?limit= lets a
+  // live-refresh re-request the range already on screen.
   if (reqPath === "/api/state" && method === "GET") {
-    const h = handle(peer.sfi_id);
-    const prefs = getPrefs(peer.sfi_id);
+    const prefs = await getPrefs(t);
     const limit = clampInt(toIntOrNull(query.limit) ?? DEFAULT_PAGE, 1, MAX_PAGE);
     return jsonReply(replyPort, 200, {
       me: {
@@ -290,21 +301,20 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
       prefs,
       can_post: canPost(peer, prefs),
       can_vote: canVote(peer),
-      ...pagePayload(h, peer, voterId(peer), null, limit),
+      ...(await pagePayload(t, peer, voterId(peer), null, limit)),
     });
   }
 
   // Older pages: ?before=<created_ms cursor>&limit=  (public — read-only feed).
   if (reqPath === "/api/posts" && method === "GET") {
-    const h = handle(peer.sfi_id);
     const before = toIntOrNull(query.before);
     const limit = clampInt(toIntOrNull(query.limit) ?? DEFAULT_PAGE, 1, MAX_PAGE);
-    return jsonReply(replyPort, 200, pagePayload(h, peer, voterId(peer), before, limit));
+    return jsonReply(replyPort, 200, await pagePayload(t, peer, voterId(peer), before, limit));
   }
 
   // Create a post (metadata only; media is uploaded afterward). Editors only.
   if (reqPath === "/api/post" && method === "POST") {
-    const prefs = getPrefs(peer.sfi_id);
+    const prefs = await getPrefs(t);
     if (!canPost(peer, prefs)) return jsonReply(replyPort, 403, { error: "editors only" });
     const v = parseJsonBody<{ text?: string; kind?: string; poll_options?: unknown[] }>(body) || {};
     const text = sanitizeText(v.text, MAX_TEXT);
@@ -320,33 +330,40 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     }
     if (!text && !pollJson) return jsonReply(replyPort, 400, { error: "a post needs text, a poll, or media" });
 
-    const h = handle(peer.sfi_id);
-    const id = crypto.randomUUID();
-    h.insertPost.run(id, peer.user_name || "Someone", peer.user_id || "", Date.now(), kind, text, pollJson);
+    const { row_id } = await t.posts.upsert(null, {
+      author: peer.user_name || "Someone", author_user_id: peer.user_id || "",
+      created_ms: Date.now(), kind, text, poll_options: pollJson,
+    });
     pushToInstance(peer.sfi_id, { type: "outpost_changed" });
-    return jsonReply(replyPort, 200, { post_id: id, post: projectOne(h, id, peer, voterId(peer)) });
+    return jsonReply(replyPort, 200, { post_id: row_id, post: await projectOne(t, row_id, peer, voterId(peer)) });
   }
 
   // Attach media to a post you just created. Bytes ride in the raw body, name in ?name=.
   if (reqPath.startsWith("/api/post/") && reqPath.endsWith("/media") && method === "POST") {
     const postId = reqPath.slice("/api/post/".length, -"/media".length);
     if (!ID_RE.test(postId)) return jsonReply(replyPort, 400, { error: "bad post id" });
-    const h = handle(peer.sfi_id);
-    if (!canPost(peer, getPrefs(peer.sfi_id))) return jsonReply(replyPort, 403, { error: "editors only" });
-    const post = h.getPost.get(postId) as PostRow | undefined;
+    if (!canPost(peer, await getPrefs(t))) return jsonReply(replyPort, 403, { error: "editors only" });
+    const post = await t.posts.get(postId);
     if (!post) return jsonReply(replyPort, 404, { error: "post not found" });
-    if (!canDeletePost(peer, post.author_user_id)) return jsonReply(replyPort, 403, { error: "not your post" });
-    const ord = Number((h.countMedia.get(postId) as { n: number }).n);
+    if (!canDeletePost(peer, post.author_user_id as string)) return jsonReply(replyPort, 403, { error: "not your post" });
+    const ord = (await t.media.query({ where: { post_id: postId }, limit: 1 })).total;
     if (ord >= MAX_MEDIA_PER_POST) return jsonReply(replyPort, 409, { error: `max ${MAX_MEDIA_PER_POST} attachments` });
     if (body.byteLength > MAX_MEDIA_MB * 1024 * 1024) return jsonReply(replyPort, 413, { error: `file exceeds ${MAX_MEDIA_MB} MB` });
 
     const name = safeName(query.name);
     const mime = sanitizeText(query.mime, 120) || "application/octet-stream";
-    const mediaId = crypto.randomUUID();
-    const dir = postDir(peer.sfi_id, postId);
-    Deno.mkdirSync(dir, { recursive: true });
-    Deno.writeFileSync(path.join(dir, mediaId), new Uint8Array(body));
-    h.insertMedia.run(mediaId, postId, name, mime, body.byteLength, ord);
+    // Row first (its _row_id names the file on disk); best-effort undo if the write fails.
+    const { row_id: mediaId } = await t.media.upsert(null, {
+      post_id: postId, name, mime, size: body.byteLength, ord,
+    });
+    try {
+      const dir = postDir(peer.sfi_id, postId);
+      Deno.mkdirSync(dir, { recursive: true });
+      Deno.writeFileSync(path.join(dir, mediaId), new Uint8Array(body));
+    } catch (e) {
+      await t.media.delete(mediaId);
+      return jsonReply(replyPort, 500, { error: "failed to store media: " + e });
+    }
     pushToInstance(peer.sfi_id, { type: "outpost_changed" });
     return jsonReply(replyPort, 200, { ok: true });
   }
@@ -358,15 +375,16 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
       return jsonReply(replyPort, 400, { error: "bad path" });
     }
     const [postId, mediaId] = parts;
-    const media = handle(peer.sfi_id).getMedia.get(mediaId, postId) as { name: string; mime: string } | undefined;
-    if (!media) return jsonReply(replyPort, 404, { error: "not found" });
+    const media = await t.media.get(mediaId);
+    if (!media || media.post_id !== postId) return jsonReply(replyPort, 404, { error: "not found" });
     let buf: Uint8Array;
     try { buf = Deno.readFileSync(path.join(postDir(peer.sfi_id, postId), mediaId)); }
     catch { return jsonReply(replyPort, 404, { error: "not found" }); }
-    const asciiName = media.name.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+    const mediaName = String(media.name ?? "file");
+    const asciiName = mediaName.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
     return replyPort.postMessage({
-      status: 200, body: buf, contentType: media.mime,
-      headers: { "Content-Disposition": `inline; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(media.name)}` },
+      status: 200, body: buf, contentType: String(media.mime || "application/octet-stream"),
+      headers: { "Content-Disposition": `inline; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(mediaName)}` },
     }, [buf.buffer]);
   }
 
@@ -377,29 +395,33 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     if (!canVote(peer)) return jsonReply(replyPort, 403, { error: "sign in to Seamside to vote" });
     const v = parseJsonBody<{ post_id?: string; option?: number }>(body) || {};
     const vkey = voterId(peer);
-    const h = handle(peer.sfi_id);
-    const post = h.getPost.get(v.post_id ?? "") as PostRow | undefined;
+    const post = typeof v.post_id === "string" && v.post_id ? await t.posts.get(v.post_id) : null;
     if (!post || !post.poll_options) return jsonReply(replyPort, 404, { error: "poll not found" });
     let options: string[] = [];
-    try { options = JSON.parse(post.poll_options); } catch { /* corrupt */ }
+    try { options = JSON.parse(post.poll_options as string); } catch { /* corrupt */ }
     const opt = clampInt(Number(v.option), 0, options.length - 1);
     if (Number(v.option) !== opt) return jsonReply(replyPort, 400, { error: "bad option" });
-    h.upsertVote.run(post.id, vkey, opt);
+    // One vote per (post, voter): re-voting replaces the previous choice.
+    const { rows: existing } = await t.votes.query({
+      where: { post_id: post._row_id, voter: vkey }, limit: 1,
+    });
+    await t.votes.upsert(existing[0]?._row_id ?? null, {
+      post_id: post._row_id, voter: vkey, choice: opt,
+    });
     pushToInstance(peer.sfi_id, { type: "outpost_changed" });
-    return jsonReply(replyPort, 200, { post: projectOne(h, post.id, peer, vkey) });
+    return jsonReply(replyPort, 200, { post: await projectOne(t, post._row_id, peer, vkey) });
   }
 
   // Delete a post (owner, or the editor who wrote it). Removes its media rows + files too.
   if (reqPath.startsWith("/api/delete/") && method === "POST") {
     const postId = reqPath.slice("/api/delete/".length);
     if (!ID_RE.test(postId)) return jsonReply(replyPort, 400, { error: "bad id" });
-    const h = handle(peer.sfi_id);
-    const post = h.getPost.get(postId) as PostRow | undefined;
+    const post = await t.posts.get(postId);
     if (!post) return jsonReply(replyPort, 404, { error: "not found" });
-    if (!canDeletePost(peer, post.author_user_id)) return jsonReply(replyPort, 403, { error: "not allowed" });
-    h.deleteVotesForPost.run(postId);
-    h.deleteMediaForPost.run(postId);
-    h.deletePost.run(postId);
+    if (!canDeletePost(peer, post.author_user_id as string)) return jsonReply(replyPort, 403, { error: "not allowed" });
+    await t.votes.deleteWhere({ post_id: postId });
+    await t.media.deleteWhere({ post_id: postId });
+    await t.posts.delete(postId);
     try { Deno.removeSync(postDir(peer.sfi_id, postId), { recursive: true }); } catch { /* no media */ }
     pushToInstance(peer.sfi_id, { type: "outpost_changed" });
     return jsonReply(replyPort, 200, { ok: true });
@@ -409,13 +431,13 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   if (reqPath === "/api/prefs" && method === "POST") {
     if (!peer.is_owner) return jsonReply(replyPort, 403, { error: "owner only" });
     const v = parseJsonBody<Partial<Prefs>>(body) || {};
-    handle(peer.sfi_id).prefsSet.run(
-      sanitizeText(v.title, MAX_TITLE) || DEFAULT_PREFS.title,
-      sanitizeText(v.tagline, MAX_TAGLINE),
-      v.who_can_post === "owner" ? "owner" : "editors",
-    );
+    await setPrefs(t, {
+      title: sanitizeText(v.title, MAX_TITLE) || DEFAULT_PREFS.title,
+      tagline: sanitizeText(v.tagline, MAX_TAGLINE),
+      who_can_post: v.who_can_post === "owner" ? "owner" : "editors",
+    });
     pushToInstance(peer.sfi_id, { type: "outpost_changed" });
-    return jsonReply(replyPort, 200, { prefs: getPrefs(peer.sfi_id) });
+    return jsonReply(replyPort, 200, { prefs: await getPrefs(t) });
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });

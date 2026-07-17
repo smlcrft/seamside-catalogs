@@ -1,13 +1,13 @@
 {
     "name": "Checklist",
-    "description": "A simple, collaborative to-do list. Each placement is its own list — any member of the space can add tasks, cycle each task through three states (unstarted, in-progress, complete), drag to reorder, and delete. Non-members get a live read-only view. Items, ordering, and states are stored in a lightweight local SQLite database keyed by placement, and every change is pushed live to all viewers.",
+    "description": "A simple, collaborative to-do list. Each placement is its own list — any member of the space can add tasks, cycle each task through three states (unstarted, in-progress, complete), drag to reorder, and delete. Non-members get a live read-only view. Items, ordering, and states are stored in an encrypted LocalTable scoped to the placement, and every change is pushed live to all viewers.",
     "frame_type": "Tandem",
     "permissions": {
         "net": []
     },
     "created_at": "2026-06-02T23:18:49Z",
-    "modified_at": "2026-06-30T17:28:44Z",
-    "app_version_min": "0.1.7",
+    "modified_at": "2026-07-16T20:04:56Z",
+    "app_version_min": "0.1.12",
     "depends_on_capabilities": [],
     "default_width_px": 420,
     "default_height_px": 560,

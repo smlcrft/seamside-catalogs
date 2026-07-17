@@ -282,3 +282,36 @@ body {
   z-index: 10;
 }
 .hd-toast.show { opacity: 1; }
+
+/* Inline-editable placement title — mirrors roadmap's proj-name recipe:
+   looks like the h1 at rest, bg-surface lift on hover/focus, ghosted
+   placeholder, ellipsis when the name outgrows the header. */
+.hd-admin-header h1 { flex: 1 1 auto; min-width: 0; }
+.hd-title-edit { flex: 1 1 auto; min-width: 0; }
+.hd-title-edit input {
+  width: 100%;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--os-radius-sm);
+  padding: 1px 4px;
+  margin-left: -4px;
+  outline: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hd-title-edit input:hover,
+.hd-title-edit input:focus { background: var(--os-bg-surface); }
+.hd-title-edit input::placeholder { color: var(--os-text-muted); }
+
+/* Public view heading: the placement title (or the default prompt). */
+.hd-public-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

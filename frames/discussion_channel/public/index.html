@@ -73,6 +73,8 @@ function ReactionPicker({ icons, anchorRect, onPick, onClose }) {
 
 function SettingsOverlay({ prefs, onClose, onSave }) {
   const [title, setTitle] = useState(prefs.title || "Discussion");
+  const [publicToViewers, setPublicToViewers] = useState(prefs.public_to_space_viewers === true);
+  const [publicReadView, setPublicReadView] = useState(prefs.public_read_view === true);
   return html`<div class="dc-settings">
     <div class="dc-settings-header">
       <h2>Channel</h2>
@@ -83,14 +85,37 @@ function SettingsOverlay({ prefs, onClose, onSave }) {
       <input type="text" maxlength="80" placeholder="Discussion" autofocus
         value=${title} onInput=${(e) => setTitle(e.target.value)} />
     </label>
+    <label class="dc-settings-toggle">
+      <input type="checkbox" checked=${publicToViewers}
+        onChange=${(e) => setPublicToViewers(e.target.checked)} />
+      <span>
+        <span class="dc-toggle-name">Viewer-role members can participate</span>
+        <span class="dc-toggle-sub muted">Members marked Viewer can chat, react, and delete their own messages. Off: they read only.</span>
+      </span>
+    </label>
+    <label class="dc-settings-toggle">
+      <input type="checkbox" checked=${publicReadView}
+        onChange=${(e) => setPublicReadView(e.target.checked)} />
+      <span>
+        <span class="dc-toggle-name">Public read-only view</span>
+        <span class="dc-toggle-sub muted">Anyone with the link can read the channel. They can never post, react, or delete.</span>
+      </span>
+    </label>
     <div class="dc-settings-actions">
       <button class="dc-icon-btn" style="padding: 4px 10px;" onClick=${onClose}>Cancel</button>
-      <button class="dc-save" onClick=${() => { onSave({ title: title.trim() || "Discussion" }); onClose(); }}>Save</button>
+      <button class="dc-save" onClick=${() => {
+        onSave({
+          title: title.trim() || "Discussion",
+          public_to_space_viewers: publicToViewers,
+          public_read_view: publicReadView,
+        });
+        onClose();
+      }}>Save</button>
     </div>
   </div>`;
 }
 
-function Reactions({ message: m, canDelete, onToggle, onAddReact, onDelete }) {
+function Reactions({ message: m, canDelete, canReact, onToggle, onAddReact, onDelete }) {
   const grouped = new Map();
   for (const r of m.reactions || []) {
     let bucket = grouped.get(r.icon);
@@ -103,15 +128,15 @@ function Reactions({ message: m, canDelete, onToggle, onAddReact, onDelete }) {
       const names = list.map((r) => r.user_name || "user").join(", ");
       return html`<button type="button" key=${icon}
         class=${"dc-reaction " + (reactedByMe ? "mine" : "")}
-        title=${names}
-        onClick=${() => onToggle(m.id, icon)}>
+        title=${names} disabled=${!canReact}
+        onClick=${canReact ? (() => onToggle(m.id, icon)) : undefined}>
         <i class=${"ph-light ph-" + icon}></i><span>${list.length}</span>
       </button>`;
     })}
-    <button type="button" class="dc-reaction-add" title="add reaction"
+    ${canReact && html`<button type="button" class="dc-reaction-add" title="add reaction"
       onClick=${(e) => onAddReact(m.id, e.currentTarget.getBoundingClientRect())}>
       <i class="ph-light ph-smiley-wink"></i>
-    </button>
+    </button>`}
     ${canDelete && html`<button type="button" class="dc-msg-delete" title="delete message"
       onClick=${() => onDelete(m.id)}>
       <i class="ph-light ph-trash"></i>
@@ -119,7 +144,7 @@ function Reactions({ message: m, canDelete, onToggle, onAddReact, onDelete }) {
   </div>`;
 }
 
-function MessagesList({ messages, onToggle, onAddReact, onDelete }) {
+function MessagesList({ messages, canParticipate, onToggle, onAddReact, onDelete }) {
   const ref = useRef(null);
   const prevLen = useRef(0);
   useEffect(() => {
@@ -148,7 +173,8 @@ function MessagesList({ messages, onToggle, onAddReact, onDelete }) {
         <span class="time">${fmtTime(m.created_at)}</span>
       </div>`}
       <div class="dc-msg-body">${m.body}</div>
-      <${Reactions} message=${m} canDelete=${mine || isOwner}
+      <${Reactions} message=${m} canDelete=${(mine || isOwner) && canParticipate}
+        canReact=${canParticipate}
         onToggle=${onToggle} onAddReact=${onAddReact} onDelete=${onDelete} />
     </div>`;
   });
@@ -194,8 +220,9 @@ function App() {
   if (state) messagesRef.current = state.messages;
 
   useEffect(() => {
-    if (isAnon) return;
-    frame.api("./api/state").then(setState).catch((e) => setErr(e.message || String(e)));
+    // Everyone attempts /api/state — the backend's two-tier auth decides.
+    // Non-readers get a 403, rendered as the private notice below.
+    frame.api("./api/state").then(setState).catch((e) => setErr(e));
   }, []);
 
   useFramePush({
@@ -214,13 +241,22 @@ function App() {
     return () => clearTimeout(id);
   }, [toast]);
 
-  if (isAnon) {
+  const showPrivate = !!err && err.status === 403;
+  // The private notice uses the centered .dc-private layout; everything else
+  // lives in the .dc-root grid. Swap the mount class to match what renders.
+  useEffect(() => {
+    const root = document.getElementById("app");
+    if (root) root.className = showPrivate ? "dc-private" : "dc-root";
+  }, [showPrivate]);
+
+  if (showPrivate) {
     return html`<${Private} />`;
   }
-  if (err) return html`<div class="dc-loading">failed to load: ${err}</div>`;
+  if (err) return html`<div class="dc-loading">failed to load: ${err.message || String(err)}</div>`;
   if (!state) return html`<div class="dc-loading">loading…</div>`;
 
   const { prefs, messages, can_edit_settings: canEditSettings } = state;
+  const canParticipate = !!state.can_participate;
   const icons = (state.reaction_icons && state.reaction_icons.length) ? state.reaction_icons : DEFAULT_REACTION_ICONS;
 
   const fail = (label) => (err) => setToast(err.message || (label + " failed"));
@@ -245,10 +281,11 @@ function App() {
         onClick=${() => setShowSettings(true)}><i class="ph-light ph-dots-three"></i></button>`}
     </div>
     <${MessagesList} messages=${messages}
+      canParticipate=${canParticipate}
       onToggle=${toggleReact}
       onAddReact=${(mid, rect) => setPicker({ messageId: mid, rect })}
       onDelete=${deleteMessage} />
-    <${Composer} onSend=${sendMessage} />
+    ${canParticipate && html`<${Composer} onSend=${sendMessage} />`}
     ${showSettings && html`<${SettingsOverlay} prefs=${prefs}
       onClose=${() => setShowSettings(false)}
       onSave=${saveSettings} />`}
@@ -260,8 +297,14 @@ function App() {
 }
 
 // Mount: render straight into `#app` so it keeps the .dc-root grid layout.
+// Clear the static pre-JS "loading…" text first — preact's render() leaves
+// pre-existing non-preact children in place, so it would linger at the bottom
+// of the grid after the app renders (App shows its own loading state anyway).
 const root = document.getElementById("app");
-root.className = isAnon ? "dc-private" : "dc-root";
+root.textContent = "";
+// Everyone starts in the grid layout — App swaps to .dc-private only when the
+// backend's 403 says this viewer can't read (public_read_view decides for anon).
+root.className = "dc-root";
 render(html`<${App}/>`, root);
   </script>
 </body>

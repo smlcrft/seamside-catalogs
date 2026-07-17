@@ -649,7 +649,7 @@
         e.preventDefault();
         const container = e.currentTarget;
         const after = dragAfter(container, e.clientY);
-        const afterId = after ? Number(after.dataset.id) : null;
+        const afterId = after ? after.dataset.id : null;  // row ids are opaque strings
         const dragId = dragTask.current;
         clearDropHints();
         const destIds = (byMs.get(destMid) || []).map((t) => t.id).filter((id) => id !== dragId);

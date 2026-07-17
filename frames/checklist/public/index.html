@@ -198,7 +198,7 @@
         if (dragId.current == null) return;
         e.preventDefault();
         const after = dragAfter(listRef.current, e.clientY);
-        const afterId = after ? Number(after.dataset.id) : null;
+        const afterId = after ? after.dataset.id : null;  // row ids are opaque strings
         listRef.current.querySelectorAll(".drop-target").forEach((n) => n.classList.remove("drop-target"));
         const id = dragId.current;
         const ids = items.map((x) => x.id).filter((x) => x !== id);

@@ -4,59 +4,55 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members get a live read-only view;
 //                                           space editors get the interactive UI.
-//   data_storage:   storage-local-db     — one lightweight local SQLite DB on the host,
-//                                           rows scoped by sfi_id so each placement is
-//                                           its own independent list. The DB is NOT shared
+//   data_storage:   storage-local-db     — a LocalTable: encrypted at rest on the host
+//                                           device, scoped per placement so each placement
+//                                           is its own independent list. NOT shared
 //                                           peer-to-peer; collaboration happens at the
 //                                           frontend layer (all viewers talk to this one
 //                                           backend and re-fetch on push).
 //   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
 //                                           so all viewers of the placement refresh live.
-//   settings_scope: settings-per-sfi      — state is keyed by peer.sfi_id.
+//   settings_scope: settings-per-sfi      — the table binding is keyed by peer.sfi_id.
 //
 // Each item has a 3-state status: 0 = unstarted, 1 = in-progress, 2 = complete.
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo,
   pushToInstance, sanitizeText, toIntOrNull, clampInt,
-  DatabaseSync, mkdirSync, path,
+  declareTables, ensureTables, table,
 } from "@frame-core";
 
-// ----- Local SQLite (per-host; rows scoped by sfi_id) -----------------------------------
-const dataDirPath = path.join(import.meta.dirname!, "data");
-mkdirSync(dataDirPath, { recursive: true });
-const db = new DatabaseSync(path.join(dataDirPath, "checklist.db"));
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS items (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    sfi_id     TEXT    NOT NULL,
-    text       TEXT    NOT NULL DEFAULT '',
-    state      INTEGER NOT NULL DEFAULT 0,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    created_ms INTEGER NOT NULL,
-    actor_id   TEXT    NOT NULL DEFAULT '',
-    actor_name TEXT    NOT NULL DEFAULT ''
-  );
-  CREATE INDEX IF NOT EXISTS idx_items_sfi ON items (sfi_id, sort_order, id);
-`);
-
-// Migrations for pre-existing DBs: who last moved an item off "unstarted".
-try { db.exec("ALTER TABLE items ADD COLUMN actor_id   TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
-try { db.exec("ALTER TABLE items ADD COLUMN actor_name TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+// ----- LocalTable (encrypted, per-placement — no sfi_id column needed) ------------------
+declareTables([{
+  key: "items",
+  title: "Checklist Items",
+  description: "Tasks for this placement's checklist.",
+  local: true,
+  schema: [
+    { name: "text",       col_type: "text",    nullable: false, default_val: "" },
+    { name: "state",      col_type: "integer", nullable: false, default_val: "0" },
+    { name: "sort_order", col_type: "integer", nullable: false, default_val: "0" },
+    { name: "created_ms", col_type: "integer", nullable: false, default_val: "0" },
+    { name: "actor_id",   col_type: "text",    nullable: true,  default_val: "" },
+    { name: "actor_name", col_type: "text",    nullable: true,  default_val: "" },
+  ],
+}]);
 
 // ----- Helpers --------------------------------------------------------------------------
-function listItems(sfiId: string) {
-  return db.prepare(
-    "SELECT id, text, state, sort_order, actor_name FROM items WHERE sfi_id = ? ORDER BY sort_order, id"
-  ).all(sfiId);
+type ItemsTable = ReturnType<typeof table>;
+
+async function listItems(items: ItemsTable) {
+  const { rows } = await items.query({
+    order_by: [{ col: "sort_order" }, { col: "created_ms" }],
+  });
+  return rows.map((r) => ({
+    id: r._row_id, text: r.text, state: r.state,
+    sort_order: r.sort_order, actor_name: r.actor_name || "",
+  }));
 }
 
-function nextSortOrder(sfiId: string): number {
-  const row = db.prepare(
-    "SELECT COALESCE(MAX(sort_order), -1) AS m FROM items WHERE sfi_id = ?"
-  ).get(sfiId) as { m: number };
-  return row.m + 1;
+async function nextSortOrder(items: ItemsTable): Promise<number> {
+  return Number(await items.max("sort_order") ?? -1) + 1;
 }
 
 function notify(sfiId: string) {
@@ -84,9 +80,15 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     });
   }
 
+  // Local tables resolve with zero ceremony, but keep the standard gate so a
+  // future graduation to a synced table needs no code change here.
+  const tables = ensureTables(peer);
+  if (!tables.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
+  const items = table("items", peer.sfi_id);
+
   // Read — open to everyone (non-members get a read-only view of this placement's list).
   if (reqPath === "/api/list" && method === "GET") {
-    return jsonReply(replyPort, 200, { items: listItems(peer.sfi_id) });
+    return jsonReply(replyPort, 200, { items: await listItems(items) });
   }
 
   // Every endpoint below mutates state and is editor-only. Non-members AND Viewer-role
@@ -103,59 +105,62 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     const v = parseJsonBody<{ text?: unknown }>(body);
     const text = sanitizeText(v?.text, 1000);
     if (!text) return jsonReply(replyPort, 400, { error: "text required" });
-    db.prepare(
-      "INSERT INTO items (sfi_id, text, state, sort_order, created_ms) VALUES (?, ?, 0, ?, ?)"
-    ).run(peer.sfi_id, text, nextSortOrder(peer.sfi_id), Date.now());
+    await items.upsert(null, {
+      text, state: 0, sort_order: await nextSortOrder(items), created_ms: Date.now(),
+    });
     notify(peer.sfi_id);
-    return jsonReply(replyPort, 200, { items: listItems(peer.sfi_id) });
+    return jsonReply(replyPort, 200, { items: await listItems(items) });
   }
 
-  // Update one item's state and/or text. id is scoped to this sfi so a member of one
-  // space can't reach into another placement's rows.
+  // Update one item's state and/or text. The table is placement-scoped, so an
+  // id from another placement simply doesn't exist here. Guard with get() —
+  // upsert(unknownId) would otherwise create a phantom row.
   if (reqPath.startsWith("/api/item/") && method === "POST") {
     if (!editorOnly()) return;
-    const id = toIntOrNull(reqPath.slice("/api/item/".length));
-    if (id == null) return jsonReply(replyPort, 400, { error: "bad id" });
+    const id = reqPath.slice("/api/item/".length);
+    if (!id || !(await items.get(id))) return jsonReply(replyPort, 400, { error: "bad id" });
     const v = parseJsonBody<{ state?: unknown; text?: unknown }>(body);
     if (v?.state !== undefined) {
       const state = clampInt(toIntOrNull(v.state) ?? 0, 0, 2);
       // Record who moved this item off "unstarted"; clear the credit when it returns to 0.
       if (state === 0) {
-        db.prepare("UPDATE items SET state = ?, actor_id = '', actor_name = '' WHERE id = ? AND sfi_id = ?")
-          .run(state, id, peer.sfi_id);
+        await items.upsert(id, { state, actor_id: "", actor_name: "" });
       } else {
         const actorName = sanitizeText(peer.user_name, 80) || "someone";
-        db.prepare("UPDATE items SET state = ?, actor_id = ?, actor_name = ? WHERE id = ? AND sfi_id = ?")
-          .run(state, peer.user_id ?? "", actorName, id, peer.sfi_id);
+        await items.upsert(id, { state, actor_id: peer.user_id ?? "", actor_name: actorName });
       }
     }
     if (v?.text !== undefined) {
       const text = sanitizeText(v.text, 1000);
-      db.prepare("UPDATE items SET text = ? WHERE id = ? AND sfi_id = ?").run(text, id, peer.sfi_id);
+      await items.upsert(id, { text });
     }
     notify(peer.sfi_id);
-    return jsonReply(replyPort, 200, { items: listItems(peer.sfi_id) });
+    return jsonReply(replyPort, 200, { items: await listItems(items) });
   }
 
   // Reorder — body carries the full ordered list of item ids for this placement.
   if (reqPath === "/api/reorder" && method === "POST") {
     if (!editorOnly()) return;
     const v = parseJsonBody<{ ids?: unknown }>(body);
-    const ids = Array.isArray(v?.ids) ? v.ids.map((x) => toIntOrNull(x)).filter((x): x is number => x != null) : [];
-    const update = db.prepare("UPDATE items SET sort_order = ? WHERE id = ? AND sfi_id = ?");
-    ids.forEach((id, i) => update.run(i, id, peer.sfi_id));
+    const ids = Array.isArray(v?.ids) ? v.ids.filter((x): x is string => typeof x === "string" && !!x) : [];
+    // Only touch ids that actually exist in this placement (never phantom-create).
+    const { rows } = await items.query({});
+    const known = new Set(rows.map((r) => r._row_id));
+    for (let i = 0; i < ids.length; i++) {
+      if (known.has(ids[i])) await items.upsert(ids[i], { sort_order: i });
+    }
     notify(peer.sfi_id);
-    return jsonReply(replyPort, 200, { items: listItems(peer.sfi_id) });
+    return jsonReply(replyPort, 200, { items: await listItems(items) });
   }
 
   // Delete.
   if (reqPath.startsWith("/api/delete/") && method === "POST") {
     if (!editorOnly()) return;
-    const id = toIntOrNull(reqPath.slice("/api/delete/".length));
-    if (id == null) return jsonReply(replyPort, 400, { error: "bad id" });
-    db.prepare("DELETE FROM items WHERE id = ? AND sfi_id = ?").run(id, peer.sfi_id);
+    const id = reqPath.slice("/api/delete/".length);
+    if (!id) return jsonReply(replyPort, 400, { error: "bad id" });
+    await items.delete(id);
     notify(peer.sfi_id);
-    return jsonReply(replyPort, 200, { items: listItems(peer.sfi_id) });
+    return jsonReply(replyPort, 200, { items: await listItems(items) });
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });

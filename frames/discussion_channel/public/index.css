@@ -298,3 +298,19 @@ body {
   .dc-composer { display: none; }
   .dc-accent { height: 1px; }
 }
+
+/* Owner access toggles in the settings overlay: checkbox beside a two-line
+   label (name + explanatory subtext), horizontal unlike the stacked inputs. */
+.dc-settings label.dc-settings-toggle {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--os-sp-sm);
+  cursor: pointer;
+}
+.dc-settings-toggle input[type="checkbox"] {
+  margin-top: 2px;
+  accent-color: var(--ch);
+}
+.dc-settings-toggle > span { display: flex; flex-direction: column; gap: 2px; }
+.dc-toggle-name { font-size: var(--os-fs-sm); color: var(--os-text); }
+.dc-toggle-sub { font-size: var(--os-fs-xs); }

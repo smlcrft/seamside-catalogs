@@ -44,9 +44,14 @@ function AnonForm() {
   const [err, setErr] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sentTo, setSentTo] = useState(null);
+  const [deskTitle, setDeskTitle] = useState("");
 
   useEffect(() => {
-    api("./api/config").then((r) => { setFields(r.fields || []); setLoaded(true); }).catch(() => setLoaded(true));
+    api("./api/config").then((r) => {
+      setFields(r.fields || []);
+      setDeskTitle((r.title || "").trim());
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
   }, []);
 
   const onChange = (fid, v) => setValues((prev) => ({ ...prev, [fid]: v }));
@@ -90,7 +95,7 @@ function AnonForm() {
   }
 
   return html`<section class="hd-anon">
-    <h1>Send us a message</h1>
+    <h1 class="hd-public-title">${deskTitle || "Send us a message"}</h1>
     <p class="hd-subtitle muted">We'll get back to you at the email you provide.</p>
     <form class="stack" onSubmit=${submit}>
       ${err && html`<div class="hd-error">${err}</div>`}
@@ -344,6 +349,7 @@ function AdminView() {
   const [highlightId, setHighlightId] = useState(null);
   const [notesBySub, setNotesBySub] = useState(new Map());
   const [toastMsg, setToastMsg] = useState(null);
+  const [deskTitle, setDeskTitle] = useState("");
 
   // Mutable refs for the push handler to avoid stale closures.
   const stateRef = useRef({ openId: null, sfi_id: me.sfi_id });
@@ -357,9 +363,18 @@ function AdminView() {
   useEffect(() => {
     loadSubmissions().catch((e) => toast(e.message || "load failed"));
     loadFields().catch((e) => toast(e.message || "load failed"));
+    api("./api/config").then((r) => setDeskTitle(r.title || "")).catch(() => {});
     const hb = setInterval(() => { api("./api/admin/register", {}).catch(() => {}); }, 30_000);
     return () => clearInterval(hb);
   }, []);
+
+  // Placement display name — saves on blur/Enter (mirrors roadmap's proj-name).
+  const saveTitle = (v) => {
+    const t = v.trim();
+    if (t === deskTitle) return;
+    setDeskTitle(t);
+    api("./api/admin/title", { title: t }, "PUT").catch((e) => toast(e.message || "rename failed"));
+  };
 
   useFramePush((d) => {
     if (typeof d.type !== "string") return;
@@ -378,6 +393,8 @@ function AdminView() {
       setNotesBySub((prev) => { const m = new Map(prev); m.set(d.submission_id, d.notes || []); return m; });
     } else if (d.type === "hd_fields_changed") {
       loadFields().catch(() => {});
+    } else if (d.type === "hd_title_changed") {
+      setDeskTitle(d.title || "");
     }
   });
 
@@ -431,7 +448,12 @@ function AdminView() {
 
   return html`<section class="hd-admin">
     <header class="hd-admin-header">
-      <h1><i class="ph-light ph-lifebuoy icon-md"></i> Help Desk</h1>
+      <h1>
+        <i class="ph-light ph-lifebuoy icon-md"></i>
+        <div class="hd-title-edit"><input value=${deskTitle} maxlength="120" placeholder="Send us a message"
+          onBlur=${(e) => saveTitle(e.target.value)}
+          onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} /></div>
+      </h1>
       <nav class="hd-tabs">
         <button class=${"hd-tab" + (tab === "inbox" ? " active" : "")} onClick=${() => setTab("inbox")}>
           Inbox ${newCount > 0 && html`<span class="hd-count-badge">${newCount}</span>`}

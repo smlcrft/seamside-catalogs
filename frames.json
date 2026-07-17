@@ -31,9 +31,9 @@
       "kind": "Frames",
       "id": "checklist",
       "name": "Checklist",
-      "description": "A simple, collaborative to-do list. Each placement is its own list \u2014 any member of the space can add tasks, cycle each task through three states (unstarted, in-progress, complete), drag to reorder, and delete. Non-members get a live read-only view. Items, ordering, and states are stored in a lightweight local SQLite database keyed by placement, and every change is pushed live to all viewers.",
+      "description": "A simple, collaborative to-do list. Each placement is its own list \u2014 any member of the space can add tasks, cycle each task through three states (unstarted, in-progress, complete), drag to reorder, and delete. Non-members get a live read-only view. Items, ordering, and states are stored in an encrypted LocalTable scoped to the placement, and every change is pushed live to all viewers.",
       "icon": "",
-      "modified_at": "2026-06-30T17:28:44Z",
+      "modified_at": "2026-07-16T20:04:56Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 420,
@@ -47,8 +47,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/checklist.tar.gz",
-      "package_sha256": "90f0b130f0764e298739ede391e4d39b1a9ea9cd88de79b87bc6fb850e057416",
-      "app_version_min": "0.1.7"
+      "package_sha256": "5f44bbb2ec05fb4966ee8c0064c18587d4ee2eb4070559fef2f0e80b3d880243",
+      "app_version_min": "0.1.12"
     },
     {
       "kind": "Frames",
@@ -56,7 +56,7 @@
       "name": "Community Home",
       "description": "A minimal website builder for a community home page. Admins configure the title, color, sections, and links; anonymous visitors see the published public page.",
       "icon": "",
-      "modified_at": "2026-06-03T17:14:57Z",
+      "modified_at": "2026-07-16T20:04:56Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -70,8 +70,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_home.tar.gz",
-      "package_sha256": "6ec4de3b8ac514ea0d7b6a78b0443caa0e785473047abce6b7be9249e41ef11c",
-      "app_version_min": "0.1.7"
+      "package_sha256": "5c7bde192c13d1d44ca39c81a1c1a436d49e52fcc4799ae0829743ca37a48fa0",
+      "app_version_min": "0.1.12"
     },
     {
       "kind": "Frames",
@@ -100,9 +100,9 @@
       "kind": "Frames",
       "id": "discussion_channel",
       "name": "Discussion Channel",
-      "description": "A per-placement realtime chat channel for known users in the space. Any signed-in member can rename the channel, pick a theme, post messages, and react with Phosphor Light icons. Anonymous viewers see a private-channel notice.",
+      "description": "A per-placement realtime chat channel. Members chat, react with Phosphor Light icons, and delete their own messages; owners can rename the channel, pick a theme, and flip two access toggles: let Viewer-role members participate, and open a public read-only view for anyone with the link.",
       "icon": "",
-      "modified_at": "2026-06-03T17:14:57Z",
+      "modified_at": "2026-07-17T01:33:52Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -116,8 +116,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/discussion_channel.tar.gz",
-      "package_sha256": "c2860ff80bb18e44da4f78eddf0636d2ccc778d9f8ce792fc6e43100c560435f",
-      "app_version_min": "0.1.7"
+      "package_sha256": "ca33cab88df804fdc9f145a8251edba9559b3c01f2d962ab92edf469fd333232",
+      "app_version_min": "0.1.12"
     },
     {
       "kind": "Frames",
@@ -243,7 +243,7 @@
       "name": "Help Desk",
       "description": "Anonymous visitors submit a message with email (plus admin-configured fields); known users in the space see a realtime inbox of incoming correspondence.",
       "icon": "",
-      "modified_at": "2026-06-03T17:14:57Z",
+      "modified_at": "2026-07-17T00:28:18Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -257,8 +257,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/help_desk.tar.gz",
-      "package_sha256": "dab95fe34df871d1579fb754e7c12b02dccabf1daf74019df30f943ca85fc2c6",
-      "app_version_min": "0.1.7"
+      "package_sha256": "eeee389a906141e8134d203d439a750bd04b1724d5316dcbe8d50e65065fa524",
+      "app_version_min": "0.1.12"
     },
     {
       "kind": "Frames",
@@ -336,9 +336,9 @@
       "kind": "Frames",
       "id": "outpost",
       "name": "Outpost",
-      "description": "A lightweight public posting board for sharing with the world. Space members (editors) publish short posts \u2014 a passing thought, an open question, a status update, an announcement, a quick poll, or an image / audio / video clip \u2014 and anyone with the frame's share link can read them. Each post shows its author and the time it was shared, and URLs in the text become clickable (opened safely in the reader's browser). Posts live entirely in the frame's own data folder: one subfolder per placement holds a local SQLite database (posts, media rows, and poll votes \u2014 indexed so a large, active feed stays fast) plus a per-post subfolder for any attached media bytes. Local file only, no sync tables.",
+      "description": "A lightweight public posting board for sharing with the world. Space members (editors) publish short posts \u2014 a passing thought, an open question, a status update, an announcement, a quick poll, or an image / audio / video clip \u2014 and anyone with the frame's share link can read them. Each post shows its author and the time it was shared, and URLs in the text become clickable (opened safely in the reader's browser). Posts live entirely in the frame's own data folder: one subfolder per placement holds a encrypted LocalTable (posts, media rows, and poll votes \u2014 indexed so a large, active feed stays fast) plus a per-post subfolder for any attached media bytes. Local file only, no sync tables.",
       "icon": "",
-      "modified_at": "2026-07-01T01:45:00Z",
+      "modified_at": "2026-07-16T20:04:56Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 480,
@@ -352,16 +352,16 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/outpost.tar.gz",
-      "package_sha256": "724828422399cbb2beba411b14aa3d7a8e32d08d059d5185fc0a2fe663666a7b",
-      "app_version_min": "0.1.8"
+      "package_sha256": "ff8e4d677b38dc9ce64c647e13a18c618d0848775774d8c5ffe740e54ba72e88",
+      "app_version_min": "0.1.12"
     },
     {
       "kind": "Frames",
       "id": "roadmap",
       "name": "Roadmap",
-      "description": "A simple, robust project roadmapping tool \u2014 one roadmap per placement. Set a project name, overview, and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in-progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Collapsed milestone headers still show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days-remaining and overdue color-coding. A milestone can only be marked done once all its tasks are complete. Everything is stored in a lightweight per-placement SQLite database on the host and pushed live to every viewer; non-members get a read-only view.",
+      "description": "A simple, robust project roadmapping tool \u2014 one roadmap per placement. Set a project name, overview, and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in-progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Collapsed milestone headers still show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days-remaining and overdue color-coding. A milestone can only be marked done once all its tasks are complete. Everything is stored in a lightweight per-placement encrypted LocalTable database on the host and pushed live to every viewer; non-members get a read-only view.",
       "icon": "",
-      "modified_at": "2026-07-08T02:20:00Z",
+      "modified_at": "2026-07-16T20:04:56Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 720,
@@ -375,8 +375,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roadmap.tar.gz",
-      "package_sha256": "b3a948550637c511017f6bd2c0a1afa2cab64ff9ef20d215a1f59e0ace9a10bf",
-      "app_version_min": "0.1.8"
+      "package_sha256": "0f09ec35a172822b2cf4b61e350c62a831e208fdaf384bc44cb078d0eb16c988",
+      "app_version_min": "0.1.12"
     },
     {
       "kind": "Frames",
@@ -384,7 +384,7 @@
       "name": "Roundtable",
       "description": "A per-placement private discussion + two prioritized idea boards for known space members. Members chat in a single channel, add items to a Positives list (features/tasks) or a Negatives list (issues/bugs), and +1 the ones that matter. Items are ranked by votes, then recency. Only the owner can rename the frame and set high-level preferences. Anonymous viewers see a private-frame notice.",
       "icon": "",
-      "modified_at": "2026-06-03T17:14:57Z",
+      "modified_at": "2026-07-16T20:04:56Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -398,8 +398,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roundtable.tar.gz",
-      "package_sha256": "8ea3cdd15eafd484dc109fd5b67201283fcc6bec9aa333bd1cfc6d32db7ee1a2",
-      "app_version_min": "0.1.7"
+      "package_sha256": "6e2b9f901c360c77db7e91e19a7c0ec7fed8692d15572b248f4d5fdbed310d00",
+      "app_version_min": "0.1.12"
     },
     {
       "kind": "Frames",
