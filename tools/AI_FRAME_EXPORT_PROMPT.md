@@ -1,6 +1,6 @@
-# Repackage a web app as a Tandem frame — Self-Contained Context
+# Repackage a web app as a Seamside frame — Self-Contained Context
 
-**This document is complete on its own.** Everything you need to produce a valid Tandem
+**This document is complete on its own.** Everything you need to produce a valid Seamside
 frame is written inline below — the skeleton files, the backend API, the manifest, and the
 exact failure modes to avoid. You do **not** need to fetch any external repository, clone a
 `_skeleton`, or read any other file. If you were handed this together with an existing web
@@ -12,8 +12,8 @@ There are two paths:
   web app (React/Vue/Svelte/vanilla — anything that compiles to static `index.html` + JS +
   CSS + assets). You wrap it, unchanged, in four tiny files and zip it. **You do not rewrite
   the app.** Start here.
-- **Part B — Author a new Tandem-native frame.** You are building UI from scratch and want
-  Tandem's batteries (Preact + htm, live multiplayer SyncTables, identity gating). This is
+- **Part B — Author a new Seamside-native frame.** You are building UI from scratch and want
+  Seamside's batteries (Preact + htm, live multiplayer SyncTables, identity gating). This is
   the reference material in Sections 5–9. Only needed if the app needs a backend or
   real-time collaboration.
 
@@ -23,11 +23,13 @@ There are two paths:
 
 ### A.0 The deliverable
 
-A single folder named `tandem-frame/`, zipped to `tandem-frame.zip`, with exactly this
-shape:
+A single folder zipped to a matching `.zip`. `my-frame-name` below is a **placeholder** —
+substitute a short kebab-case name for *your* frame (e.g. `recipe-box/` → `recipe-box.zip`).
+Pick it deliberately: on import, the folder name (slugified) becomes the frame's on-disk id.
+The folder has exactly this shape:
 
 ```
-tandem-frame/
+my-frame-name/
   frame.json          ← manifest (≈12 lines, copy from A.1)
   frame.ts            ← static-file server (≈20 lines, copy from A.2)
   public/             ← your built app goes here, untouched
@@ -57,7 +59,7 @@ inside a sandboxed iframe exactly as it did before — same HTML, same JS bundle
 ```
 
 - `name` / `description` — human-facing; fill them in.
-- `frame_type` — leave as `"Tandem"`.
+- `frame_type` — leave as `"Tandem"`. This is the frame *type* (runs in the shared Deno worker), not the old Tandem product name — the type keeps its name.
 - `permissions.net` — **list every external hostname your app calls at runtime.** A purely
   self-contained app keeps this empty (`[]`). If your app fetches, say, `api.github.com`,
   you must write `"net": ["api.github.com"]` or those calls are blocked by the sandbox. List
@@ -97,7 +99,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, _qu
 };
 ```
 
-`@frame-core` resolves automatically — it is provided by the Tandem host at runtime. **Do
+`@frame-core` resolves automatically — it is provided by the Seamside host at runtime. **Do
 not** create a `deno.json`, `package.json`, or import map for it; doing so will break the
 build. The import string is literally `"@frame-core"`.
 
@@ -106,7 +108,7 @@ build. The import string is literally `"@frame-core"`.
 This is the single most common reason a rebundled app shows a blank screen, unstyled HTML,
 or "elements in the wrong place." **Read it carefully.**
 
-A Tandem frame is served under a per-placement URL **prefix**, not at the web root. So a
+A Seamside frame is served under a per-placement URL **prefix**, not at the web root. So a
 build that emits **absolute** asset URLs breaks:
 
 ```html
@@ -160,7 +162,7 @@ NotFound page. The tell-tale console line is the framework's own message, e.g.:
 404 Error: User attempted to access non-existent route: /frame/35ef…1716/my_app/index.html
 ```
 
-That 404 comes from **inside your bundle**, not from Tandem. The fix is to make routing
+That 404 comes from **inside your bundle**, not from Seamside. The fix is to make routing
 independent of the path prefix by switching to a **hash router** (routes live after `#`,
 which the prefix never touches):
 
@@ -210,50 +212,50 @@ is nothing to do here — skip this step.
 > result is a zip with everything **except** `frame.ts` and `frame.json` — which makes the
 > frame fail to load. Two rules prevent this:
 >
-> 1. **`tandem-frame/` must be a plain folder, NOT the web-app project.** Do not write the
+> 1. **`my-frame-name/` must be a plain folder, NOT the web-app project.** Do not write the
 >    control files into the Vite/React project root and rely on the builder's "Download"
->    button. Instead: build the app, copy its output into `tandem-frame/public/`, write
->    `frame.json` + `frame.ts` into `tandem-frame/`, and zip that folder directly with the
+>    button. Instead: build the app, copy its output into `my-frame-name/public/`, write
+>    `frame.json` + `frame.ts` into `my-frame-name/`, and zip that folder directly with the
 >    `zip` command below — no build tooling in the loop.
 > 2. **Verify the archive lists the control files before delivering.** If they're missing, the
 >    export dropped them — rebuild from a plain directory.
 
-From the directory that *contains* `tandem-frame/`:
+From the directory that *contains* `my-frame-name/`:
 
 ```sh
 # 1. Confirm the root control files exist on disk first.
-ls -la tandem-frame/frame.json tandem-frame/frame.ts
+ls -la my-frame-name/frame.json my-frame-name/frame.ts
 
 # 2. Zip the whole folder.
-zip -r tandem-frame.zip tandem-frame \
+zip -r my-frame-name.zip my-frame-name \
   -x '*/data/*' -x '*.DS_Store' -x '*/node_modules/*'
 
 # 3. Assert the control files made it into the archive (must print both lines).
-unzip -l tandem-frame.zip | grep -E 'tandem-frame/frame\.(ts|json)$'
+unzip -l my-frame-name.zip | grep -E 'my-frame-name/frame\.(ts|json)$'
 ```
 
-The full listing should show `tandem-frame/frame.json`, `tandem-frame/frame.ts`, and
-`tandem-frame/public/index.html` plus all assets:
+The full listing should show `my-frame-name/frame.json`, `my-frame-name/frame.ts`, and
+`my-frame-name/public/index.html` plus all assets:
 
 ```sh
-unzip -l tandem-frame.zip
+unzip -l my-frame-name.zip
 ```
 
 If step 3 prints nothing, the zip is **invalid** — the control files were omitted. Recreate
-`tandem-frame/` as a plain directory (not inside the app project), re-copy the files, and zip
+`my-frame-name/` as a plain directory (not inside the app project), re-copy the files, and zip
 again. That verified archive is the single-file deliverable. **Part A is complete.**
 
 ---
 
-## Part B — Author a new Tandem-native frame
+## Part B — Author a new Seamside-native frame
 
 Everything below is reference material for building a frame's UI and backend *from scratch*
-with Tandem's native toolkit. You do **not** need any of it to rebundle an existing app
+with Seamside's native toolkit. You do **not** need any of it to rebundle an existing app
 (Part A). Reach for it when the frame needs a real backend, persistence, or live multiplayer.
 
 ### 1. What a frame is
 
-A **frame** is a sandboxed micro-app that runs inside a Tandem Space — a tile on the canvas
+A **frame** is a sandboxed micro-app that runs inside a Seamside Space — a tile on the canvas
 with its own UI. Under the hood:
 
 - **Backend** (`frame.ts`) — a Deno worker spawned by the Arbiter. Receives HTTP-style
@@ -278,7 +280,7 @@ Three files. (For a rebundle, prefer the simpler `frame.ts` in A.2.)
 {
   "name": "Skeleton",
   "description": "Foundational starter frame. Demonstrates Preact + htm + framelib.",
-  "frame_type": "Tandem",
+  "frame_type": "Seamside",
   "app_version_min": "0.1.7",
   "permissions": { "net": [] },
   "created_at": "2026-05-15T18:00:00Z",
@@ -336,7 +338,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, _qu
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Skeleton</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css"> <!-- Tandem design tokens; themed per placement -->
+  <link rel="stylesheet" href="dyn/frame-prefs.css"> <!-- Seamside design tokens; themed per placement -->
   <style>
     :root { --ch: var(--os-c4); }
     body { margin: 0; font-family: var(--os-font-sans, system-ui, sans-serif);
@@ -582,7 +584,7 @@ Three render shapes:
 
 ### 8. CSS & icons
 
-Native frames inherit Tandem's design tokens by linking the relative path
+Native frames inherit Seamside's design tokens by linking the relative path
 `<link rel="stylesheet" href="dyn/frame-prefs.css">`. After that, CSS variables are
 available: `--os-bg`, `--os-text`, `--os-fs-*`, `--os-sp-*`, `--os-radius-*`, `--os-c1`…
 `--os-c12`, `--os-font-sans`, `--os-font-mono`, `--os-ease-spring`, etc. Set the frame's
@@ -592,7 +594,7 @@ accent at the top of `:root`: `:root { --ch: var(--os-c4); }`. Phosphor Light ic
 ### 9. `frame.json` manifest reference
 
 Minimum is shown in A.1 and Section 2. Field notes:
-- `frame_type` — almost always `"Tandem"` (sandboxed Deno worker). `Solo`/`Hosted`/`Proxy`
+- `frame_type` — almost always `"Seamside"` (sandboxed Deno worker). `Solo`/`Hosted`/`Proxy`
   are advanced.
 - `permissions.net` — array of bare hostnames the worker may fetch from. Empty for
   self-contained frames; e.g. `["api.open-meteo.com", "geocoding-api.open-meteo.com"]`.
@@ -613,7 +615,7 @@ Minimum is shown in A.1 and Section 2. Field notes:
 - **External hosts need `permissions.net`.** Any `fetch()` to a host not listed is blocked.
 - **No `localStorage`/cookies** — the iframe has no `allow-same-origin` (opaque origin).
 - **Root files get dropped from the zip.** AI builders export only the web app, omitting
-  sibling `frame.ts`/`frame.json`. Build `tandem-frame/` as a standalone folder and verify the
+  sibling `frame.ts`/`frame.json`. Build `my-frame-name/` as a standalone folder and verify the
   archive lists both control files — see A.6.
 - **Don't ship `data/`, `node_modules`, or `.DS_Store`** in the zip.
 - **Don't create a `deno.json`** — `@frame-core` is host-provided.
@@ -639,17 +641,18 @@ Minimum is shown in A.1 and Section 2. Field notes:
 
 # PROMPT — use the context above to run this request
 
-I have an existing web app. Repackage it to run as a Tandem frame by following **Part A**
-above:
+I have an existing web app. Repackage it to run as a Seamside frame by following **Part A**
+above. `my-frame-name` in these steps is a placeholder — replace it throughout with a short
+kebab-case name for the app (the folder name becomes the frame's on-disk id on import):
 
-1. Create a folder named `tandem-frame/` as a **plain, standalone directory — NOT inside the
+1. Create a folder named `my-frame-name/` as a **plain, standalone directory — NOT inside the
    web-app project.** (If it lives inside the app project, the builder's export will drop the
    root-level `frame.ts`/`frame.json`; see A.6.)
 2. Put my app's built static files (the contents of its `dist/` / `build/` output —
-   `index.html`, JS, CSS, assets) into `tandem-frame/public/`, **unchanged**.
-3. Add `tandem-frame/frame.json` (copy from A.1; fill in `name`, `description`, and any
+   `index.html`, JS, CSS, assets) into `my-frame-name/public/`, **unchanged**.
+3. Add `my-frame-name/frame.json` (copy from A.1; fill in `name`, `description`, and any
    external hostnames the app calls under `permissions.net`).
-4. Add `tandem-frame/frame.ts` (copy verbatim from A.2 — the static-file server).
+4. Add `my-frame-name/frame.ts` (copy verbatim from A.2 — the static-file server).
 5. **Fix asset paths (A.3):** ensure every asset URL in `public/index.html` is **relative**
    (`./assets/…`), not absolute (`/assets/…`). If the app was built with Vite/CRA/etc.,
    either rebuild with a relative base or edit the emitted `index.html` to change leading-`/`
@@ -660,11 +663,11 @@ above:
    app will load but immediately render its own 404 page under the frame's URL prefix. Skip
    if the app has no client-side router.
 7. Do **not** rewrite the app in Preact/htm, and do **not** create a `deno.json`.
-8. If there are included .js files (such as within `tandem-frame/public` or `tandem-frame/public/assets`), make sure that there are not assumed domains or blockers that will prohibit the code to run on a different domain, port, or protocol.
+8. If there are included .js files (such as within `my-frame-name/public` or `my-frame-name/public/assets`), make sure that there are not assumed domains or blockers that will prohibit the code to run on a different domain, port, or protocol.
 9. Zip the whole folder and **verify the root control files survived** (A.6):
-   `zip -r tandem-frame.zip tandem-frame -x '*/data/*' -x '*.DS_Store' -x '*/node_modules/*'`,
-   then run `unzip -l tandem-frame.zip | grep -E 'tandem-frame/frame\.(ts|json)$'` — it must
+   `zip -r my-frame-name.zip my-frame-name -x '*/data/*' -x '*.DS_Store' -x '*/node_modules/*'`,
+   then run `unzip -l my-frame-name.zip | grep -E 'my-frame-name/frame\.(ts|json)$'` — it must
    print both `frame.ts` and `frame.json`. If it prints nothing, the export dropped them;
-   rebuild the zip from the plain `tandem-frame/` directory.
+   rebuild the zip from the plain `my-frame-name/` directory.
 
-Deliver `tandem-frame.zip`.
+Deliver `my-frame-name.zip`.

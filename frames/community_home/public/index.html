@@ -285,7 +285,7 @@ function BlockRow({ block: b, onSave, onDelete }) {
             <i class="ph-light ph-trash icon-sm"></i>
           </button>
         </div>
-        <${Editable} type="url" maxlength=${2048} placeholder="https://tandem.place/go/#t=frame&l=…"
+        <${Editable} type="url" maxlength=${2048} placeholder="https://seamside.com/go/#t=frame&l=…"
           value=${b.url} onSave=${(v) => onSave(b.id, { url: v })} />
         <div class="ch-pubframe-dims">
           <label>Width

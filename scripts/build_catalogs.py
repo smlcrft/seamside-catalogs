@@ -5,7 +5,7 @@ Build catalog manifests for seamside-catalogs.
 Walks `frames/` and `capabilities/`, builds tarballs for frames (single-file
 copies for capabilities) into `packages/`, computes sha256 of each package,
 and emits `frames.json` / `capabilities.json` at the repo root. Those manifests
-are what a Tandem client fetches when `catalog_urls_frames` /
+are what a Seamside client fetches when `catalog_urls_frames` /
 `catalog_urls_capabilities` is configured.
 
 Re-runnable. Idempotent: tarball entries are normalized (mtime=0, uid/gid=0,
@@ -62,13 +62,13 @@ CATALOG_FRAMES = {
     "catalog_id":  "smallcraft_frames",
     "name":        "Small Craft Frames",
     "description": "Community frames published by Small Craft.",
-    # "about_url": "https://example.com/about",
+    "about_url":   "https://github.com/smlcrft/seamside-catalogs",
 }
 CATALOG_CAPS = {
     "catalog_id":  "smallcraft_capabilities",
     "name":        "Small Craft Capabilities",
     "description": "Community capabilities published by Small Craft.",
-    # "about_url": "https://example.com/about",
+    "about_url":   "https://github.com/smlcrft/seamside-catalogs",
 }
 
 # images_b64 validation ceilings (mirrors layer3_catalogs::validate_images_b64 in the app).
@@ -254,7 +254,7 @@ def build_frames_manifest() -> tuple[int, int]:
             "package_url":        url,
             "package_sha256":     sha,
         }
-        # Optional minimum-Tandem-version gate (omitted when the frame.json doesn't set it).
+        # Optional minimum-Seamside-version gate (omitted when the frame.json doesn't set it).
         if meta.get("app_version_min"):
             item["app_version_min"] = meta["app_version_min"]
         items.append(item)
@@ -309,7 +309,7 @@ def build_caps_manifest() -> int:
             "package_url":    url,
             "package_sha256": sha,
         }
-        # Optional minimum-Tandem-version gate (omitted when the capability JSON doesn't set it).
+        # Optional minimum-Seamside-version gate (omitted when the capability JSON doesn't set it).
         if meta.get("app_version_min"):
             item["app_version_min"] = meta["app_version_min"]
         items.append(item)

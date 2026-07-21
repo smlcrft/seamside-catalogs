@@ -1,5 +1,5 @@
-# Tandem Catalogs
-Catalogs for Tandem frames and capabilities.
+# Seamside Catalogs
+Catalogs for Seamside frames and capabilities.
 
-https://tandem.place
+https://seamside.com
 

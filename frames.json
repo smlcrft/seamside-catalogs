@@ -2,6 +2,7 @@
   "catalog_id": "smallcraft_frames",
   "name": "Small Craft Frames",
   "description": "Community frames published by Small Craft.",
+  "about_url": "https://github.com/smlcrft/seamside-catalogs",
   "kind": "Frames",
   "items": [
     {
@@ -56,7 +57,7 @@
       "name": "Community Home",
       "description": "A minimal website builder for a community home page. Admins configure the title, color, sections, and links; anonymous visitors see the published public page.",
       "icon": "",
-      "modified_at": "2026-07-17T19:47:22Z",
+      "modified_at": "2026-07-21T00:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -70,7 +71,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_home.tar.gz",
-      "package_sha256": "379c388323a0b6d4a67c43a4803a3784acf01e2014588d87ccec276e2ebfa7a8",
+      "package_sha256": "1518a3d815514c7a9c9045bdbdc3285d7f1e8947a546e0fe2535e880a4c0deaa",
       "app_version_min": "0.1.12"
     },
     {
@@ -384,7 +385,7 @@
       "name": "Roundtable",
       "description": "A per-placement private discussion + two prioritized idea boards for known space members. Members chat in a single channel, add items to a Positives list (features/tasks) or a Negatives list (issues/bugs), and +1 the ones that matter. Items are ranked by votes, then recency. Only the owner can rename the frame and set high-level preferences. Anonymous viewers see a private-frame notice.",
       "icon": "",
-      "modified_at": "2026-07-17T20:12:56Z",
+      "modified_at": "2026-07-21T00:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -398,7 +399,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roundtable.tar.gz",
-      "package_sha256": "c133956f090a3a411dca92648d430814681a8756bfc4b3572e6448fbfe201f52",
+      "package_sha256": "9e279b0fd06bc2828719db9420c7735e98be33155b9a2d058ceb9081f6182a41",
       "app_version_min": "0.1.12"
     },
     {

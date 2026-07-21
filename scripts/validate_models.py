@@ -7,7 +7,7 @@ Model ids are the most volatile data in a capability: providers retire models
 without warning, and a stale `models` assignment (or `pricing` key) ships a
 recommendation that fails at request time. This script converts that silent
 rot into a red build — run it on every catalog build and on a weekly cron.
-See the Tandem app's design/ai-model-roles/README.md for the architecture.
+See the Seamside app's design/ai-model-roles/README.md for the architecture.
 
 For each `capabilities/*.json`:
 
@@ -41,7 +41,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CAPS_DIR = REPO_ROOT / "capabilities"
 
-# The app-owned role vocabulary (mirrors codegen/roles.rs in the Tandem app).
+# The app-owned role vocabulary (mirrors codegen/roles.rs in the Seamside app).
 # Grows only when the app grows a new codegen path — bump this list alongside.
 KNOWN_ROLES = {"quick", "standard", "deep"}
 

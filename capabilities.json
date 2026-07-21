@@ -2,6 +2,7 @@
   "catalog_id": "smallcraft_capabilities",
   "name": "Small Craft Capabilities",
   "description": "Community capabilities published by Small Craft.",
+  "about_url": "https://github.com/smlcrft/seamside-catalogs",
   "kind": "Capabilities",
   "items": [
     {
