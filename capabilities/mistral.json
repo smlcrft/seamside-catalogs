@@ -3,7 +3,7 @@
   "description": "Mistral AI API — chat completions and text generation",
   "category": "ai",
   "modified_at": "2026-07-07T00:00:00Z",
-  "app_version_min": "0.1.10",
+  "app_version_min": "0.2.0",
   "source": "local_api",
   "kind": "service",
   "aliases": [
@@ -64,22 +64,33 @@
     "ai_chat": {
       "method": "v1/chat/completions",
       "max_output_tokens": 8192,
-      "features": ["tool_use", "streaming"],
+      "features": [
+        "tool_use",
+        "streaming"
+      ],
       "request": {
         "model_field": "model",
         "messages_field": "messages",
         "system_mode": "first_message",
         "max_tokens_field": "max_tokens",
-        "extra": { "stream": false }
+        "extra": {
+          "stream": false
+        }
       },
-      "response": { "text_path": "choices[0].message.content" },
+      "response": {
+        "text_path": "choices[0].message.content"
+      },
       "tool_use": {
         "request_tools_field": "tools",
         "request_schema_key": "parameters",
         "assistant_tool_use_style": "tool_calls",
         "request_tool_wrapper": {
           "type": "function",
-          "function": { "name": "$name", "description": "$description", "parameters": "$schema" }
+          "function": {
+            "name": "$name",
+            "description": "$description",
+            "parameters": "$schema"
+          }
         },
         "response_calls_path": "choices[0].message.tool_calls",
         "call_id_field": "id",

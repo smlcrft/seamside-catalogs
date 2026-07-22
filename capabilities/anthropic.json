@@ -1,0 +1,111 @@
+{
+  "name": "anthropic",
+  "description": "Anthropic Claude API — chat completions and text generation",
+  "category": "ai",
+  "modified_at": "2026-07-07T00:00:00Z",
+  "source": "local_api",
+  "kind": "service",
+  "aliases": [
+    "claude"
+  ],
+  "keywords": [
+    "ai",
+    "llm",
+    "chat",
+    "claude",
+    "anthropic",
+    "generation"
+  ],
+  "base_url": "https://api.anthropic.com",
+  "setup_steps": [
+    "New to using Anthropic for AI? Here's how to do it..."
+  ],
+  "auth": {
+    "type": "header",
+    "header": "x-api-key",
+    "setting": "api_key"
+  },
+  "headers": {
+    "anthropic-version": "2023-06-01",
+    "content-type": "application/json"
+  },
+  "usage": "invoke('anthropic', 'v1/messages', { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'Hello' }], max_tokens: 1024 })",
+  "methods": [
+    {
+      "name": "v1/messages",
+      "description": "Send a chat completion request to Claude",
+      "params": [
+        "model",
+        "messages",
+        "max_tokens"
+      ]
+    }
+  ],
+  "settings": {
+    "api_key": {
+      "type": "secret",
+      "label": "API Key",
+      "required": true
+    }
+  },
+  "models_source": {
+    "url": "https://api.anthropic.com/v1/models",
+    "list_path": "data",
+    "value_key": "id",
+    "label_key": "display_name"
+  },
+  "models": {
+    "quick": "claude-haiku-4-5-20251001",
+    "standard": "claude-sonnet-5",
+    "deep": "claude-opus-4-8"
+  },
+  "protocols": {
+    "ai_chat": {
+      "method": "v1/messages",
+      "max_output_tokens": 32000,
+      "features": [
+        "tool_use",
+        "streaming",
+        "system_prompt"
+      ],
+      "request": {
+        "model_field": "model",
+        "messages_field": "messages",
+        "system_mode": "top_level",
+        "system_field": "system",
+        "max_tokens_field": "max_tokens",
+        "extra": {
+          "stream": false,
+          "thinking": {
+            "type": "disabled"
+          }
+        }
+      },
+      "response": {
+        "text_path": "content[0].text"
+      },
+      "tool_use": {
+        "request_tools_field": "tools",
+        "request_schema_key": "input_schema",
+        "response_calls_path": "content",
+        "response_calls_filter": {
+          "type": "tool_use"
+        },
+        "call_id_field": "id",
+        "call_name_field": "name",
+        "call_args_field": "input",
+        "call_args_is_string": false,
+        "result_role": "user",
+        "result_wrapper": "tool_result",
+        "result_id_field": "tool_use_id"
+      }
+    }
+  },
+  "good_for": [
+    "framegen",
+    "modify",
+    "chat",
+    "text"
+  ],
+  "app_version_min": "0.2.0"
+}

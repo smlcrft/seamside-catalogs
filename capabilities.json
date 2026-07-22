@@ -7,6 +7,24 @@
   "items": [
     {
       "kind": "Capabilities",
+      "id": "anthropic",
+      "name": "anthropic",
+      "description": "Anthropic Claude API \u2014 chat completions and text generation",
+      "icon": "",
+      "modified_at": "2026-07-07T00:00:00Z",
+      "frame_preview": null,
+      "capability_preview": {
+        "kind": "service",
+        "methods": [
+          "v1/messages"
+        ]
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/capabilities/anthropic.json",
+      "package_sha256": "bec98e3671826817adbd364995392c8a134dd8403f4d4f23c58fab8a917fe101",
+      "app_version_min": "0.2.0"
+    },
+    {
+      "kind": "Capabilities",
       "id": "mistral",
       "name": "mistral",
       "description": "Mistral AI API \u2014 chat completions and text generation",
@@ -20,8 +38,8 @@
         ]
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/capabilities/mistral.json",
-      "package_sha256": "b05c895efd5d18056e1f0228ca274518d434a3f174367d37bb5fcb6bd1bb65b5",
-      "app_version_min": "0.1.10"
+      "package_sha256": "c4e4ab7bcd72803f10e7a2d2fca35d6fa70571a0c978b0a14723ec29f1cd0f41",
+      "app_version_min": "0.2.0"
     },
     {
       "kind": "Capabilities",
@@ -38,8 +56,8 @@
         ]
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/capabilities/openai.json",
-      "package_sha256": "41c5c4d5ff92c177fd1d2f3c4fd28d757d8d20eb1cc0e0d2664eb36ba452b76f",
-      "app_version_min": "0.1.10"
+      "package_sha256": "f9952e4eadbf1ea150a2d7c5f1dc88a003243e587de5c9ea90748541c9171fca",
+      "app_version_min": "0.2.0"
     },
     {
       "kind": "Capabilities",
@@ -56,8 +74,8 @@
         ]
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/capabilities/thaura.json",
-      "package_sha256": "c0cee03ed6c488fdbf8f9702a2937be1dfbceb63460196fb86adc0e006970c1c",
-      "app_version_min": "0.1.10"
+      "package_sha256": "fd71471f61acef3a012746cfcc74e1278f2d4663fadc79b37274a25364cf64a9",
+      "app_version_min": "0.2.0"
     }
   ]
 }
