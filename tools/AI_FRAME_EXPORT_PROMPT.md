@@ -50,21 +50,35 @@ inside a sandboxed iframe exactly as it did before — same HTML, same JS bundle
   "name": "My App",
   "description": "One sentence describing what this app does for the user.",
   "frame_type": "Tandem",
-  "app_version_min": "0.1.7",
-  "permissions": { "net": [] },
+  "app_version_min": "0.2.0",
+  "permissions": { "net": [], "web": [], "web_scripts": [] },
   "created_at": "2026-01-01T00:00:00Z",
   "modified_at": "2026-01-01T00:00:00Z",
-  "depends_on_capabilities": []
+  "depends_on_capabilities": [],
+  "licensed_under_cc0": true,
+  "attribution_log": []
 }
 ```
 
 - `name` / `description` — human-facing; fill them in.
 - `frame_type` — leave as `"Tandem"`. This is the frame *type* (runs in the shared Deno worker), not the old Tandem product name — the type keeps its name.
-- `permissions.net` — **list every external hostname your app calls at runtime.** A purely
-  self-contained app keeps this empty (`[]`). If your app fetches, say, `api.github.com`,
-  you must write `"net": ["api.github.com"]` or those calls are blocked by the sandbox. List
-  bare hostnames, no scheme, no path. (CDN-hosted scripts/fonts loaded from HTML count too —
-  but prefer to **vendor** them into `public/` so the frame is offline-capable; see A.5.)
+- `permissions` — **three separate allowlists; putting a host in the wrong one silently
+  blocks it.** A purely self-contained app keeps all three empty.
+  - `net` — bare hostnames (no scheme, no path) the **backend worker** (`frame.ts`) may
+    `fetch()` from. Part A's `frame.ts` makes no external calls, so this stays `[]` unless
+    you add backend logic.
+  - `web` — full origins (`https://…` or `wss://…` only) the **frontend** may load passive
+    resources from or connect to: external `<img>`, `<audio>`/`<video>` sources, and the
+    app's own browser-side `fetch()`/XHR/`WebSocket` calls. **A rebundled app's runtime API
+    calls run in the browser, so they belong here** — an app that fetches
+    `https://api.github.com` needs `"web": ["https://api.github.com"]` or the CSP blocks
+    the call (console shows a "Refused to connect …" error).
+  - `web_scripts` — **HIGH-RISK**: origins the frame may run external `<script>` code from
+    (also unlocks styles/fonts/workers from those origins). Prefer **vendoring** CDN files
+    into `public/` instead (see A.5); use this only for SDKs that genuinely can't be
+    vendored (e.g. Google Maps).
+- `licensed_under_cc0` — `true` marks the frame CC0 and lets space members clone it to their
+  own device; `attribution_log` tracks provenance of cloned/modified frames — start `[]`.
 - `created_at` / `modified_at` — any valid ISO-8601 timestamps.
 
 ### A.2 `frame.ts` — copy this verbatim, no edits needed
@@ -185,12 +199,16 @@ is nothing to do here — skip this step.
 ### A.5 Other rebundling rules
 
 - **Self-contained beats CDN.** If `index.html` pulls scripts/fonts/styles from a CDN
-  (`https://cdn…`), either (a) vendor those files into `public/` and rewrite the links to
-  `./…`, or (b) add the CDN hostname to `permissions.net`. Vendoring is strongly preferred —
-  the frame then works offline and on every peer device.
-- **External API calls need `permissions.net`.** The sandbox blocks any `fetch()` to a host
-  not listed. Add each hostname (see A.1). Calls to your *own* assets (relative paths) are
-  always fine and need no permission.
+  (`https://cdn…`), **vendor those files into `public/`** and rewrite the links to `./…`.
+  External `<script>`/`<link>` resources are blocked by the frame's CSP unless their origin
+  is declared in `permissions.web_scripts` — a high-risk, user-visible external-code
+  dependency you should only accept for SDKs that can't be vendored (e.g. Google Maps).
+  Vendoring keeps the frame offline-capable and works on every peer device.
+- **External calls need the right permission list.** The app's own browser-side
+  `fetch()`/XHR/`WebSocket` to an external host needs that full origin in `permissions.web`
+  (so do external `<img>`/`<audio>`/`<video>` sources). `permissions.net` only gates the
+  *backend worker's* `fetch()` — Part A's `frame.ts` makes none. See A.1. Calls to your
+  *own* assets (relative paths) are always fine and need no permission.
 - **Don't rewrite the app.** You are repackaging, not porting. Keep the existing JS bundle,
   CSS, and HTML. Do not introduce Preact/htm/framelib (Part B) — that's for new frames.
 - **"Consolidate to fewer files" means inline small assets, not rewrite logic.** If the app
@@ -198,11 +216,14 @@ is nothing to do here — skip this step.
   CSS or JS file into `index.html` if it genuinely simplifies the tree. Never flatten a
   hashed production bundle by hand.
 - **No `data/`, no `.DS_Store`, no `node_modules`** in the zip.
-- **The iframe sandbox** is `allow-scripts allow-forms allow-modals` with **no**
-  `allow-same-origin`. Consequences: `localStorage`/`sessionStorage`/cookies are unavailable
-  (storage is "opaque origin"); `window.top` navigation is blocked. If the app depends on
-  `localStorage` for persistence it will run but lose state on reload — that's acceptable for
-  a first rebundle; wire Part B's persistence later if needed.
+- **The iframe sandbox** is `allow-scripts allow-forms allow-modals allow-same-origin
+  allow-downloads`. Even with `allow-same-origin`, the webview blocks the frame's own
+  `localStorage`/`sessionStorage` (third-party-iframe storage — it comes back `null` or
+  throws), and `window.top` navigation is blocked. If the app depends on `localStorage` for
+  persistence it will run but lose state on reload — that's acceptable for a first rebundle.
+  For small UI preferences there are async host-backed helpers
+  (`frame.localStorageSetItem`/`GetItem`, Section 4); for real persistence wire Part B's
+  backend storage later.
 
 ### A.6 Zip it (and verify the root control files survive)
 
@@ -261,11 +282,12 @@ with its own UI. Under the hood:
 - **Backend** (`frame.ts`) — a Deno worker spawned by the Arbiter. Receives HTTP-style
   requests via `self.onNetworkRequest`. Imports from `"@frame-core"`.
 - **Frontend** (`public/index.html` + static assets) — served into a sandboxed iframe
-  (`allow-scripts allow-forms allow-modals`, no `allow-same-origin`). Talks to the backend
-  over HTTP and to the OS via `window.postMessage`.
+  (`allow-scripts allow-forms allow-modals allow-same-origin allow-downloads`). All frames
+  share one chassis origin; isolation comes from the unguessable per-placement `sfi_id`
+  URL segment. Talks to the backend over HTTP and to the OS via `window.postMessage`.
 - **Identity cookies** — every backend request carries `device_id`, `user_id`, `sfi_id`,
-  `cap_token`, `is_anon`, `is_owner`, `is_sfi_member`, `is_sfi_editor`, `space_id`,
-  `user_name`, `space_color`. Parse with `parsePeerInfo` (Section 5).
+  `is_anon`, `is_owner`, `is_sfi_member`, `is_sfi_editor`, `space_id`, `user_name`,
+  `space_color`. Parse with `parsePeerInfo` (Section 5).
 - **Lifecycle** — one Deno worker per frame, one HTTP request per UI action, no persistent
   connection. State that must survive a reload has to be persisted (Section 7).
 
@@ -280,12 +302,14 @@ Three files. (For a rebundle, prefer the simpler `frame.ts` in A.2.)
 {
   "name": "Skeleton",
   "description": "Foundational starter frame. Demonstrates Preact + htm + framelib.",
-  "frame_type": "Seamside",
-  "app_version_min": "0.1.7",
-  "permissions": { "net": [] },
+  "frame_type": "Tandem",
+  "app_version_min": "0.2.0",
+  "permissions": { "net": [], "web": [], "web_scripts": [] },
   "created_at": "2026-05-15T18:00:00Z",
   "modified_at": "2026-05-22T14:16:13Z",
-  "depends_on_capabilities": []
+  "depends_on_capabilities": [],
+  "licensed_under_cc0": true,
+  "attribution_log": []
 }
 ```
 
@@ -406,8 +430,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, _qu
 
 **Identity & request parsing**
 - `parsePeerInfo(query, cookies) → PeerInfo` — returns `{device_id, user_id, sfi_id,
-  cap_token, is_anon, is_owner, is_sfi_member, is_sfi_editor, space_id, user_name,
-  space_color}`. The four `is_*` fields are **booleans**; everything else is a string.
+  is_anon, is_owner, is_sfi_member, is_sfi_editor, space_id, user_name, space_color}`.
+  The four `is_*` fields are **booleans**; everything else is a string.
   Cookies travel the wire as `"1"`/`"0"`/`""`; `parsePeerInfo` converts the `is_*` ones to
   booleans, so use plain truthy checks (`if (peer.is_sfi_editor) { ... }`).
   - `is_sfi_member` = true iff the user is in the space's `user_permissions`. `is_sfi_editor`
@@ -416,10 +440,12 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, _qu
     `is_sfi_editor`. `is_owner` gates frame-management; owners are always also editors.
 
 **HTTP helpers**
-- `serveFileAtPath(replyPort, urlOrPath, requestHeaders?)` — serves a static asset, sets
-  content-type from extension, always emits `Last-Modified`. Pass the request `headers` (4th
-  arg of `onNetworkRequest`) to enable `If-Modified-Since` → `304` short-circuits. Always
-  forward `headers`.
+- `serveFileAtPath(replyPort, urlOrPath, requestHeaders?, opts?)` — serves a static asset,
+  sets content-type from extension, always emits `Last-Modified`. Pass the request `headers`
+  (4th arg of `onNetworkRequest`) to enable `If-Modified-Since` → `304` short-circuits.
+  Always forward `headers`. `opts.cacheSecs` (opt-in) adds `Cache-Control: private,
+  max-age=<n>` — use only for large, effectively-immutable assets (vendored libs), never
+  HTML. The chassis gzips compressible responses automatically.
 - `serveHtmlShell(replyPort, htmlPath, { peer?, inlineCss?, inlineJs? })` — serves HTML with
   optional inlined CSS/JS and an injected `window.__peer = {...}` for server-stamped identity.
 - `jsonReply(replyPort, status, data)` — JSON response.
@@ -433,30 +459,74 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, _qu
 - `saveJsonFile(import.meta.url, "x.json", data)` — sync JSON write (pretty-printed).
 - `mkdirSync` and `path` are re-exported from `@std/path` / `node:fs`.
 
-**Local SQLite (per-device, NOT peer-synced)**
+**Legacy raw SQLite (per-device, NOT peer-synced, NOT encrypted)**
 - `DatabaseSync` re-exported from `node:sqlite`. Construct once at module top with
-  `path.join(import.meta.dirname, "data", "your.sqlite")`.
+  `path.join(import.meta.dirname, "data", "your.sqlite")`. Legacy/power tool only — for
+  ordinary rows-and-queries local data, prefer a **local table** (below): same `table()`
+  API, encrypted at rest, and it can graduate to synced later with a one-line change.
 
-**SyncTables (shared, peer-replicated)**
-- `declareTables([{ key, title, description, schema: [{name, col_type, nullable?,
-  default_val?}] }])` — at module top.
+**Tables — one API, two backends (local or peer-replicated)**
+- `declareTables([{ key, title, description, local?: true, schema: [{name, col_type,
+  nullable?, default_val?}] }])` — at module top.
+  - `local: true` → **LocalTable**: private to this frame + placement, encrypted at rest on
+    the host device, never synced, zero setup (no owner prompt — `ensureTables` is
+    immediately ready).
+  - omit `local` → **SyncTable**: replicated to every space member, browsable in the Tables
+    view, owner binds it once via a modal.
+  - The frame code is identical either way — removing `local: true` later "graduates" the
+    declaration to a shared SyncTable with no other change.
   - `col_type` is `"text" | "integer" | "real" | "blob"`. **NOT** `"string"` / `"number"` /
     `"boolean"`. Field names are `col_type`, `nullable`, `default_val` — **not** `type`,
     `required`, `default`.
 - `ensureTables(peer) → { ready, byKey, missingKeys }` — call inside the handler, **one arg**.
-  If `!ready` and owner, framecore auto-fires the binding modal; if `!ready` for a non-owner,
-  serve `renderWaitingForOwner(replyPort, peer)` for `/index.html` and a 503 for API routes.
-- `table(key, sfi_id) → { query, upsert, delete, onChange }` — valid only after
-  `ensureTables(peer).ready === true`. Author always uses column **names**; framecore
-  translates to `col_id`s internally.
+  Local tables are always ready. For synced tables: if `!ready` and owner, framecore
+  auto-fires the binding modal; if `!ready` for a non-owner, serve
+  `renderWaitingForOwner(replyPort, peer)` for `/index.html` and a 503 for API routes. Keep
+  this gate even in local-only frames so graduation needs no code change.
+- `table(key, sfi_id) → { query, get, upsert, delete, deleteWhere, max, countBy, onChange,
+  addColumn, renameColumn }` — same handle for both backends. Author always uses column
+  **names**; framecore translates to `col_id`s internally.
+  - `query(opts?) → Promise<{ rows, total }>` — `opts` is `{ where?, order_by?, limit?,
+    offset? }`. `where` entries AND together: scalar = equality; object value applies
+    operators (`{ count: { gte: 2 } }`, `{ id: { in: [...] } }`; ops
+    `eq|ne|lt|lte|gt|gte|like|in`). `order_by` is `[{ col, dir: "asc"|"desc" }]` over column
+    names or `_created_at`/`_modified_at`/`_row_id`. No joins — read parents, then children
+    with `{ in: parentIds }`, stitch in JS. Rows carry system fields (`row_id`,
+    `_created_at`, `_modified_at`, `_deleted`) plus your named columns.
+  - `upsert(rowId | null, values) → Promise<{ row_id }>` — `null` inserts (fresh `row_id`
+    returned); an existing `row_id` updates. `delete(rowId)` soft-deletes.
+  - `deleteWhere(where) → Promise<{ deleted }>` — bulk delete by predicate (requires ≥1
+    predicate; never clears a whole table). `max(col, where?)`, `countBy(cols, { where?,
+    limit? })` — MAX / COUNT(*)-per-group helpers (append-ordering idiom:
+    `Number(await t.max("sort_order") ?? -1) + 1`).
+  - `onChange(cb) → () => void` — subscribe to mutations; prefer `wireTableChangeListener`
+    for the common "push to viewers" case. `addColumn` / `renameColumn` — schema evolution
+    (advanced; binding owner only).
 - `wireTableChangeListener(tableKey, sfi_id, pushType)` — idempotent. Subscribes to onChange
   and pushes `{type: pushType}` to every viewer on any mutation (local OR remote-synced).
 - `renderWaitingForOwner(replyPort, peer?)` — canned wait screen for non-owners.
 
+**Per-placement settings — use `frameSettings`, NOT a hand-rolled "meta" table**
+- `frameSettings(peer.sfi_id) → { get, set, remove, all }` — a per-placement, encrypted,
+  self-ensuring key/value store for scalar per-placement state (title, flags, accent,
+  "seeded" markers). Needs **no** `declareTables` entry. `set(key, value)`,
+  `get<T>(key, fallback?)`, `remove(key)`, `all()`; values are JSON-encoded. Each placement
+  gets its own store automatically. Seed defaults idempotently:
+  `if (!(await s.get("seeded"))) { await s.set("seeded", true); /* defaults */ }`.
+- **NEVER build a one-row "meta"/"prefs" table by hand** with `query({ limit: 1 })` +
+  `upsert(null, …)` — concurrent requests race into duplicate "singleton" rows that
+  unordered reads return at random. For a row unique by an app key (one vote/reaction per
+  member+item), use a STABLE id built from the key —
+  `` await t.upsert(`${itemId}:${userId}`, {…}) `` — never query-then-`upsert(null)`.
+
 **Capabilities (external services)**
 - `invokeCapability(capability, method, params) → Promise<{success, status, result_json}>`
-  — call a registered capability (AI provider, network fetch, etc.). Declare the dependency
-  in `frame.json#depends_on_capabilities`.
+  — call a registered capability. Declare the dependency in
+  `frame.json#depends_on_capabilities`. The catalog is **AI providers + system info only**
+  (`anthropic`, `openai`, `system_info`). There is **no generic-HTTP capability** — to reach
+  an arbitrary external HTTP API from the backend, add the hostname(s) to
+  `frame.json#permissions.net` and call raw `fetch()` from `frame.ts` (backend only; the
+  frontend never calls raw `fetch()`).
 
 **Realtime push to viewers**
 - `pushToInstance(sfi_id, data)` — broadcasts to every observed viewer session of this
@@ -492,6 +562,16 @@ hooks set (`useState`, `useEffect`, `useMemo`, `useRef`, `useReducer`, `useCallb
 - `frame.openExternalUrl(url)` — opens in the OS browser (desktop) or a new tab (web). Host
   validates the scheme (`https`/`http`/`mailto`/`tel`) and asks the user to confirm. Use for
   genuine outbound links, NOT in-frame navigation.
+
+**Device-local key/value storage:** the webview blocks the frame's own `localStorage` (it's
+`null` or throws — do **not** use it directly). These async helpers forward to the host
+page, which stores the value in its own first-party `localStorage`, namespaced per frame
+instance:
+- `await frame.localStorageSetItem(key, valstring)` — store a string (≤512 UTF-8 bytes).
+- `await frame.localStorageGetItem(key)` — the stored string, or `null` if unset/evicted.
+- Device-local, NOT synced, best-effort (entries may be evicted after ~60 days). Use only
+  for UI preferences (last tab, collapsed state, a draft). Anything that must persist
+  reliably or be shared goes through the backend (`frame.api` → tables or `data/` files).
 
 **Async dialogs:** Tauri's webview doesn't reliably surface native `alert`/`confirm`/`prompt`.
 - `await frame.alert(msg, { title?, okLabel? })`, `await frame.confirm(msg, { title?, danger?,
@@ -571,15 +651,19 @@ Three render shapes:
 ### 7. Storage choices
 
 **Hard rules** (learned from real failures):
-- **Multiplayer (live across peers) requires SyncTable.** `DatabaseSync`/local SQLite is
-  per-device and never syncs. Don't mix the two in one data domain.
-- **`ensureTables(peer)` IS the auth gate for SyncTable endpoints.** Do not write your own
+- **Multiplayer (live across peers) requires a synced table.** Local tables (`local: true`)
+  and `DatabaseSync`/raw SQLite are per-device and never sync. Don't mix table backends and
+  `DatabaseSync` in one data domain.
+- **`ensureTables(peer)` IS the auth gate for table endpoints.** Do not write your own
   `if (!peer.is_sfi_member) return 403` around them — it handles owner/member/anon correctly
   and a homemade gate breaks the public-view case and the warm-up handshake.
 - **Schema field names are `col_type` / `nullable` / `default_val`** (not `type` / `required`
   / `default`); `col_type` values are `"text" | "integer" | "real" | "blob"`. Getting this
   wrong silently leaves the frame stuck on the binding modal.
-- **Local SQLite paths use `path.join(import.meta.dirname, "data", "x.sqlite")`** with
+- **Per-placement settings go in `frameSettings(peer.sfi_id)`, never a hand-rolled one-row
+  table** (see Section 3 — `query({limit:1})` + `upsert(null, …)` races into duplicate
+  "singleton" rows). Rows unique by an app key get a STABLE id built from the key.
+- **Legacy raw SQLite paths use `path.join(import.meta.dirname, "data", "x.sqlite")`** with
   `mkdirSync(dataDir, { recursive: true })` at module top.
 
 ### 8. CSS & icons
@@ -594,12 +678,25 @@ accent at the top of `:root`: `:root { --ch: var(--os-c4); }`. Phosphor Light ic
 ### 9. `frame.json` manifest reference
 
 Minimum is shown in A.1 and Section 2. Field notes:
-- `frame_type` — almost always `"Seamside"` (sandboxed Deno worker). `Solo`/`Hosted`/`Proxy`
-  are advanced.
-- `permissions.net` — array of bare hostnames the worker may fetch from. Empty for
-  self-contained frames; e.g. `["api.open-meteo.com", "geocoding-api.open-meteo.com"]`.
+- `frame_type` — almost always `"Tandem"` (the sandboxed-Deno-worker frame *type*; it keeps
+  its historical name — see A.1). `Solo`/`Hosted`/`Proxy` are advanced.
+- `app_version_min` — minimum Seamside app version the frame requires; default to `"0.2.0"`.
+- `permissions.net` — array of bare hostnames the **backend worker** may `fetch()` from.
+  Empty for self-contained frames; e.g. `["api.open-meteo.com",
+  "geocoding-api.open-meteo.com"]`.
+- `permissions.web` — array of full **frontend** origins (`https://…`/`wss://…`) the iframe
+  may load external media/images from or connect to (browser-side `fetch`/`WebSocket`) —
+  otherwise the CSP blocks them. Does **not** unblock external scripts. e.g.
+  `["https://icecast.radiofrance.fr"]`.
+- `permissions.web_scripts` — **HIGH-RISK** array of origins the frame may run external
+  code from (folded into `script-src` + style/font/worker). Empty for almost every frame —
+  vendor into `public/` instead; only for non-vendorable SDKs (e.g. Google Maps).
 - `default_width_px` / `default_height_px` — optional initial tile size in pixels.
-- `depends_on_capabilities` — capability names this frame requires.
+- `depends_on_capabilities` — capability names this frame requires (`anthropic` / `openai` /
+  `system_info` only — external HTTP is `permissions.net`, not a capability).
+- `licensed_under_cc0` — `true` lets members clone the frame to their own device ("copy ·
+  edit · run locally"); `false`/omitted removes the clone affordance.
+- `attribution_log` — provenance of cloned/modified frames; start `[]`.
 - `created_at` / `modified_at` — ISO-8601. Bump `modified_at` to signal an update to
   existing installs.
 
@@ -612,8 +709,12 @@ Minimum is shown in A.1 and Section 2. Field notes:
   (build with a relative base — see A.3). This is the #1 cause of blank/unstyled/misplaced output.
 - **Path-based SPA routers render a 404.** `BrowserRouter`/history-mode routing reads the
   prefixed `location.pathname` and matches nothing. Use a hash router — see A.4.
-- **External hosts need `permissions.net`.** Any `fetch()` to a host not listed is blocked.
-- **No `localStorage`/cookies** — the iframe has no `allow-same-origin` (opaque origin).
+- **External hosts need the right permission list.** Browser-side `fetch()`/media/images →
+  the full origin in `permissions.web`; external `<script>` → `permissions.web_scripts`
+  (prefer vendoring); backend-worker `fetch()` → the bare hostname in `permissions.net`.
+- **No direct `localStorage`/cookies** — the webview blocks third-party-iframe storage
+  even though the sandbox includes `allow-same-origin`. Use
+  `frame.localStorageSetItem`/`GetItem` for small UI prefs (Section 4).
 - **Root files get dropped from the zip.** AI builders export only the web app, omitting
   sibling `frame.ts`/`frame.json`. Build `my-frame-name/` as a standalone folder and verify the
   archive lists both control files — see A.6.
@@ -624,11 +725,15 @@ Minimum is shown in A.1 and Section 2. Field notes:
 - **`peer.is_*` are booleans** after `parsePeerInfo` — use truthy checks, not `=== "1"`.
 - **Never call raw `fetch()` in frontend code** — use `frame.api` / `frame.fetch` (the iframe
   runs under a URL prefix; raw fetch hits the wrong origin).
-- **SyncTable schema field names** are `col_type` / `nullable` / `default_val`, types
+- **Table schema field names** are `col_type` / `nullable` / `default_val`, types
   `"text" | "integer" | "real" | "blob"`.
-- **Don't homebrew an auth check around SyncTable endpoints** — `ensureTables(peer)` is the gate.
+- **Don't homebrew an auth check around table endpoints** — `ensureTables(peer)` is the gate.
 - **`ensureTables(peer)` takes one arg.**
-- **Local SQLite does NOT sync** — multiplayer requires SyncTable. Don't mix them in one domain.
+- **Local tables (`local: true`) and local SQLite do NOT sync** — multiplayer requires a
+  synced table (omit `local`). Don't mix tables and `DatabaseSync` in one domain.
+- **Per-placement settings use `frameSettings(sfi_id)`, never a hand-rolled one-row table**;
+  rows unique by an app key get a stable id (`` upsert(`${itemId}:${userId}`, …) ``), never
+  query-then-`upsert(null)`.
 - **`status ∈ {101, 103, 204, 205, 304}` responses must have `body: null`** — `body: ""`
   crashes the arbiter with `"Response with null body status cannot have body"`.
 - **`pushToInstance` data must be JSON-serialisable.**
@@ -650,8 +755,11 @@ kebab-case name for the app (the folder name becomes the frame's on-disk id on i
    root-level `frame.ts`/`frame.json`; see A.6.)
 2. Put my app's built static files (the contents of its `dist/` / `build/` output —
    `index.html`, JS, CSS, assets) into `my-frame-name/public/`, **unchanged**.
-3. Add `my-frame-name/frame.json` (copy from A.1; fill in `name`, `description`, and any
-   external hostnames the app calls under `permissions.net`).
+3. Add `my-frame-name/frame.json` (copy from A.1; fill in `name`, `description`, and the
+   permissions: any external origins the app's browser-side code fetches or loads media
+   from go in `permissions.web` (full `https://…` origins); any non-vendorable external
+   `<script>` origins go in `permissions.web_scripts`; `permissions.net` stays `[]` unless
+   you add backend fetches to `frame.ts`).
 4. Add `my-frame-name/frame.ts` (copy verbatim from A.2 — the static-file server).
 5. **Fix asset paths (A.3):** ensure every asset URL in `public/index.html` is **relative**
    (`./assets/…`), not absolute (`/assets/…`). If the app was built with Vite/CRA/etc.,
