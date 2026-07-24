@@ -325,7 +325,8 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
       // One vote row per (item, user), keyed by a stable id — toggling is get→delete/upsert
       // on that id, so concurrent votes can never fork it into two rows.
       const voteId = `${id}:${peer.user_id}`;
-      if (await t.votes.get(voteId)) {
+      const hadVote = !!(await t.votes.get(voteId));
+      if (hadVote) {
         await t.votes.delete(voteId);
       } else {
         await t.votes.upsert(voteId, {
@@ -337,7 +338,7 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
         type: "rt_item_vote", sfi_id: sfiId, kind: row.kind, id,
         votes,
       });
-      return jsonReply(replyPort, 200, { ok: true, votes, i_voted: existing.length === 0 });
+      return jsonReply(replyPort, 200, { ok: true, votes, i_voted: !hadVote });
     }
 
     // -------- OWNER SETTINGS --------
