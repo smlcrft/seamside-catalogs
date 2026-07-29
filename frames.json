@@ -244,7 +244,7 @@
       "name": "Help Desk",
       "description": "Anonymous visitors submit a message with email (plus admin-configured fields); known users in the space see a realtime inbox of incoming correspondence.",
       "icon": "",
-      "modified_at": "2026-07-17T19:39:24Z",
+      "modified_at": "2026-07-29T19:40:01Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -258,7 +258,7 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/help_desk.tar.gz",
-      "package_sha256": "9e98c4d07f3c64a1075d9c01659c3a1544f482d3392a4cd1dbd882435ffdc33b",
+      "package_sha256": "1a614672d5c0363636d422f52b9875632c8c6bce3fe68e0ff3ab3cf947c182fc",
       "app_version_min": "0.1.12"
     },
     {

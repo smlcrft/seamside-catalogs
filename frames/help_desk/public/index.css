@@ -32,25 +32,31 @@ body {
   gap: var(--os-sp-xs);
   margin-bottom: var(--os-sp-lg);
 }
-.hd-field label .req { color: var(--os-cError-fg); margin-left: 2px; }
+.hd-field label .req { color: var(--os-cError); margin-left: 2px; }
 .hd-field .hint { color: var(--os-text-muted); font-size: var(--os-fs-xs); }
 .hd-field.inline {
   flex-direction: row;
   align-items: center;
   gap: var(--os-sp-sm);
 }
+/* Status blocks sit on the *-muted (near-white) tints, so their text is the warm-stone
+   ink, not the *-fg tokens — those are the light foregrounds meant for the saturated
+   fills and read as invisible here. The status hue survives in the icon / message ink,
+   darkened into the text range so it stays legible on its own tint. */
 .hd-success {
   background: var(--os-cSuccess-muted);
-  color: var(--os-cSuccess-fg);
+  color: var(--os-text);
   border-radius: var(--os-radius-md);
   padding: var(--os-sp-lg);
   display: flex;
   align-items: center;
   gap: var(--os-sp-sm);
 }
+.hd-success i { color: color-mix(in srgb, var(--os-cSuccess), var(--os-text) 50%); }
+.hd-success .muted { color: var(--os-text-secondary); }
 .hd-error {
   background: var(--os-cError-muted);
-  color: var(--os-cError-fg);
+  color: color-mix(in srgb, var(--os-cError), var(--os-text) 40%);
   border-radius: var(--os-radius-sm);
   padding: var(--os-sp-sm) var(--os-sp-md);
   font-size: var(--os-fs-sm);
@@ -80,8 +86,23 @@ body {
   align-items: center;
   gap: var(--os-sp-sm);
 }
-.hd-admin-header h1 i { color: var(--ch); }
-.hd-tabs { display: flex; gap: var(--os-sp-xs); }
+.hd-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--os-sp-sm);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.hd-heading > i { color: var(--ch); }
+.hd-heading-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.hd-tabs { display: flex; gap: var(--os-sp-xs); align-items: center; }
+.hd-tab-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--os-border-color);
+  margin: 0 var(--os-sp-xs);
+}
+.hd-icon-btn { gap: var(--os-sp-xs); }
 .hd-tab {
   background: transparent;
   border: 1px solid transparent;
@@ -97,7 +118,8 @@ body {
 }
 .hd-count-badge {
   display: inline-block;
-  background: var(--ch, var(--os-c2));
+  /* Darkened into the text range so 10px cream reads on it. */
+  background: color-mix(in srgb, var(--ch, var(--os-c2)), var(--os-text) 30%);
   color: var(--os-bg);
   padding: 0 6px;
   border-radius: var(--os-radius-full);
@@ -146,7 +168,7 @@ body {
   align-items: center;
   gap: 4px;
   background: color-mix(in oklch, var(--ch) 15%, transparent);
-  color: var(--ch);
+  color: color-mix(in srgb, var(--ch), var(--os-text) 50%);
   padding: 2px var(--os-sp-sm);
   border-radius: var(--os-radius-full);
   font-size: var(--os-fs-xs);
@@ -241,10 +263,22 @@ body {
   letter-spacing: 0.04em;
 }
 .hd-field-row .options {
+  order: 1; /* wraps to its own line below the row's controls */
   font-size: var(--os-fs-xs);
   color: var(--os-text-muted);
   flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--os-sp-xs);
 }
+.hd-field-row .options-lbl { text-transform: uppercase; letter-spacing: 0.04em; }
+/* Editable label + options: the row hints at editability on hover, the input itself
+   commits the lift. Rows sit on bg-surface, so the lift goes down into inset. */
+.hd-field-row .hd-inline { width: auto; flex: 0 1 auto; min-width: 0; }
+.hd-field-row .options-edit { flex: 1 1 160px; font-size: inherit; color: var(--os-text-secondary); }
+.hd-field-row:hover .hd-inline { background: var(--os-bg-subtle); }
+.hd-field-row .hd-inline:hover,
+.hd-field-row .hd-inline:focus { background: var(--os-bg-inset); }
 .hd-field-row .spacer { flex: 1; }
 .hd-field-row .required-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: var(--os-fs-xs); color: var(--os-text-secondary); }
 
@@ -283,10 +317,27 @@ body {
 }
 .hd-toast.show { opacity: 1; }
 
-/* Inline-editable placement title — mirrors roadmap's proj-name recipe:
-   looks like the h1 at rest, bg-surface lift on hover/focus, ghosted
-   placeholder, ellipsis when the name outgrows the header. */
-.hd-admin-header h1 { flex: 1 1 auto; min-width: 0; }
+/* Inline-editable text (framelib's <Editable/>) — mirrors roadmap's proj-name recipe:
+   looks like plain text at rest, lifts on hover/focus, ghosted placeholder. Used for
+   field labels/options and the public subtitle; the title keeps its own type below. */
+.hd-inline {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--os-radius-xs);
+  padding: 1px 4px;
+  margin-left: -4px;
+  outline: none;
+  text-overflow: ellipsis;
+}
+.hd-inline:hover, .hd-inline:focus { background: var(--os-bg-surface); }
+.hd-inline::placeholder { color: var(--os-text-subtle); }
+.hd-subtitle-edit { font-size: var(--os-fs-sm); color: var(--os-text-secondary); }
+
+/* Inline-editable placement title. */
 .hd-title-edit { flex: 1 1 auto; min-width: 0; }
 .hd-title-edit input {
   width: 100%;
@@ -308,6 +359,29 @@ body {
 .hd-title-edit input:hover,
 .hd-title-edit input:focus { background: var(--os-bg-surface); }
 .hd-title-edit input::placeholder { color: var(--os-text-muted); }
+
+/* ---------- Public view (admin looking at their own form) ---------- */
+.hd-public-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--os-sp-sm);
+  padding: var(--os-sp-sm) var(--os-sp-xl);
+  background: var(--os-bg-subtle);
+  border-bottom: 1px solid var(--os-border-color-subtle);
+}
+.hd-public-bar .spacer { flex: 1; }
+.hd-public-note { font-size: var(--os-fs-xs); color: var(--os-text-secondary); }
+.hd-public-tag {
+  font-size: var(--os-fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--os-text-secondary);
+  background: var(--os-bg-inset);
+  border: 1px solid var(--os-border-color);
+  border-radius: var(--os-radius-full);
+  padding: 2px var(--os-sp-sm);
+}
+.hd-public-body { flex: 1; min-height: 0; overflow: auto; }
 
 /* Public view heading: the placement title (or the default prompt). */
 .hd-public-title {

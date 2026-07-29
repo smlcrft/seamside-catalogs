@@ -10,7 +10,7 @@
 <body>
   <main id="app" class="hd-root"></main>
   <script type="module">
-import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush } from "/lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, Editable } from "/lib/js/framelib.js";
 
 const peer = window.__peer || {};
 const urlSfi = new URLSearchParams(location.search).get("sfi") || "";
@@ -20,6 +20,14 @@ const me = {
   user_name: peer.user_name || "",
 };
 const api = frame.api;
+
+// Public-form heading fallbacks — used verbatim when the admin hasn't set their own,
+// and as the placeholders in the admin's inline editors.
+const DEFAULT_TITLE = "Send us a message";
+const DEFAULT_SUBTITLE = "We'll get back to you at the email you provide.";
+
+// Enter commits an inline edit (framelib's Editable saves on blur).
+const enterBlur = (e) => { if (e.key === "Enter") e.target.blur(); };
 
 function formatRelative(ts) {
   const diff = Math.max(0, Date.now() - ts);
@@ -45,11 +53,13 @@ function AnonForm() {
   const [submitting, setSubmitting] = useState(false);
   const [sentTo, setSentTo] = useState(null);
   const [deskTitle, setDeskTitle] = useState("");
+  const [deskSubtitle, setDeskSubtitle] = useState("");
 
   useEffect(() => {
     api("./api/config").then((r) => {
       setFields(r.fields || []);
       setDeskTitle((r.title || "").trim());
+      setDeskSubtitle((r.subtitle || "").trim());
       setLoaded(true);
     }).catch(() => setLoaded(true));
   }, []);
@@ -95,8 +105,8 @@ function AnonForm() {
   }
 
   return html`<section class="hd-anon">
-    <h1 class="hd-public-title">${deskTitle || "Send us a message"}</h1>
-    <p class="hd-subtitle muted">We'll get back to you at the email you provide.</p>
+    <h1 class="hd-public-title">${deskTitle || DEFAULT_TITLE}</h1>
+    <p class="hd-subtitle">${deskSubtitle || DEFAULT_SUBTITLE}</p>
     <form class="stack" onSubmit=${submit}>
       ${err && html`<div class="hd-error">${err}</div>`}
       <div class="hd-field">
@@ -150,6 +160,7 @@ function CustomFieldInput({ field: f, value, onChange }) {
 // =====================================================================================
 // Admin view
 // =====================================================================================
+
 function previewFor(s, fieldMap) {
   const pick = (pred) => {
     for (const [fid, v] of Object.entries(s.fields || {})) {
@@ -164,7 +175,7 @@ function previewFor(s, fieldMap) {
     || pick(() => true);
 }
 
-function Submission({ s, fields, isOpen, isHighlight, notes, onToggle, onSetStatus, onDelete, onAddNote }) {
+function Submission({ s, fields, isOpen, isHighlight, notes, onToggle, onSetStatus, onDelete, onAddNote, onReply }) {
   const fieldMap = new Map(fields.map((f) => [String(f.id), f]));
   const blocks = [];
   const compact = [];
@@ -208,9 +219,9 @@ function Submission({ s, fields, isOpen, isHighlight, notes, onToggle, onSetStat
         <select value=${s.status} onChange=${(e) => onSetStatus(s.id, e.target.value)}>
           ${["new", "in_progress", "resolved", "archived"].map((st) => html`<option key=${st} value=${st}>${st.replace("_", " ")}</option>`)}
         </select>
-        <a class="secondary" href=${`mailto:${encodeURIComponent(s.email)}?subject=${encodeURIComponent("Re: your message")}`} role="button" style="text-decoration:none;">
-          <button class="secondary" type="button"><i class="ph-light ph-envelope-simple icon-sm"></i> Reply via email</button>
-        </a>
+        <button class="secondary" type="button" onClick=${() => onReply(s.email)}>
+          <i class="ph-light ph-envelope-simple icon-sm"></i> Reply via email
+        </button>
         <span class="spacer" style="flex:1;"></span>
         <button class="ghost" onClick=${() => onDelete(s.id)}><i class="ph-light ph-trash icon-sm"></i></button>
       </div>
@@ -281,11 +292,26 @@ function InboxView({ submissions, fields, openId, highlightId, notesBySub, setOp
   </div>`;
 }
 
-function FieldsView({ fields, onCreate, onSetRequired, onDelete, toast }) {
+function FieldsView({ fields, onCreate, onUpdate, onSetRequired, onDelete, toast }) {
   const [label, setLabel] = useState("");
   const [type, setType] = useState("text");
   const [required, setRequired] = useState(false);
   const [optsRaw, setOptsRaw] = useState("");
+  // Bumped when we reject an edit, to remount the Editable back onto the stored
+  // value — Editable only re-syncs when its `value` prop actually changes.
+  const [seq, setSeq] = useState(0);
+  const reject = (msg) => { toast(msg); setSeq((n) => n + 1); };
+
+  const saveLabel = (f) => (v) => {
+    const t = v.trim();
+    if (!t) return reject("field label can't be empty");
+    onUpdate(f.id, { label: t });
+  };
+  const saveOptions = (f) => (v) => {
+    const opts = v.split(",").map((s) => s.trim()).filter(Boolean);
+    if (opts.length === 0) return reject("dropdown needs at least one option");
+    onUpdate(f.id, { options: opts });
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -298,7 +324,7 @@ function FieldsView({ fields, onCreate, onSetRequired, onDelete, toast }) {
   return html`<div class="hd-fields">
     <div>
       <h2>Form Fields</h2>
-      <p class="muted">Anonymous visitors always fill in <strong>Email</strong>. The <em>Message</em> field below is included by default — remove it if another field fits better, or keep and mark required.</p>
+      <p class="muted">Anonymous visitors always fill in <strong>Email</strong>. Click a field's label or options to edit them; the <em>Message</em> field below is included by default.</p>
     </div>
     <div class="hd-field-row fixed">
       <span class="label">Email</span>
@@ -307,9 +333,16 @@ function FieldsView({ fields, onCreate, onSetRequired, onDelete, toast }) {
       <span class="required-toggle">required • default</span>
     </div>
     ${fields.map((f) => html`<div class="hd-field-row" key=${f.id} data-fid=${f.id}>
-      <span class="label">${f.label}</span>
+      <${Editable} key=${"lbl" + seq} class="hd-inline label" maxlength=${120}
+        size=${Math.max(8, (f.label || "").length + 1)} placeholder="Field label"
+        value=${f.label} onKeyDown=${enterBlur} onSave=${saveLabel(f)} />
       <span class="type">${f.type}</span>
-      ${f.type === "dropdown" && html`<span class="options">options: ${(f.options || []).join(", ")}</span>`}
+      ${f.type === "dropdown" && html`<span class="options">
+        <span class="options-lbl">options</span>
+        <${Editable} key=${"opt" + seq} class="hd-inline options-edit"
+          placeholder="Option 1, Option 2, Option 3" value=${(f.options || []).join(", ")}
+          onKeyDown=${enterBlur} onSave=${saveOptions(f)} />
+      </span>`}
       <span class="spacer"></span>
       <label class="required-toggle">
         <input type="checkbox" checked=${f.required} onChange=${(e) => onSetRequired(f.id, e.target.checked)} /> required
@@ -350,6 +383,8 @@ function AdminView() {
   const [notesBySub, setNotesBySub] = useState(new Map());
   const [toastMsg, setToastMsg] = useState(null);
   const [deskTitle, setDeskTitle] = useState("");
+  const [deskSubtitle, setDeskSubtitle] = useState("");
+  const [publicView, setPublicView] = useState(false);
 
   // Mutable refs for the push handler to avoid stale closures.
   const stateRef = useRef({ openId: null, sfi_id: me.sfi_id });
@@ -363,17 +398,26 @@ function AdminView() {
   useEffect(() => {
     loadSubmissions().catch((e) => toast(e.message || "load failed"));
     loadFields().catch((e) => toast(e.message || "load failed"));
-    api("./api/config").then((r) => setDeskTitle(r.title || "")).catch(() => {});
+    api("./api/config").then((r) => {
+      setDeskTitle(r.title || "");
+      setDeskSubtitle(r.subtitle || "");
+    }).catch(() => {});
     const hb = setInterval(() => { api("./api/admin/register", {}).catch(() => {}); }, 30_000);
     return () => clearInterval(hb);
   }, []);
 
-  // Placement display name — saves on blur/Enter (mirrors roadmap's proj-name).
+  // Public heading — saves on blur/Enter (mirrors roadmap's proj-name).
   const saveTitle = (v) => {
     const t = v.trim();
     if (t === deskTitle) return;
     setDeskTitle(t);
-    api("./api/admin/title", { title: t }, "PUT").catch((e) => toast(e.message || "rename failed"));
+    api("./api/admin/meta", { title: t }, "PUT").catch((e) => toast(e.message || "rename failed"));
+  };
+  const saveSubtitle = (v) => {
+    const t = v.trim();
+    if (t === deskSubtitle) return;
+    setDeskSubtitle(t);
+    api("./api/admin/meta", { subtitle: t }, "PUT").catch((e) => toast(e.message || "rename failed"));
   };
 
   useFramePush((d) => {
@@ -393,8 +437,9 @@ function AdminView() {
       setNotesBySub((prev) => { const m = new Map(prev); m.set(d.submission_id, d.notes || []); return m; });
     } else if (d.type === "hd_fields_changed") {
       loadFields().catch(() => {});
-    } else if (d.type === "hd_title_changed") {
+    } else if (d.type === "hd_meta_changed") {
       setDeskTitle(d.title || "");
+      setDeskSubtitle(d.subtitle || "");
     }
   });
 
@@ -421,6 +466,13 @@ function AdminView() {
       setNotesBySub((prev) => { const m = new Map(prev); m.set(id, notes || []); return m; });
     } catch (e) { toast(e.message || "failed"); }
   };
+  // Frames are sandboxed (no allow-popups / allow-top-navigation), so a mailto: link
+  // can't be followed from in here — hand it up to the host, which passes it to the
+  // OS mail handler.
+  const replyByEmail = (email) => {
+    try { frame.openExternalUrl(`mailto:${email}?subject=${encodeURIComponent("Re: your message")}`); }
+    catch (e) { toast(e.message || "couldn't open your mail app"); }
+  };
   const fetchNotes = (subId) => {
     if (notesBySub.has(subId)) return;
     api(`./api/admin/messages/${subId}/notes`).then(({ notes }) => {
@@ -434,6 +486,11 @@ function AdminView() {
       await loadFields();
     } catch (e) { toast(e.message || "failed"); }
   };
+  const updateField = async (fid, patch) => {
+    try { await api(`./api/admin/fields/${fid}`, patch, "PUT"); }
+    catch (e) { toast(e.message || "failed"); }
+    await loadFields().catch(() => {});
+  };
   const setFieldRequired = async (fid, required) => {
     try { await api(`./api/admin/fields/${fid}`, { required }, "PUT"); }
     catch (e) { toast(e.message || "failed"); await loadFields(); }
@@ -446,20 +503,45 @@ function AdminView() {
 
   const newCount = submissions.filter((s) => s.status === "new").length;
 
+  // Public view — the real anonymous form, with a return bar above it. Anything sent
+  // from here is a real submission, so the bar says so rather than faking a preview.
+  if (publicView) {
+    return html`<section class="hd-admin">
+      <header class="hd-public-bar">
+        <button class="ghost hd-icon-btn" onClick=${() => setPublicView(false)}>
+          <i class="ph-light ph-arrow-left icon-sm"></i> Back to inbox
+        </button>
+        <span class="spacer"></span>
+        <span class="hd-public-note">Anything you send here lands in your inbox.</span>
+        <span class="hd-public-tag">public view</span>
+      </header>
+      <div class="hd-public-body"><${AnonForm} /></div>
+    </section>`;
+  }
+
   return html`<section class="hd-admin">
     <header class="hd-admin-header">
-      <h1>
+      <div class="hd-heading">
         <i class="ph-light ph-lifebuoy icon-md"></i>
-        <div class="hd-title-edit"><input value=${deskTitle} maxlength="120" placeholder="Send us a message"
-          onBlur=${(e) => saveTitle(e.target.value)}
-          onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} /></div>
-      </h1>
+        <div class="hd-heading-text">
+          <h1><div class="hd-title-edit"><${Editable} maxlength=${120} placeholder=${DEFAULT_TITLE}
+            value=${deskTitle} onKeyDown=${enterBlur} onSave=${saveTitle} /></div></h1>
+          <${Editable} class="hd-inline hd-subtitle-edit" maxlength=${240}
+            placeholder=${DEFAULT_SUBTITLE} value=${deskSubtitle}
+            onKeyDown=${enterBlur} onSave=${saveSubtitle} />
+        </div>
+      </div>
       <nav class="hd-tabs">
         <button class=${"hd-tab" + (tab === "inbox" ? " active" : "")} onClick=${() => setTab("inbox")}>
           Inbox ${newCount > 0 && html`<span class="hd-count-badge">${newCount}</span>`}
         </button>
         <button class=${"hd-tab" + (tab === "fields" ? " active" : "")} onClick=${() => setTab("fields")}>
           Form Fields
+        </button>
+        <span class="hd-tab-sep"></span>
+        <button class="hd-tab hd-icon-btn" title="See the form the way anonymous visitors do"
+          onClick=${() => setPublicView(true)}>
+          <i class="ph-light ph-eye icon-sm"></i> Public view
         </button>
       </nav>
     </header>
@@ -469,8 +551,9 @@ function AdminView() {
             openId=${openId} highlightId=${highlightId} notesBySub=${notesBySub}
             setOpenId=${setOpenId}
             onToggleNotes=${fetchNotes}
-            onSetStatus=${setStatus} onDelete=${deleteSubmission} onAddNote=${addNote} />`
-        : html`<${FieldsView} fields=${fields} onCreate=${createField}
+            onSetStatus=${setStatus} onDelete=${deleteSubmission} onAddNote=${addNote}
+            onReply=${replyByEmail} />`
+        : html`<${FieldsView} fields=${fields} onCreate=${createField} onUpdate=${updateField}
             onSetRequired=${setFieldRequired} onDelete=${deleteField} toast=${toast} />`}
     </div>
     ${toastMsg && html`<div class="hd-toast show">${toastMsg}</div>`}
