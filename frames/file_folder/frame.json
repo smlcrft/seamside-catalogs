@@ -1,12 +1,13 @@
 {
     "name": "File Folder",
-    "description": "A simple shared file bucket, unique per placement. Members (or just the owner — the owner chooses) can add files by clicking 'Add file' or dragging them in from the desktop. The owner sets who may add files, who may download them (space members only, or anyone with the link), a max file size, and a max number of files. Files live in the frame's own data folder in a per-placement subfolder; only the owner's sharing preferences are stored, in a single JSON file. No database or sync tables.",
+    "description": "A simple shared file bucket, unique per placement. Members (or just the owner — the owner chooses) can add files by clicking 'Add file' or dragging them in from the desktop. The owner sets who may add files, a max file size, and a max number of files. Anyone who can open the frame can list and download its files, so sharing the frame publicly shares the folder. Files live in the frame's own data folder in a per-placement subfolder; only the owner's sharing preferences are stored, in a single JSON file. No database or sync tables.",
     "frame_type": "Tandem",
+    "tags": ["everyday", "files"],
     "permissions": {
         "net": []
     },
     "created_at": "2026-06-03T00:24:55Z",
-    "modified_at": "2026-06-03T01:48:04Z",
+    "modified_at": "2026-08-04T03:00:00Z",
     "app_version_min": "0.1.7",
     "depends_on_capabilities": [],
     "default_width_px": 420,

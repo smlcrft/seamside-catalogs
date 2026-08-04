@@ -15,7 +15,7 @@
 //   settings_scope: settings-per-sfi     — project meta + links keyed by peer.sfi_id.
 //
 // Data model (all tables are per-placement LocalTables):
-//   meta        one row per placement — project name, overview, links (JSON), accent.
+//   meta        one row per placement — project name, overview, links (JSON).
 //   milestones  real milestones (kind='milestone', with a target date + completed flag)
 //               PLUS two auto-created singleton buckets, kind='backburner' / 'maybelater',
 //               which hold parked tasks and never appear on the timeline.
@@ -80,9 +80,6 @@ const MAX_TASK = 1000;
 const MAX_LABEL = 80;
 const MAX_URL = 2048;
 const MAX_LINKS = 12;
-const VALID_ACCENTS = new Set(
-  Array.from({ length: 12 }, (_, i) => "c" + (i + 1)),
-);
 const BUCKETS: Array<{ kind: string; title: string; sort_order: number }> = [
   { kind: "backburner", title: "Back Burner", sort_order: 1_000_000 },
   { kind: "maybelater", title: "Maybe Later", sort_order: 1_000_001 },
@@ -93,7 +90,7 @@ function isSafeUrl(u: string): boolean {
 }
 
 // ----- Buckets bootstrap ----------------------------------------------------------------
-// Project meta (name/overview/links/accent/public_view) lives in the per-placement
+// Project meta (name/overview/links) lives in the per-placement
 // frameSettings store, which needs no seeding — getMeta reads keys with defaults.
 async function ensurePlacement(t: Tables): Promise<void> {
   // Auto-create the two parking buckets once per placement. Each bucket is unique
@@ -112,19 +109,15 @@ async function ensurePlacement(t: Tables): Promise<void> {
 
 // ----- Readers --------------------------------------------------------------------------
 async function getMeta(t: Tables) {
-  const [name, overview, accent, links, publicView] = await Promise.all([
+  const [name, overview, links] = await Promise.all([
     t.settings.get<string>("name"),
     t.settings.get<string>("overview"),
-    t.settings.get<string>("accent"),
     t.settings.get<Array<{ label: string; url: string }>>("links"),
-    t.settings.get<boolean>("public_view"),
   ]);
   return {
     name: name ?? "",
     overview: overview ?? "",
-    accent: VALID_ACCENTS.has(accent ?? "") ? accent : "c4",
     links: Array.isArray(links) ? links : [],
-    public_view: !!publicView,
   };
 }
 
@@ -197,6 +190,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
       is_owner: peer.is_owner,
       user_id: peer.user_id,
       user_name: peer.user_name,
+      space_color: peer.space_color,
     });
   }
 
@@ -211,12 +205,11 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     tasks: table("tasks", sfiId),
   };
 
-  // Full read. Members always see it; non-members only when the editor has turned on
-  // public viewing — otherwise they get a { private: true } marker and nothing else.
+  // Full read, open to every viewer who reaches the frame. Whether a non-member can reach
+  // it at all is the platform's call (public sharing on the placement), never the frame's.
   if (reqPath === "/api/state" && method === "GET") {
     await ensurePlacement(t);
     const meta = await getMeta(t);
-    if (!peer.is_sfi_member && !meta.public_view) return jsonReply(replyPort, 200, { private: true });
     return jsonReply(replyPort, 200, { meta, milestones: await listMilestones(t), tasks: await listTasks(t) });
   }
 
@@ -229,23 +222,15 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   };
   const ok = async () => jsonReply(replyPort, 200, await snapshot(t));
 
-  // ----- Project settings: name / overview / links / accent -----------------------------
+  // ----- Project settings: name / overview / links --------------------------------------
   if (reqPath === "/api/settings" && method === "POST") {
     if (!(await editorOnly())) return;
-    const v = parseJsonBody<{ name?: unknown; overview?: unknown; links?: unknown; accent?: unknown; public_view?: unknown }>(body);
-    if (v?.public_view !== undefined) {
-      await t.settings.set("public_view", !!(toIntOrNull(v.public_view) ?? 0));
-    }
+    const v = parseJsonBody<{ name?: unknown; overview?: unknown; links?: unknown }>(body);
     if (v?.name !== undefined) {
       await t.settings.set("name", sanitizeText(v.name, MAX_NAME));
     }
     if (v?.overview !== undefined) {
       await t.settings.set("overview", sanitizeText(v.overview, MAX_OVERVIEW));
-    }
-    if (v?.accent !== undefined) {
-      const a = sanitizeText(v.accent, 4);
-      if (!VALID_ACCENTS.has(a)) return jsonReply(replyPort, 400, { error: "invalid accent" });
-      await t.settings.set("accent", a);
     }
     if (v?.links !== undefined) {
       const raw = Array.isArray(v.links) ? v.links : [];

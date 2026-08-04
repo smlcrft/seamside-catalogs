@@ -2,10 +2,11 @@
 // Calendar — a simple shared calendar, one per placement (sfi_id).
 //
 // Design axes:
-//   privacy:        privacy-public-view  — editors add/change events; members get a read-only
-//                                           view. A per-instance "public" toggle decides whether
-//                                           NON-members (anon link visitors, bookmark-only users)
-//                                           may see the calendar at all, or get a "private" panel.
+//   privacy:        privacy-public-view  — editors add/change events; everyone else gets a
+//                                           read-only view. Whether a non-member can reach this
+//                                           frame at all is the platform's call (public sharing on
+//                                           the placement), never the frame's — if a request lands
+//                                           here, the viewer is allowed to see the calendar.
 //   data_storage:   storage-simple-files — the whole calendar lives in a single cal.json under a
 //                                           per-sfi folder. No DB / SyncTable.
 //   view_realtime:  view-collaborative   — every mutation calls pushToInstance so all viewers of
@@ -41,10 +42,10 @@ type CalEvent = {
   note: string;
   recur: Recur;     // null = one-time
 };
-type Settings = { palette: string; isPublic: boolean };
+type Settings = Record<string, never>;
 type Cal = { settings: Settings; events: CalEvent[] };
 
-const DEFAULT_CAL: Cal = { settings: { palette: "c1", isPublic: false }, events: [] };
+const DEFAULT_CAL: Cal = { settings: {}, events: [] };
 
 // Caps — keep disk + rendering bounded.
 const MAX_EVENTS = 1000;
@@ -135,28 +136,26 @@ function sanitizeEvent(e: any): CalEvent | null {
 
 function sanitizeCal(raw: any): Cal {
   const s = raw && typeof raw === "object" ? raw : {};
-  const settings: Settings = {
-    palette: oneOf(s.settings?.palette, PALETTES, "c1"),
-    isPublic: s.settings?.isPublic === true,
-  };
+  // Legacy cal.json may carry settings.isPublic (the old frame-side gate) and
+  // settings.palette (the old frame-picked accent); both are dropped here — the
+  // frame follows the space channel now.
+  const settings: Settings = {};
   const eventsIn = Array.isArray(s.events) ? s.events.slice(0, MAX_EVENTS) : [];
   const events = eventsIn.map(sanitizeEvent).filter(Boolean) as CalEvent[];
   return { settings, events };
 }
 
-// ----- State for a peer (applies the read-side privacy gate) ----------------------------
+// ----- State for a peer -----------------------------------------------------------------
+// Reads are open to every viewer who reaches the frame; the identity flags only decide which
+// controls the frontend renders. Writes are gated per-endpoint on is_sfi_editor below.
 function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
   const cal = loadCal(peer.sfi_id);
   const me = {
     is_anon: peer.is_anon, is_sfi_member: peer.is_sfi_member,
     is_sfi_editor: peer.is_sfi_editor, is_owner: peer.is_owner,
-    user_name: peer.user_name,
+    user_name: peer.user_name, space_color: peer.space_color,
   };
-  // Private + non-member → reveal nothing but the "this is private" signal and the accent.
-  if (!cal.settings.isPublic && !peer.is_sfi_member) {
-    return { me, private: true, settings: { palette: cal.settings.palette, isPublic: false }, events: [] };
-  }
-  return { me, private: false, settings: cal.settings, events: cal.events };
+  return { me, settings: cal.settings, events: cal.events };
 }
 
 // ----- Networking -----------------------------------------------------------------------
@@ -168,7 +167,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
   }
 
-  // Full calendar + identity in one round trip. The privacy gate lives in stateFor().
+  // Full calendar + identity in one round trip. Open to every viewer who reaches the frame.
   if (reqPath === "/api/state" && method === "GET") {
     return jsonReply(replyPort, 200, stateFor(peer));
   }
@@ -204,20 +203,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
       pushToInstance(peer.sfi_id, { type: "cal_changed", by: str(v.by, 64) });
     }
     return jsonReply(replyPort, 200, { ok: true });
-  }
-
-  // Calendar settings (accent palette + public/private) — editors only.
-  if (reqPath === "/api/settings" && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const v = parseJsonBody<{ settings?: any; by?: string }>(body) || {};
-    const cal = loadCal(peer.sfi_id);
-    if (v.settings && typeof v.settings === "object") {
-      if (v.settings.palette !== undefined) cal.settings.palette = oneOf(v.settings.palette, PALETTES, cal.settings.palette);
-      if (v.settings.isPublic !== undefined) cal.settings.isPublic = v.settings.isPublic === true;
-    }
-    saveCal(peer.sfi_id, cal);
-    pushToInstance(peer.sfi_id, { type: "cal_changed", by: str(v.by, 64) });
-    return jsonReply(replyPort, 200, { ok: true, settings: cal.settings });
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });

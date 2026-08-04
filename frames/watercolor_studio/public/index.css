@@ -24,11 +24,9 @@ body {
 /* === ROOT === */
 .ws-root {
   --ch: var(--os-c1); --ch-fg: #ffffff;
-  display: grid; grid-template-rows: auto 1fr auto;
+  display: grid; grid-template-rows: 1fr auto;
   height: 100vh; width: 100vw; overflow: hidden;
 }
-
-.ws-accent { height: 2px; background: var(--ch); }
 
 /* === STAGE ("the desk") === */
 .ws-stage {
@@ -85,7 +83,7 @@ body {
   z-index: 6;
 }
 .ws-title-input {
-  width: 132px; max-width: 132px;
+  width: 150px; max-width: 150px;
   font-size: var(--os-fs-xs);
   font-weight: var(--os-weight-medium);
   letter-spacing: -0.005em;
@@ -103,7 +101,7 @@ body {
 .ws-title-input:focus { outline: none; background: var(--os-bg-surface); border-color: var(--os-border-color); }
 .ws-title-input:disabled { cursor: default; color: var(--os-text-secondary); }
 .ws-meta {
-  font-family: var(--os-font-mono); font-size: 9px;
+  font-feature-settings: 'tnum' 1; font-size: 9px;
   letter-spacing: 0.02em; color: var(--os-text-subtle);
   white-space: nowrap;
 }
@@ -125,24 +123,30 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 .ws-dock {
-  display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: var(--os-sp-sm);
+  display: flex; align-items: center; justify-content: center;
   padding: var(--os-sp-sm) var(--os-sp-md);
   background: var(--os-bg-subtle);                 /* continues the "desk" under the paper */
   border-top: 1px solid var(--os-border-color-subtle);
   min-height: 0;
 }
 
-/* Tools cluster — brushes + size + undo */
-.ws-tools {
-  display: flex; flex-direction: row; align-items: center; gap: 2px;
+/* The deck — ONE instrument card holding tools + palette, centered under the paper */
+.ws-deck {
+  display: flex; align-items: center; gap: var(--os-sp-md);
+  flex-wrap: wrap; justify-content: center; row-gap: 6px;
+  max-width: 100%;
   background: var(--os-bg-elevated);
   border: 1px solid var(--os-border-color-subtle);
   border-radius: var(--os-radius-lg);
-  padding: 3px;
+  padding: 6px var(--os-sp-md);
   box-shadow: var(--os-shadow-sm);
   animation: dock-in 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: 80ms;
+}
+
+/* Tools cluster — brushes + size + undo */
+.ws-tools {
+  display: flex; flex-direction: row; align-items: center; gap: 2px;
 }
 .ws-tool-btn {
   width: 30px; height: 30px;
@@ -172,14 +176,9 @@ body {
 
 /* === PALETTE — pigment tray + mixing well, sits at the dock's right === */
 .ws-palette {
-  display: flex; align-items: stretch; gap: var(--os-sp-sm);
-  background: var(--os-bg-elevated);
-  border: 1px solid var(--os-border-color-subtle);
-  border-radius: var(--os-radius-lg);
-  padding: var(--os-sp-sm);
-  box-shadow: var(--os-shadow-sm);
-  animation: dock-in 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: 120ms;
+  display: flex; align-items: center; gap: var(--os-sp-sm);
+  border-left: 1px solid var(--os-border-color-subtle);
+  padding-left: var(--os-sp-md);
 }
 
 /* Pigment pans — a real watercolor tray (16 pans in two rows of eight) */
@@ -213,17 +212,20 @@ body {
 
 /* Mixing well */
 .ws-mixer {
-  display: flex; flex-direction: column; align-items: center;
-  justify-content: space-between; gap: 4px;
+  display: flex; flex-direction: row; align-items: center; gap: var(--os-sp-sm);
   padding-left: var(--os-sp-sm);
   border-left: 1px solid var(--os-border-color-subtle);
 }
+.ws-mix-side {
+  display: flex; flex-direction: column; align-items: flex-start;
+  justify-content: center; gap: 3px;
+}
 .ws-recipe {
   display: flex; align-items: center; gap: 3px; flex-wrap: wrap;
-  justify-content: center; min-height: 12px; max-width: 92px;
+  justify-content: flex-start; min-height: 12px; max-width: 76px;
 }
 .ws-recipe-hint {
-  font-family: var(--os-font-mono); font-size: 9px;
+  font-feature-settings: 'tnum' 1; font-size: 9px;
   letter-spacing: 0.03em; color: var(--os-text-subtle);
 }
 .ws-recipe-chip {
@@ -235,7 +237,7 @@ body {
 .ws-recipe-chip[data-parts]::after {
   content: attr(data-parts);
   position: absolute; top: -6px; right: -6px;
-  font-family: var(--os-font-mono); font-size: 8px; line-height: 1;
+  font-feature-settings: 'tnum' 1; font-size: 8px; line-height: 1;
   color: var(--os-text-muted);
 }
 .ws-well-wrap { position: relative; display: flex; align-items: center; }
@@ -293,7 +295,7 @@ body {
 
 .ws-set-row { display: flex; flex-direction: column; gap: 5px; }
 .ws-set-label {
-  font-size: 9px; font-family: var(--os-font-mono);
+  font-size: 9px; font-feature-settings: 'tnum' 1;
   text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--os-text-muted);
 }
@@ -336,7 +338,7 @@ body {
   border-radius: var(--os-radius-sm);
   padding: 4px 10px;
   font-size: var(--os-fs-2xs); color: var(--os-text-muted);
-  font-family: var(--os-font-mono); letter-spacing: 0.03em;
+  font-feature-settings: 'tnum' 1; letter-spacing: 0.03em;
   text-transform: uppercase;
   display: inline-flex; align-items: center; gap: 4px;
 }
@@ -356,13 +358,18 @@ body {
 .ws-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* === RESPONSIVE COLLAPSE === */
+@media (max-width: 560px) {
+  .ws-palette { border-left: none; padding-left: 0; }
+}
 @media (max-width: 520px) {
-  .ws-dock { justify-content: center; }
   .ws-pan { width: 19px; height: 19px; }
   .ws-well { width: 40px; height: 40px; }
-  .ws-title-input { width: 92px; max-width: 92px; }
+  .ws-deck { gap: var(--os-sp-sm); padding: 6px var(--os-sp-sm); }
+}
+@media (max-width: 430px) {
+  .ws-meta { display: none; }
+  .ws-title-input { width: 110px; max-width: 110px; }
 }
 @media (max-width: 300px), (max-height: 260px) {
   .ws-dock, .ws-utility { display: none !important; }
-  .ws-accent { height: 1px; }
 }

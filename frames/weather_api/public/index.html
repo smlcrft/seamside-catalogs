@@ -7,33 +7,79 @@
   <link rel="stylesheet" href="dyn/frame-prefs.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; padding: 16px; height: 100vh; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
-    #search-row { display: flex; gap: 6px; }
-    #location-input { flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(128,128,128,0.3); background: rgba(128,128,128,0.08); font-size: 0.85rem; color: inherit; outline: none; }
-    #location-input:focus { border-color: rgba(128,128,128,0.6); }
-    #search-btn { padding: 6px 12px; border-radius: 6px; border: none; background: rgba(128,128,128,0.15); color: inherit; font-size: 0.85rem; cursor: pointer; }
-    #search-btn:hover { background: rgba(128,128,128,0.25); }
-    #error { color: tomato; font-size: 0.8rem; display: none; }
-    #location-label { font-size: 0.85rem; opacity: 0.6; min-height: 1.2em; }
-    #current { display: flex; align-items: center; gap: 16px; }
-    #current .icon { font-size: 3rem; line-height: 1; }
-    #current .temp { font-size: 2.8rem; font-weight: 600; }
-    #current .details { font-size: 0.8rem; opacity: 0.7; line-height: 1.7; }
-    #condition { font-size: 1rem; opacity: 0.8; min-height: 1.4em; }
-    #forecast { display: flex; gap: 8px; flex: 1; }
-    .day { flex: 1; border-radius: 8px; padding: 8px 4px; text-align: center; background: rgba(128,128,128,0.08); display: flex; flex-direction: column; gap: 4px; justify-content: center; }
-    .day .day-name { font-size: 0.7rem; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.04em; }
-    .day .day-icon { font-size: 1.4rem; }
-    .day .day-hi { font-size: 0.9rem; font-weight: 600; }
-    .day .day-lo { font-size: 0.75rem; opacity: 0.55; }
-    .day .day-precip { font-size: 0.65rem; opacity: 0.5; }
-    #updated { font-size: 0.65rem; opacity: 0.4; text-align: right; }
+    body {
+      font-family: var(--os-font-sans);
+      background: var(--os-bg);
+      color: var(--os-text);
+      font-size: var(--os-fs-base);
+      padding: var(--os-sp-lg);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      gap: var(--os-sp-md);
+      overflow: hidden;
+    }
+    #search-row { display: flex; gap: var(--os-sp-sm); }
+    #location-input { flex: 1; }
+    #error { color: var(--os-cError-fg); font-size: var(--os-fs-sm); display: none; }
+    #location-label {
+      font-size: var(--os-fs-2xs);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--os-text-muted);
+      min-height: 1.2em;
+    }
+    #current { display: flex; align-items: center; gap: var(--os-sp-lg); }
+    #current .icon { font-size: 44px; line-height: 1; color: var(--os-text-secondary); display: flex; }
+    #current .temp {
+      font-size: 44px;
+      font-weight: var(--os-weight-semibold);
+      font-feature-settings: 'tnum' 1;
+      letter-spacing: -0.02em;
+    }
+    #current .details {
+      font-size: var(--os-fs-sm);
+      color: var(--os-text-secondary);
+      line-height: 1.7;
+      font-feature-settings: 'tnum' 1;
+    }
+    #condition { font-size: var(--os-fs-md); color: var(--os-text-secondary); min-height: 1.4em; }
+    #forecast { display: flex; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .day {
+      flex: 1;
+      border-radius: var(--os-radius-md);
+      padding: var(--os-sp-md) var(--os-sp-xs);
+      text-align: center;
+      background: var(--os-bg-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      justify-content: center;
+      font-feature-settings: 'tnum' 1;
+    }
+    .day .day-name {
+      font-size: var(--os-fs-2xs);
+      color: var(--os-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .day .day-icon { font-size: 20px; color: var(--os-text-secondary); }
+    .day .day-hi { font-size: var(--os-fs-base); font-weight: var(--os-weight-semibold); }
+    .day .day-lo { font-size: var(--os-fs-sm); color: var(--os-text-muted); }
+    .day .day-precip { font-size: var(--os-fs-2xs); color: var(--os-text-muted); }
+    #updated {
+      margin-top: auto;
+      font-size: var(--os-fs-2xs);
+      color: var(--os-text-muted);
+      text-align: right;
+      font-feature-settings: 'tnum' 1;
+    }
   </style>
 </head>
 <body>
   <div id="search-row">
     <input id="location-input" type="text" placeholder="City, State or Country…" autocomplete="off" spellcheck="false">
-    <button id="search-btn">Search</button>
+    <button id="search-btn" class="secondary">Search</button>
   </div>
   <div id="error"></div>
   <div id="location-label"></div>
@@ -63,17 +109,19 @@
       95:"Thunderstorm", 96:"Thunderstorm w/ hail", 99:"Thunderstorm w/ hail",
     };
     const WMO_ICON = {
-      0:"☀️", 1:"🌤️", 2:"⛅", 3:"☁️",
-      45:"🌫️", 48:"🌫️",
-      51:"🌦️", 53:"🌦️", 55:"🌧️",
-      61:"🌧️", 63:"🌧️", 65:"🌧️",
-      71:"🌨️", 73:"🌨️", 75:"❄️", 77:"❄️",
-      80:"🌦️", 81:"🌧️", 82:"⛈️",
-      85:"🌨️", 86:"❄️",
-      95:"⛈️", 96:"⛈️", 99:"⛈️",
+      0:"ph-sun", 1:"ph-sun-dim", 2:"ph-cloud-sun", 3:"ph-cloud",
+      45:"ph-cloud-fog", 48:"ph-cloud-fog",
+      51:"ph-cloud-rain", 53:"ph-cloud-rain", 55:"ph-cloud-rain",
+      61:"ph-cloud-rain", 63:"ph-cloud-rain", 65:"ph-cloud-rain",
+      71:"ph-cloud-snow", 73:"ph-cloud-snow", 75:"ph-snowflake", 77:"ph-snowflake",
+      80:"ph-cloud-rain", 81:"ph-cloud-rain", 82:"ph-cloud-lightning",
+      85:"ph-cloud-snow", 86:"ph-snowflake",
+      95:"ph-cloud-lightning", 96:"ph-cloud-lightning", 99:"ph-cloud-lightning",
     };
     function wmoLabel(code) { return WMO[code] ?? "Unknown"; }
-    function wmoIcon(code) { return WMO_ICON[code] ?? "🌡️"; }
+    function wmoIcon(code) {
+      return '<i class="ph-light ' + (WMO_ICON[code] ?? "ph-thermometer") + '"></i>';
+    }
     // A weather field may be absent if the placement's settings.json trims it (or the API
     // omits it). Coerce to a finite number, or null so callers can render a "—" placeholder.
     function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
@@ -101,7 +149,7 @@
         const code = cur.weather_code;
         const temp = num(cur.temperature_2m), feels = num(cur.apparent_temperature);
         const hum = num(cur.relative_humidity_2m), wind = num(cur.wind_speed_10m);
-        document.getElementById("cur-icon").textContent = wmoIcon(code);
+        document.getElementById("cur-icon").innerHTML = wmoIcon(code);
         document.getElementById("cur-temp").textContent = temp != null ? Math.round(temp) + "°" : "—";
         document.getElementById("cur-feels").textContent = feels != null ? Math.round(feels) + "°" : "—";
         document.getElementById("cur-humidity").textContent = hum != null ? hum + "%" : "—";
@@ -125,7 +173,7 @@
             <div class="day-icon">${wmoIcon(daily.weather_code?.[i])}</div>
             <div class="day-hi">${hi != null ? Math.round(hi) + "°" : "—"}</div>
             <div class="day-lo">${lo != null ? Math.round(lo) + "°" : "—"}</div>
-            ${precip != null && precip > 0 ? `<div class="day-precip">${precip.toFixed(2)}"</div>` : ""}
+            <div class="day-precip">${precip != null && precip > 0 ? precip.toFixed(2) + '"' : "\u00a0"}</div>
           `;
           forecastEl.appendChild(div);
         }

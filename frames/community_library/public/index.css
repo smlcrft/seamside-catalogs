@@ -35,7 +35,7 @@ body {
 }
 
 .badge {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-xs);
   color: var(--os-text-muted);
   background: var(--os-bg-subtle);
@@ -62,14 +62,19 @@ body {
   margin: 0 0 var(--os-sp-md);
 }
 
-/* ----- Legend ----- */
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--os-sp-sm);
-  margin-bottom: var(--os-sp-md);
-  font-size: var(--os-fs-xs);
+/* ----- Dense + air: the number that matters, given room ----- */
+.airhero {
+  display: flex; align-items: baseline; gap: var(--os-sp-sm);
+  /* left padding matches the row padding below so the number and the row
+     text share a left edge */
+  padding: var(--os-sp-xs) var(--os-sp-md) var(--os-sp-sm);
 }
+.airhero .n {
+  font-size: 32px; font-weight: var(--os-weight-semibold);
+  font-feature-settings: 'tnum' 1; letter-spacing: -0.02em; line-height: 1;
+  color: var(--os-text);
+}
+.airhero .u { font-size: var(--os-fs-sm); color: var(--os-text-muted); }
 
 /* ----- Status chip + bar (shared) ----- */
 .status-chip {
@@ -77,11 +82,11 @@ body {
   align-items: center;
   gap: var(--os-sp-xs);
   font-size: var(--os-fs-xs);
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   padding: 2px var(--os-sp-sm);
   border-radius: var(--os-radius-full);
-  border: 1px solid var(--os-border-color-subtle);
-  background: var(--os-bg-subtle);
+  border: none;
+  background: var(--os-bg-inset);
   color: var(--os-text-secondary);
   white-space: nowrap;
 }
@@ -93,26 +98,11 @@ body {
   background: var(--os-text-subtle);
 }
 
-.status-bar {
-  width: 4px;
-  border-radius: var(--os-radius-xs);
-  align-self: stretch;
-  background: var(--os-text-subtle);
-}
-
-.status-available .status-bar,
 .status-chip.status-available .dot { background: var(--os-cSuccess); }
-.status-checked_out .status-bar,
 .status-chip.status-checked_out .dot { background: var(--os-c4); }
-.status-overdue .status-bar,
 .status-chip.status-overdue .dot { background: var(--os-cError); }
-.status-issue .status-bar,
 .status-chip.status-issue .dot { background: var(--os-cWarn); }
 
-.status-chip.status-available { color: var(--os-text); border-color: color-mix(in oklab, var(--os-cSuccess) 30%, var(--os-border-color-subtle)); }
-.status-chip.status-checked_out { color: var(--os-text); border-color: color-mix(in oklab, var(--os-c4) 30%, var(--os-border-color-subtle)); }
-.status-chip.status-overdue { color: var(--os-text); border-color: color-mix(in oklab, var(--os-cError) 35%, var(--os-border-color-subtle)); }
-.status-chip.status-issue { color: var(--os-text); border-color: color-mix(in oklab, var(--os-cWarn) 35%, var(--os-border-color-subtle)); }
 
 /* ----- Empty state ----- */
 .empty {
@@ -140,7 +130,7 @@ body {
 
 .asset {
   display: grid;
-  grid-template-columns: 4px 1fr auto auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: var(--os-sp-md);
   padding: var(--os-sp-md);
@@ -161,7 +151,7 @@ body {
   color: var(--os-text);
 }
 .asset-type {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-2xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -217,7 +207,7 @@ body {
 
 .public-row {
   display: grid;
-  grid-template-columns: 4px 1fr;
+  grid-template-columns: 1fr;
   align-items: center;
   gap: var(--os-sp-md);
   padding: var(--os-sp-md);
@@ -230,7 +220,7 @@ body {
   color: var(--os-text);
 }
 .public-meta {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-xs);
   color: var(--os-text-muted);
   margin-top: 2px;
@@ -298,6 +288,7 @@ body {
   align-self: flex-start;
 }
 .seg-toggle .seg-btn {
+  border-radius: 0;
   background: var(--os-bg-surface);
   border: none;
   padding: var(--os-sp-xs) var(--os-sp-md);
@@ -305,6 +296,7 @@ body {
   color: var(--os-text-secondary);
   cursor: pointer;
 }
+.seg-toggle .seg-btn:active { transform: none; background: var(--os-bg-inset); }
 .seg-toggle .seg-btn.active {
   background: var(--os-bg-inset);
   color: var(--os-text);
@@ -315,14 +307,13 @@ body {
 @media (max-width: 640px) {
   .compose { grid-template-columns: 1fr; }
   .asset {
-    grid-template-columns: 4px 1fr;
+    grid-template-columns: 1fr;
     grid-template-areas:
-      "bar main"
-      "bar status"
-      "bar actions";
+      "main"
+      "status"
+      "actions";
     row-gap: var(--os-sp-sm);
   }
-  .asset .status-bar { grid-area: bar; }
   .asset-main { grid-area: main; }
   .asset-status { grid-area: status; }
   .asset-actions { grid-area: actions; flex-wrap: wrap; }

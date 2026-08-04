@@ -34,25 +34,6 @@ body {
   flex-wrap: wrap;
 }
 
-.weather-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--os-sp-xs);
-  font-size: var(--os-fs-xs);
-  font-family: var(--os-font-mono);
-  color: var(--os-text-secondary);
-  background: var(--os-bg-subtle);
-  padding: 2px var(--os-sp-sm);
-  border-radius: var(--os-radius-full);
-  border: 1px solid var(--os-border-color-subtle);
-  white-space: nowrap;
-}
-.weather-chip .rain-ahead {
-  color: var(--os-c1);
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
 
 /* ----- Notes ----- */
 .note {
@@ -88,7 +69,7 @@ body {
   gap: var(--os-sp-sm);
 }
 .legend-end {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-2xs);
   color: var(--os-text-muted);
   text-transform: uppercase;
@@ -111,7 +92,7 @@ body {
   gap: 2px;
   font-size: var(--os-fs-2xs);
   color: var(--os-text-muted);
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -159,84 +140,42 @@ body {
   font-weight: var(--os-weight-medium);
 }
 
-/* ----- Spectrum (per-plant indicator strip) -----
- * Score 0 sits at 50%. The plant's ideal band spans score -1..+1, which (with the
- * marker margin baked into pct = 50 + score * 23) lands at 27%..73% on the bar —
- * exactly the green span below. Yellow shoulders cover ±1..±1.5 (the "drift" zone),
- * red caps the extremes. The bar carries all the meaning; markers stay neutral.
+/* ----- Meters (per-plant readings) -----
+ * Three instrument rows: glyph, a quiet inset track with the comfort band
+ * (score -1..+1 = 27%..73%) marked, a severity-colored dot at the reading,
+ * and the value in figures. The track is calm; the dot carries the news.
  */
-.spectrum {
-  position: relative;
-  width: 100%;
-  height: 22px;
+.meters { display: flex; flex-direction: column; gap: 7px; }
+.meter { display: flex; align-items: center; gap: var(--os-sp-sm); height: 14px; }
+.meter-icon { flex: 0 0 16px; font-size: 13px; line-height: 1; color: var(--os-text-muted); text-align: center; }
+.meter-track {
+  position: relative; flex: 1 1 auto; height: 6px;
+  background: var(--os-bg-inset); border-radius: var(--os-radius-full);
 }
-.spectrum_bg {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    to right,
-    var(--os-cError-muted)    0%,
-    var(--os-cError-muted)    8%,
-    var(--os-cWarn-muted)    16%,
-    var(--os-cSuccess-muted) 27%,
-    var(--os-cSuccess-muted) 73%,
-    var(--os-cWarn-muted)    84%,
-    var(--os-cError-muted)   92%,
-    var(--os-cError-muted)  100%
-  );
+.meter-band {
+  position: absolute; left: 27%; right: 27%; top: 0; bottom: 0;
+  background: color-mix(in srgb, var(--os-cSuccess-muted) 60%, transparent);
   border-radius: var(--os-radius-full);
-  border: 1px solid var(--os-border-color-subtle);
-  opacity: 0.35;
 }
-.spectrum::before,
-.spectrum::after {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  font-family: var(--os-font-mono);
-  font-size: var(--os-fs-2xs);
-  color: var(--os-text-muted);
+.meter-mid {
+  position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px;
+  background: color-mix(in srgb, var(--os-text) 18%, transparent);
 }
-.spectrum::before { content: "−"; left: -10px; }
-.spectrum::after  { content: "+"; right: -10px; }
-.spectrum .tick {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: rgba(0, 0, 0, 0.08);
-}
-.spectrum .tick.tick-mid { background: rgba(0, 0, 0, 0.22); }
-
-/* Markers — uniformly visible against any zone of the gradient.
- * Dark slate fill + thin white halo reads against red, yellow, and green alike. */
-.spectrum .marker {
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 16px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--os-radius-full);
-  background: var(--os-text);
-  color: var(--os-bg-surface);
-  border: 1.5px solid var(--os-bg-surface);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  cursor: default;
+.meter-dot {
+  position: absolute; top: 50%; transform: translate(-50%, -50%);
+  width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid var(--os-bg-surface);
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.18);
   transition: left var(--os-transition-normal);
 }
-.spectrum .marker i { font-size: 10px; line-height: 1; }
-
-/* Stagger when markers stack at similar positions so all three remain visible */
-.marker.ch-water { transform: translate(-50%, calc(-50% - 9px)); }
-.marker.ch-temp  { transform: translate(-50%, -50%); }
-.marker.ch-sun   { transform: translate(-50%, calc(-50% + 9px)); }
-.marker.ch-water { z-index: 1; }
-.marker.ch-temp  { z-index: 2; }
-.marker.ch-sun   { z-index: 3; }
+.meter-dot.ok   { background: var(--os-cSuccess); }
+.meter-dot.warn { background: var(--os-cWarn); }
+.meter-dot.bad  { background: var(--os-cError); }
+.meter-val {
+  flex: 0 0 44px; text-align: right;
+  font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1;
+  color: var(--os-text-muted); white-space: nowrap;
+}
 
 /* ----- Risk badges -----
  * Compact icon chips that sit inline with the plant name. Each chip is a shaded circle
@@ -288,7 +227,7 @@ body {
 }
 .risk-badge.expanded .risk-label {
   display: inline;
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-2xs);
   font-weight: var(--os-weight-medium);
   text-transform: uppercase;
@@ -310,22 +249,27 @@ body {
 }
 
 .risk--cold {
-  background: color-mix(in oklch, var(--os-c1-muted) 70%, transparent);
+  background: color-mix(in srgb, var(--os-c1-muted) 70%, transparent);
   border-color: var(--os-c1);
   /* color: var(--os-c1-fg); */
 }
 .risk--hot {
-  background: color-mix(in oklch, var(--os-cError-muted) 70%, transparent);
+  background: color-mix(in srgb, var(--os-cError-muted) 70%, transparent);
   border-color: var(--os-cError);
   /* color: var(--os-cError-fg); */
 }
 .risk--dry {
-  background: color-mix(in oklch, var(--os-cWarn-muted) 70%, transparent);
+  background: color-mix(in srgb, var(--os-cWarn-muted) 70%, transparent);
   border-color: var(--os-c8, var(--os-cWarn));
   /* color: var(--os-c8-fg, var(--os-cWarn-fg)); */
 }
+/* Fallback for unknown risk keys (riskBadgeHtml defaults to tone "warn"). */
+.risk--warn {
+  background: color-mix(in srgb, var(--os-cWarn-muted) 70%, transparent);
+  border-color: var(--os-cWarn);
+}
 .risk--soaked {
-  background: color-mix(in oklch, var(--os-c7-muted) 60%, transparent);
+  background: color-mix(in srgb, var(--os-c7-muted) 60%, transparent);
   border-color: var(--os-c7);
   /* color: var(--os-c7-fg); */
 }
@@ -468,3 +412,31 @@ body {
 @media (max-width: 480px) {
   .plant-grid { grid-template-columns: 1fr; }
 }
+
+
+/* ---------- The reading (ink plate) ---------- */
+/* The page's own ink flooded as a surface; the day's verdict in the serif,
+   one bright meta line under it. The frame's single contrast moment. */
+.reading {
+  background: var(--os-text);
+  border-radius: var(--os-radius-lg);
+  padding: var(--os-sp-lg) var(--os-sp-lg) var(--os-sp-md);
+  margin: var(--os-sp-md) 0;
+  display: flex; flex-direction: column; gap: var(--os-sp-xs);
+}
+.reading-line {
+  margin: 0;
+  font-family: var(--os-font-serif);
+  font-weight: 500;
+  font-size: 22px; line-height: 1.3; letter-spacing: -0.01em;
+  color: var(--os-bg);
+  max-width: 28ch;
+}
+.reading-line i { font-style: italic; }
+.reading-meta {
+  display: flex; align-items: center; gap: var(--os-sp-sm);
+  font-size: var(--os-fs-xs); font-feature-settings: 'tnum' 1;
+  color: color-mix(in srgb, var(--os-bg) 72%, transparent);
+}
+.reading-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--os-cSuccess); flex: 0 0 auto; }
+.reading-dot.warn { background: var(--os-cWarn); }

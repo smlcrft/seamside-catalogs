@@ -10,7 +10,7 @@
 <body>
   <main id="app" class="dc-loading">loading…</main>
   <script type="module">
-import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, Editable, applyChannel } from "/lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, Editable, Modal, applyChannel } from "/lib/js/framelib.js";
 
 const peer = window.__peer || {};
 const isAnon = peer.is_anon || !peer.user_id;
@@ -29,14 +29,6 @@ function fmtTime(ts) {
   const days = (now - d) / 86400000;
   if (days < 7) return d.toLocaleDateString(undefined, { weekday: "short" }) + ` ${hh}:${mm}`;
   return d.toLocaleDateString();
-}
-
-function Private() {
-  return html`<${Fragment}>
-    <i class="ph-light ph-lock-key"></i>
-    <div class="dc-private-title">Private discussion channel</div>
-    <div class="dc-private-sub">You need to be signed in to view or post messages.</div>
-  </${Fragment}>`;
 }
 
 function Toast({ message }) {
@@ -74,12 +66,17 @@ function ReactionPicker({ icons, anchorRect, onPick, onClose }) {
 function SettingsOverlay({ prefs, onClose, onSave }) {
   const [title, setTitle] = useState(prefs.title || "Discussion");
   const [publicToViewers, setPublicToViewers] = useState(prefs.public_to_space_viewers === true);
-  const [publicReadView, setPublicReadView] = useState(prefs.public_read_view === true);
-  return html`<div class="dc-settings">
-    <div class="dc-settings-header">
-      <h2>Channel</h2>
-      <button class="dc-icon-btn" title="close" onClick=${onClose}><i class="ph-light ph-x"></i></button>
-    </div>
+  return html`<${Modal} title="Channel settings" onClose=${onClose}
+    actions=${html`
+      <button class="dc-ghost-btn" onClick=${onClose}>Cancel</button>
+      <button class="dc-save" onClick=${() => {
+        onSave({
+          title: title.trim() || "Discussion",
+          public_to_space_viewers: publicToViewers,
+        });
+        onClose();
+      }}>Save</button>`}>
+    <div class="dc-settings-fields">
     <label>
       Title
       <input type="text" maxlength="80" placeholder="Discussion" autofocus
@@ -93,26 +90,8 @@ function SettingsOverlay({ prefs, onClose, onSave }) {
         <span class="dc-toggle-sub muted">Members marked Viewer can chat, react, and delete their own messages. Off: they read only.</span>
       </span>
     </label>
-    <label class="dc-settings-toggle">
-      <input type="checkbox" checked=${publicReadView}
-        onChange=${(e) => setPublicReadView(e.target.checked)} />
-      <span>
-        <span class="dc-toggle-name">Public read-only view</span>
-        <span class="dc-toggle-sub muted">Anyone with the link can read the channel. They can never post, react, or delete.</span>
-      </span>
-    </label>
-    <div class="dc-settings-actions">
-      <button class="dc-icon-btn" style="padding: 4px 10px;" onClick=${onClose}>Cancel</button>
-      <button class="dc-save" onClick=${() => {
-        onSave({
-          title: title.trim() || "Discussion",
-          public_to_space_viewers: publicToViewers,
-          public_read_view: publicReadView,
-        });
-        onClose();
-      }}>Save</button>
     </div>
-  </div>`;
+  </${Modal}>`;
 }
 
 function Reactions({ message: m, canDelete, canReact, onToggle, onAddReact, onDelete }) {
@@ -220,8 +199,6 @@ function App() {
   if (state) messagesRef.current = state.messages;
 
   useEffect(() => {
-    // Everyone attempts /api/state — the backend's two-tier auth decides.
-    // Non-readers get a 403, rendered as the private notice below.
     frame.api("./api/state").then(setState).catch((e) => setErr(e));
   }, []);
 
@@ -241,17 +218,6 @@ function App() {
     return () => clearTimeout(id);
   }, [toast]);
 
-  const showPrivate = !!err && err.status === 403;
-  // The private notice uses the centered .dc-private layout; everything else
-  // lives in the .dc-root grid. Swap the mount class to match what renders.
-  useEffect(() => {
-    const root = document.getElementById("app");
-    if (root) root.className = showPrivate ? "dc-private" : "dc-root";
-  }, [showPrivate]);
-
-  if (showPrivate) {
-    return html`<${Private} />`;
-  }
   if (err) return html`<div class="dc-loading">failed to load: ${err.message || String(err)}</div>`;
   if (!state) return html`<div class="dc-loading">loading…</div>`;
 
@@ -271,7 +237,6 @@ function App() {
   useEffect(() => { applyChannel(document.getElementById("app"), peer.space_color); }, []);
 
   return html`<${Fragment}>
-    <div class="dc-accent"></div>
     <div class="dc-topline">
       <${Editable} class="dc-title-input" maxlength="80" placeholder="Discussion"
         disabled=${!canEditSettings}
@@ -302,8 +267,6 @@ function App() {
 // of the grid after the app renders (App shows its own loading state anyway).
 const root = document.getElementById("app");
 root.textContent = "";
-// Everyone starts in the grid layout — App swaps to .dc-private only when the
-// backend's 403 says this viewer can't read (public_read_view decides for anon).
 root.className = "dc-root";
 render(html`<${App}/>`, root);
   </script>

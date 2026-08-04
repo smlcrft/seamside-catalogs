@@ -43,26 +43,44 @@ import { frame } from "/lib/js/framelib.js";
     return fmtHour12(h1) + "–" + fmtHour12(h2);
   }
 
-  // ----- Header ------------------------------------------------------------------------
-  function renderHeader() {
-    const chip = $("weather-chip");
-    if (state.weather && state.readings.length) {
-      const first = state.readings[0];
-      const now = Math.round(first.t_f);
-      const name = state.weather.resolved_name;
-      const next24 = state.readings.slice(0, Math.min(24, state.readings.length));
-      const lo = Math.round(Math.min.apply(null, next24.map(r => r.t_f)));
-      const hi = Math.round(Math.max.apply(null, next24.map(r => r.t_f)));
-      const rain24 = next24.reduce((s, r) => s + r.precip_in, 0);
-      const rainPart = rain24 >= 0.05
-        ? ' · <i class="ph-light ph-cloud-rain icon-sm"></i> ' + rain24.toFixed(rain24 >= 1 ? 1 : 2) + '"'
-        : '';
-      chip.classList.remove("hidden");
-      chip.innerHTML = '<i class="ph-light ph-sun icon-sm"></i> ' +
-        escapeHTML(name) + ' · ' + now + '°F · 24h ' + lo + '–' + hi + '°F' + rainPart;
+  // ----- The reading -------------------------------------------------------------------
+  // The frame's verdict on the ink plate: the best market window, spoken.
+  function renderReading() {
+    const plate = $("reading");
+    if (!state.weather || !state.readings.length) { plate.classList.add("hidden"); return; }
+    const first = state.readings[0];
+    const now = Math.round(first.t_f);
+    const name = state.weather.resolved_name;
+    const next24 = state.readings.slice(0, Math.min(24, state.readings.length));
+    const lo = Math.round(Math.min.apply(null, next24.map(r => r.t_f)));
+    const hi = Math.round(Math.max.apply(null, next24.map(r => r.t_f)));
+    const picks = currentPeaks();
+
+    // Two deliberate lines: the window is the hero; the turnout is the deck.
+    let line, warn = false;
+    if (picks.length) {
+      const p = picks[0];
+      const d1 = localDate(state.readings[p.start].iso);
+      const d2 = localDate(state.readings[p.end].iso);
+      const sameDay = dayKey(state.readings[p.start].iso) === dayKey(state.readings[p.end].iso);
+      const when = sameDay
+        ? DOW_SHORT[d1.getUTCDay()] + " " + fmtRange12(d1.getUTCHours(), d2.getUTCHours() + 1)
+        : DOW_SHORT[d1.getUTCDay()] + " " + fmtHour12(d1.getUTCHours());
+      line = `<span class="rl-hero"><i>${escapeHTML(when)}</i> is the window.</span>` +
+             `<span class="rl-sub">Turnout near ${Math.round(p.mean)}%.</span>`;
+      warn = p.mean < 45;
     } else {
-      chip.classList.add("hidden");
+      line = `<span class="rl-hero">No standout window in the forecast.</span>`;
+      warn = true;
     }
+    $("reading-line").innerHTML = line;
+    $("reading-dot").className = "reading-dot" + (warn ? " warn" : "");
+    const parts = [];
+    if (name) parts.push(escapeHTML(name));
+    parts.push(now + "°F");
+    parts.push("next day " + lo + "–" + hi + "°F");
+    $("reading-meta-text").textContent = parts.join(" · ");
+    plate.classList.remove("hidden");
   }
 
   function renderSetupNote() {
@@ -850,7 +868,7 @@ import { frame } from "/lib/js/framelib.js";
 
   // ----- Render orchestrator -----------------------------------------------------------
   function render() {
-    renderHeader();
+    renderReading();
     renderSetupNote();
     // Show the view toggle only when we actually have a forecast to show.
     const toggle = $("view-toggle");

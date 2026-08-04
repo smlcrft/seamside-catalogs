@@ -14,12 +14,17 @@
       <h1>Garden Gnome</h1>
     </div>
     <div class="header-actions">
-      <span id="weather-chip" class="weather-chip hidden"></span>
       <button id="settings-btn" class="ghost" title="Settings">
         <i class="ph-light ph-gear icon-sm"></i>
       </button>
     </div>
   </header>
+
+  <!-- The frame's one reading: an ink plate speaking the day's verdict -->
+  <div id="reading" class="reading hidden">
+    <p id="reading-line" class="reading-line"></p>
+    <div class="reading-meta"><span id="reading-dot" class="reading-dot"></span><span id="reading-meta-text"></span></div>
+  </div>
 
   <p id="setup-note" class="muted note hidden">
     <i class="ph-light ph-info icon-sm"></i>
@@ -30,7 +35,7 @@
 
   <p id="empty-note" class="muted note empty-note hidden">
     <i class="ph-light ph-leaf icon-sm"></i>
-    No plants picked yet — open settings to choose what's growing.
+    <span>No plants picked yet — open settings to choose what's growing.</span>
   </p>
 
   <!-- Settings dialog -->

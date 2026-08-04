@@ -11,7 +11,7 @@
   <div id="game-container">
     <div id="hud">
       <div id="score-display">SCORE: <span id="score">0</span></div>
-      <div id="health-display">LIVES: <span id="health">❤️❤️❤️</span></div>
+      <div id="health-display">LIVES: <span id="health">♥♥♥</span></div>
       <div id="speed-display">SPEED: <span id="speed">1</span></div>
     </div>
 
@@ -22,7 +22,7 @@
         <div id="obstacle-layer"></div>
         <div id="player-container">
           <div id="player" class="running">
-            <div class="player-sprite">🏃</div>
+            <div class="player-sprite">/o/</div>
           </div>
         </div>
       </div>
@@ -45,7 +45,7 @@
     <div id="start-screen">
       <div id="start-content">
         <h1>🎮 ASCII RUNNER 🎮</h1>
-        <p class="instructions">Jump over 🪨 rocks and duck under 🦅 birds!</p>
+        <p class="instructions">Jump over ▲ rocks and duck under ~v~ birds!</p>
         <p class="instructions">The game gets faster as you progress...</p>
         <button id="start-btn">▶ START GAME</button>
         <p class="high-score-start" id="high-score-start"></p>
@@ -103,7 +103,7 @@
 
     function initGroundDecorations() {
       groundDecorations.innerHTML = '';
-      const decorations = ['🌱', '🌿', '🌾', '🍄', '🥀', '🌱', '🌿'];
+      const decorations = [',', '\'', '"', ';', '.', ',', '\''];
       for (let i = 0; i < 20; i++) {
         const dec = document.createElement('div');
         dec.className = 'ground-dec';
@@ -135,11 +135,11 @@
       if (gameState.isDucking) {
         player.classList.add('ducking');
         player.classList.remove('running');
-        player.querySelector('.player-sprite').textContent = '🧎';
+        player.querySelector('.player-sprite').textContent = '_o_';
       } else if (!gameState.isJumping) {
         player.classList.remove('ducking');
         player.classList.add('running');
-        player.querySelector('.player-sprite').textContent = '🏃';
+        player.querySelector('.player-sprite').textContent = '/o/';
       }
     }
 
@@ -160,11 +160,11 @@
     }
 
     const obstacleTypes = [
-      { type: 'rock', emoji: '🪨', width: 30, height: 30, y: 0, requiresJump: true },
-      { type: 'rock2', emoji: '🪨', width: 35, height: 35, y: 0, requiresJump: true },
-      { type: 'bird', emoji: '🦅', width: 40, height: 30, y: 50, requiresDuck: true },
-      { type: 'bird2', emoji: '🦆', width: 35, height: 25, y: 55, requiresDuck: true },
-      { type: 'cactus', emoji: '🌵', width: 25, height: 40, y: 0, requiresJump: true },
+      { type: 'rock', emoji: '▲', width: 30, height: 30, y: 0, requiresJump: true },
+      { type: 'rock2', emoji: '◭', width: 35, height: 35, y: 0, requiresJump: true },
+      { type: 'bird', emoji: '~v~', width: 40, height: 30, y: 50, requiresDuck: true },
+      { type: 'bird2', emoji: '~w~', width: 35, height: 25, y: 55, requiresDuck: true },
+      { type: 'cactus', emoji: 'Ψ', width: 25, height: 40, y: 0, requiresJump: true },
     ];
 
     function spawnObstacle() {
@@ -275,7 +275,7 @@
     function updateScore() { scoreDisplay.textContent = gameState.score; }
 
     function updateHealth() {
-      const hearts = '❤️'.repeat(Math.max(0, gameState.health)) + '🖤'.repeat(Math.max(0, 3 - gameState.health));
+      const hearts = '♥'.repeat(Math.max(0, gameState.health)) + '♡'.repeat(Math.max(0, 3 - gameState.health));
       healthDisplay.textContent = hearts;
     }
 
@@ -334,7 +334,7 @@
       player.style.bottom = '0px';
       player.classList.remove('jumping', 'ducking');
       player.classList.add('running');
-      player.querySelector('.player-sprite').textContent = '🏃';
+      player.querySelector('.player-sprite').textContent = '/o/';
 
       playerVelocity = 0;
 

@@ -77,6 +77,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
       is_owner:      peer.is_owner,
       user_id:       peer.user_id,
       user_name:     peer.user_name,
+      space_color:   peer.space_color,
     });
   }
 

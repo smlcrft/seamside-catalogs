@@ -48,7 +48,6 @@ type Prefs = {
   borrow_options: BorrowOption[];
   default_borrow_days: number;
   owner_only_edit: boolean;
-  allow_public_viewing: boolean;
 };
 
 const DEFAULT_PREFS: Prefs = {
@@ -62,7 +61,6 @@ const DEFAULT_PREFS: Prefs = {
   ],
   default_borrow_days: 7,
   owner_only_edit: false,
-  allow_public_viewing: false,
 };
 
 const allPrefs: Record<string, Prefs> = loadJsonFile(import.meta.url, "prefs.json", {} as Record<string, Prefs>);
@@ -74,7 +72,6 @@ function clonePrefs(p: Prefs): Prefs {
     borrow_options: p.borrow_options.map((o) => ({ label: o.label, days: o.days })),
     default_borrow_days: p.default_borrow_days,
     owner_only_edit: p.owner_only_edit,
-    allow_public_viewing: p.allow_public_viewing,
   };
 }
 
@@ -96,7 +93,6 @@ function getPrefs(sfi_id: string): Prefs {
       ? Number(p.default_borrow_days)
       : (borrowOptions[0]?.days ?? DEFAULT_PREFS.default_borrow_days),
     owner_only_edit: !!p.owner_only_edit,
-    allow_public_viewing: !!p.allow_public_viewing,
   };
 }
 
@@ -106,10 +102,11 @@ function setPrefs(sfi_id: string, next: Prefs): void {
 }
 
 // ----- Helpers --------------------------------------------------------------------------
+// Writes are editor-only. Never gate on is_sfi_member — a Viewer-role member would slip
+// through and be able to edit the library.
 function canEdit(peer: ReturnType<typeof parsePeerInfo>, prefs: Prefs): boolean {
-  if (peer.is_anon) return false;
   if (prefs.owner_only_edit) return peer.is_owner;
-  return true;
+  return peer.is_sfi_editor;
 }
 
 type AssetRow = Record<string, unknown> & { _row_id: string; _created_at: number };
@@ -176,10 +173,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     return jsonReply(replyPort, 200, { rows: slim });
   }
 
+  // Open to every viewer who reaches the frame. Anonymous viewers get a reduced projection
+  // below (no member identities, no notes) — that is the public view, not an access gate.
   if (reqPath === "/api/assets" && method === "GET") {
-    if (peer.is_anon && !prefs.allow_public_viewing) {
-      return jsonReply(replyPort, 200, { rows: [], public_disabled: true });
-    }
     const { rows } = await assets.query({ limit: 2000 }) as { rows: AssetRow[] };
     rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
@@ -316,7 +312,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     if (!peer.is_owner) return jsonReply(replyPort, 403, { error: "only the frame owner can change settings" });
     const v = parseJsonBody<{
       org_name?: unknown; item_types?: unknown; borrow_options?: unknown;
-      default_borrow_days?: unknown; owner_only_edit?: unknown; allow_public_viewing?: unknown;
+      default_borrow_days?: unknown; owner_only_edit?: unknown;
     }>(body);
     if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
     const org_name = sanitizeText(v.org_name, 120) || DEFAULT_PREFS.org_name;
@@ -334,7 +330,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     const next: Prefs = {
       org_name, item_types, borrow_options, default_borrow_days,
       owner_only_edit: !!v.owner_only_edit,
-      allow_public_viewing: !!v.allow_public_viewing,
     };
     setPrefs(peer.sfi_id, next);
     pushToInstance(peer.sfi_id, { type: "settings_changed" });

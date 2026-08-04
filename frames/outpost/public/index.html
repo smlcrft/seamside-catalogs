@@ -19,22 +19,42 @@
       display: flex; flex-direction: column; gap: var(--os-sp-md);
     }
 
-    /* Header */
+    /* Header — a shared 24px first-line rail. Every single-line item (brand icon, mode,
+       gear) is a 24px-tall centered box and the h1's line box is exactly 24px, so their
+       optical centers coincide; the tagline flows below the rail. No eyeballed margin
+       nudges — the phosphor glyph's inherited line-height (33px at 22px font) was what
+       made the icon float low before. */
     .header { display: flex; align-items: flex-start; gap: var(--os-sp-sm); }
-    .header > i.brand { font-size: 22px; color: var(--ch); margin-top: 2px; }
+    .header > i.brand {
+      font-size: 22px; line-height: 1; color: var(--ch);
+      height: 24px; display: flex; align-items: center;
+    }
     .header .titles { flex: 1; min-width: 0; }
-    .header h1 { margin: 0; font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); word-break: break-word; }
+    input.htitle {
+      display: block; width: 100%; margin: 0; padding: 0 var(--os-sp-xs); margin-left: calc(-1 * var(--os-sp-xs));
+      font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); line-height: 24px; height: 24px;
+      color: var(--os-text); background: transparent; border: 1px solid transparent;
+      border-radius: var(--os-radius-sm);
+      transition: background var(--os-transition-fast), border-color var(--os-transition-fast);
+    }
+    input.htitle:hover:not(:disabled) { background: var(--os-bg-subtle); }
+    input.htitle:focus { outline: none; background: var(--os-bg-surface); border-color: var(--os-border-color); box-shadow: none; }
+    input.htitle:disabled { color: var(--os-text); cursor: default; opacity: 1; }
     .header .tagline { margin: 2px 0 0; font-size: var(--os-fs-sm); color: var(--os-text-muted); word-break: break-word; }
     .header .mode {
       font-size: var(--os-fs-2xs); color: var(--os-text-muted);
-      font-family: var(--os-font-mono); text-transform: lowercase; white-space: nowrap; margin-top: 3px;
+      font-feature-settings: 'tnum' 1; text-transform: lowercase; white-space: nowrap;
+      height: 24px; display: flex; align-items: center;
     }
     .gear {
       background: none; border: 0; cursor: pointer; color: var(--os-text-muted);
-      padding: 4px; border-radius: var(--os-radius-sm); font-size: 18px; line-height: 0;
-      display: flex; align-items: center; transition: color 150ms, background 150ms; margin-top: 1px;
+      width: 28px; height: 28px; margin: -2px 0; padding: 0;
+      border-radius: var(--os-radius-sm); font-size: 18px; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      transition: color 150ms, background 150ms;
     }
     .gear:hover, .gear.on { color: var(--ch); background: var(--os-bg-subtle); }
+    .gear:active { transform: scale(0.92); }
 
     /* Cards */
     .card {
@@ -45,7 +65,7 @@
 
     .field { display: flex; flex-direction: column; gap: var(--os-sp-xs); }
     .field > label {
-      font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); text-transform: uppercase;
+      font-size: 11px; font-weight: var(--os-weight-semibold); text-transform: uppercase;
       letter-spacing: 0.06em; color: var(--os-text-muted);
     }
     input.txt, textarea.txt {
@@ -54,32 +74,29 @@
       padding: var(--os-sp-sm); outline: none; width: 100%; resize: vertical;
       transition: border-color 150ms, background 150ms;
     }
-    input.txt:focus, textarea.txt:focus { border-color: var(--ch); background: var(--os-bg-surface); }
+    input.txt:focus, textarea.txt:focus { border-color: var(--os-text-muted); background: var(--os-bg-surface); }
     textarea.compose { min-height: 84px; }
 
     /* Segmented control */
     .seg { display: flex; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md); overflow: hidden; }
     .seg button {
+      border-radius: 0;
       flex: 1; background: var(--os-bg); border: 0; cursor: pointer; padding: var(--os-sp-sm);
       font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-secondary);
       display: inline-flex; align-items: center; justify-content: center; gap: var(--os-sp-xs);
       transition: background 150ms, color 150ms; min-width: 0;
     }
     .seg button + button { border-left: 1px solid var(--os-border-color); }
+    /* Press: never scale a clipped interior; darken like a secondary. */
+    .seg button:active { transform: none; background: var(--os-bg-inset); }
+    .seg button.active:active { background: color-mix(in srgb, var(--ch), var(--os-text) 10%); }
     .seg button.active { background: var(--ch); color: var(--ch-fg); font-weight: var(--os-weight-medium); }
     .seg button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-    /* Kind chips (composer) */
-    .kinds { display: flex; flex-wrap: wrap; gap: var(--os-sp-xs); }
-    .chip {
-      background: var(--os-bg); border: 1px solid var(--os-border-color); cursor: pointer;
-      padding: 5px var(--os-sp-sm); border-radius: 999px; font: inherit; font-size: var(--os-fs-sm);
-      color: var(--os-text-secondary); display: inline-flex; align-items: center; gap: 5px;
-      transition: background 150ms, color 150ms, border-color 150ms;
-    }
-    .chip:hover { border-color: var(--ch); color: var(--os-text); }
-    .chip.on { background: var(--ch); color: var(--ch-fg); border-color: var(--ch); }
-    .chip i { font-size: 15px; line-height: 0; }
+    /* Kind selector (composer) — single choice, so it speaks seg, not pill */
+    .kinds-seg { max-width: 460px; }
+    .kinds-seg button { padding: var(--os-sp-xs) var(--os-sp-sm); }
+    .kinds-seg button i { font-size: 15px; line-height: 0; flex: 0 0 auto; }
 
     /* Composer action row */
     .compose-actions { display: flex; align-items: center; gap: var(--os-sp-sm); flex-wrap: wrap; }
@@ -100,7 +117,14 @@
       transition: filter 150ms; white-space: nowrap;
     }
     .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
-    .btn-primary:disabled { opacity: 0.5; cursor: default; }
+    .btn-primary:disabled {
+      background: transparent;
+      border: 1px solid var(--os-border-color);
+      color: var(--os-text-subtle);
+      opacity: 1;
+      cursor: default;
+      padding: calc(var(--os-sp-sm) - 1px) calc(var(--os-sp-lg) - 1px);
+    }
 
     /* Pending attachments in composer */
     .pending { display: flex; flex-wrap: wrap; gap: var(--os-sp-xs); }
@@ -136,9 +160,9 @@
     }
     .post .who { flex: 1; min-width: 0; line-height: 1.2; }
     .post .who .name { font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium); }
-    .post .who .when { font-size: var(--os-fs-2xs); font-family: var(--os-font-mono); color: var(--os-text-muted); display: inline-flex; align-items: center; gap: 4px; }
+    .post .who .when { font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1; color: var(--os-text-muted); display: inline-flex; align-items: center; gap: 4px; }
     .post .kindtag {
-      font-size: var(--os-fs-2xs); font-family: var(--os-font-mono); color: var(--os-text-muted);
+      font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1; color: var(--os-text-muted);
       display: inline-flex; align-items: center; gap: 4px; text-transform: lowercase;
     }
     .post .kindtag i { font-size: 13px; }
@@ -183,9 +207,9 @@
     }
     .poll .opt.chosen .bar { background: color-mix(in srgb, var(--ch) 30%, transparent); }
     .poll .opt .lbl { position: relative; z-index: 1; flex: 1; }
-    .poll .opt .pct { position: relative; z-index: 1; font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); color: var(--os-text-muted); }
+    .poll .opt .pct { position: relative; z-index: 1; font-feature-settings: 'tnum' 1; font-size: var(--os-fs-2xs); color: var(--os-text-muted); }
     .poll .opt.chosen .lbl { font-weight: var(--os-weight-medium); }
-    .poll .tally { font-size: var(--os-fs-2xs); font-family: var(--os-font-mono); color: var(--os-text-muted); }
+    .poll .tally { font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1; color: var(--os-text-muted); }
     .poll .votenote { display: inline-flex; align-items: center; gap: 4px; font-size: var(--os-fs-2xs); color: var(--os-text-subtle); }
     .poll .votenote i { font-size: 13px; }
 
@@ -302,10 +326,10 @@
 
       return html`
         <div class="card">
-          <div class="kinds">
+          <div class="seg kinds-seg">
             ${KIND_ORDER.map((k) => html`
-              <button class=${"chip" + (kind === k ? " on" : "")} onClick=${() => setKind(k)} key=${k}>
-                <i class=${"ph-light " + KIND_META[k].icon}></i>${KIND_META[k].label}
+              <button class=${kind === k ? "active" : ""} onClick=${() => setKind(k)} key=${k}>
+                <i class=${"ph-light " + KIND_META[k].icon}></i><span>${KIND_META[k].label}</span>
               </button>`)}
           </div>
 
@@ -440,19 +464,14 @@
 
     // ---- Owner settings -----------------------------------------------------------------
     function Settings({ prefs, onSave }) {
-      const [title, setTitle]     = useState(prefs.title);
       const [tagline, setTagline] = useState(prefs.tagline);
       const [who, setWho]         = useState(prefs.who_can_post);
       function save(patch) {
-        const next = { title, tagline, who_can_post: who, ...patch };
+        const next = { title: prefs.title, tagline, who_can_post: who, ...patch };
         onSave(next);
       }
       return html`
         <div class="card">
-          <div class="field">
-            <label>Heading</label>
-            <input class="txt" value=${title} maxlength="80" onInput=${(e) => setTitle(e.target.value)} onBlur=${() => save({})} />
-          </div>
           <div class="field">
             <label>Tagline</label>
             <input class="txt" value=${tagline} maxlength="160" placeholder="A short description (optional)"
@@ -566,7 +585,9 @@
           <div class="header">
             <i class="ph-light ph-megaphone brand"></i>
             <div class="titles">
-              <h1>${prefs.title || "Outpost"}</h1>
+              <input class="htitle" value=${prefs.title || ""} placeholder="Outpost" maxlength="80"
+                disabled=${!me.is_owner}
+                onBlur=${(e) => { const v = e.target.value.trim(); if (me.is_owner && v !== prefs.title) savePrefs({ ...prefs, title: v }); }} />
               ${prefs.tagline ? html`<p class="tagline">${prefs.tagline}</p>` : null}
             </div>
             <span class="mode">${mode}</span>

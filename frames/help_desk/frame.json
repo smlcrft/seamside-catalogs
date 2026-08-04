@@ -2,11 +2,12 @@
     "name": "Help Desk",
     "description": "Anonymous visitors submit a message with email (plus admin-configured fields); known users in the space see a realtime inbox of incoming correspondence.",
     "frame_type": "Tandem",
+    "tags": ["smallbiz", "community", "support"],
     "permissions": {
         "net": []
     },
     "created_at": "2026-04-22 00:00:00.000000 UTC",
-    "modified_at": "2026-07-29T19:40:01Z",
+    "modified_at": "2026-08-04T07:00:00Z",
     "app_version_min": "0.1.12",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,

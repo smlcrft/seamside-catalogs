@@ -2,8 +2,8 @@
 // Community Home — simple public-facing landing page that members of a space can edit.
 //
 // Auth model:
-//   - Anonymous request (peer.is_anon OR user_id is empty) — sees the published page only.
-//   - Known user of the space — sees an admin builder UI (title, accent, sections, links)
+//   - Everyone else (anon visitors, Viewer-role members) — sees the published page only.
+//   - Space editor — sees an admin builder UI (title, sections, links)
 //     with a "preview" toggle that renders the same public view.
 //
 // Storage is LocalTables (encrypted at rest, host-local, not peer-synced), scoped per
@@ -47,7 +47,6 @@ type Settings = ReturnType<typeof frameSettings>;
 // ----------------------------------------------------------------------------------------
 // HELPERS
 // ----------------------------------------------------------------------------------------
-const VALID_ACCENTS = new Set(["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"]);
 const VALID_FORMATS = new Set(["text", "html"]);
 const VALID_KINDS = new Set(["section", "link", "pub_frame"]);
 
@@ -75,7 +74,7 @@ function clampStr(v: unknown, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-// Page-level settings (title / tagline / accent / updated_at) live in the
+// Page-level settings (title / tagline / updated_at) live in the
 // per-placement frameSettings store — one row per key, race-free. The default
 // "About us" block is seeded once, gated on the "seeded" setting marker.
 const SEED_BLOCK_ROW = "seed_about"; // fixed id so a concurrent first-load can't duplicate it
@@ -85,20 +84,18 @@ async function ensurePage(settings: Settings, blocks: Tbl): Promise<void> {
   await settings.set("seeded", true);
   await settings.set("title", "Welcome to our community");
   await settings.set("tagline", "A place for updates, links, and news.");
-  await settings.set("accent", "c1");
   await settings.set("updated_at", Date.now());
   await blocks.upsert(SEED_BLOCK_ROW, {
     kind: "section", heading: "About us",
-    body: "Tell visitors what your community is about. Use the edit panel on the left to change this text, update the title, pick an accent color, and add sections, links, or public-frame embeds in any order.",
+    body: "Tell visitors what your community is about. Use the edit panel on the left to change this text, update the title, and add sections, links, or public-frame embeds in any order.",
     format: "text", sort_order: 0,
   });
 }
 
 async function getPage(settings: Settings, blocks: Tbl) {
-  const [title, tagline, accent, updatedAt] = await Promise.all([
+  const [title, tagline, updatedAt] = await Promise.all([
     settings.get<string>("title"),
     settings.get<string>("tagline"),
-    settings.get<string>("accent"),
     settings.get<number>("updated_at"),
   ]);
   const { rows } = await blocks.query({
@@ -107,7 +104,6 @@ async function getPage(settings: Settings, blocks: Tbl) {
   return {
     title: title ?? "",
     tagline: tagline ?? "",
-    accent: accent ?? "c1",
     updated_at: updatedAt ?? 0,
     blocks: rows.map((r) => ({
       id: r._row_id, kind: r.kind, heading: r.heading, body: r.body, format: r.format,
@@ -133,7 +129,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
   });
   const peer = parsePeerInfo(query, cookies);
   const sfiId = peer.sfi_id;
-  const anon = peer.is_anon || !peer.user_id;
 
   // ----- index.html: serve a single bundled response (html + inlined css + per-viewer
   // window.__peer stamp) so the UI can render without an extra /api/whoami round-trip.
@@ -150,7 +145,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
   if (reqPath.startsWith("/api/")) {
     if (!sfiId) {
       if (reqPath === "/api/page" && method === "GET") {
-        return send({ title: "", tagline: "", accent: "c1", blocks: [] });
+        return send({ title: "", tagline: "", blocks: [] });
       }
       return send({ error: "sfi_id missing" }, 400);
     }
@@ -167,12 +162,12 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
       return send(await getPage(settings, blocks));
     }
 
-    // ----- admin routes — require a known user.
+    // ----- admin routes — space editors only (Viewer-role members read like anyone else).
     if (reqPath.startsWith("/api/admin/")) {
-      if (anon) return send({ error: "forbidden" }, 403);
+      if (!peer.is_sfi_editor) return send({ error: "forbidden" }, 403);
       await ensurePage(settings, blocks);
 
-      // Update top-level page settings (title / tagline / accent).
+      // Update top-level page settings (title / tagline).
       if (reqPath === "/api/admin/page" && method === "PUT") {
         const data = parseJsonBody(body);
         if (!data) return send({ error: "invalid body" }, 400);
@@ -181,10 +176,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
         }
         if (typeof data.tagline === "string") {
           await settings.set("tagline", clampStr(data.tagline, MAX_TAGLINE));
-        }
-        if (typeof data.accent === "string") {
-          if (!VALID_ACCENTS.has(data.accent)) return send({ error: "invalid accent" }, 400);
-          await settings.set("accent", data.accent);
         }
         await settings.set("updated_at", Date.now());
         await broadcast(sfiId, settings, blocks);

@@ -32,7 +32,7 @@ body {
 }
 
 .badge {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-xs);
   color: var(--os-text-muted);
   background: var(--os-bg-subtle);
@@ -103,7 +103,7 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--os-sp-sm);
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-xs);
   color: var(--os-text-muted);
   margin-top: 2px;
@@ -153,7 +153,7 @@ body {
   border: 1px solid var(--os-border-color);
   border-radius: var(--os-radius-sm);
   font-size: var(--os-fs-xs);
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   color: var(--os-text-secondary);
   padding: 2px var(--os-sp-sm);
 }
@@ -213,7 +213,7 @@ body {
 }
 
 .public-role {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-xs);
   color: var(--os-text-muted);
   text-transform: uppercase;
@@ -306,7 +306,7 @@ body {
 }
 
 .contact-modal__number {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-sm);
   color: var(--os-text-muted);
 }

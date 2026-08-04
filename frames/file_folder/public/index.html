@@ -24,7 +24,7 @@
     .header h1 { margin: 0; font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); flex: 1; }
     .header .mode {
       font-size: var(--os-fs-2xs); color: var(--os-text-muted);
-      font-family: var(--os-font-mono); text-transform: lowercase; white-space: nowrap;
+      font-feature-settings: 'tnum' 1; text-transform: lowercase; white-space: nowrap;
     }
     .gear {
       background: none; border: 0; cursor: pointer; color: var(--os-text-muted);
@@ -41,17 +41,21 @@
     }
     .field { display: flex; flex-direction: column; gap: var(--os-sp-xs); }
     .field > label {
-      font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); text-transform: uppercase;
+      font-size: 11px; font-weight: var(--os-weight-semibold); text-transform: uppercase;
       letter-spacing: 0.06em; color: var(--os-text-muted);
     }
     .seg { display: flex; gap: 0; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md); overflow: hidden; }
     .seg button {
+      border-radius: 0;
       flex: 1; background: var(--os-bg); border: 0; cursor: pointer; padding: var(--os-sp-sm);
       font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-secondary);
       display: inline-flex; align-items: center; justify-content: center; gap: var(--os-sp-xs);
       transition: background 150ms, color 150ms; min-width: 0;
     }
     .seg button + button { border-left: 1px solid var(--os-border-color); }
+    /* Press: never scale a clipped interior; darken like a secondary. */
+    .seg button:active { transform: none; background: var(--os-bg-inset); }
+    .seg button.active:active { background: color-mix(in srgb, var(--ch), var(--os-text) 10%); }
     .seg button.active { background: var(--ch); color: var(--os-c4-fg, #2a2207); font-weight: var(--os-weight-medium); }
     .seg button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .limits { display: flex; gap: var(--os-sp-md); }
@@ -61,7 +65,7 @@
       border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
       padding: var(--os-sp-sm); outline: none; width: 100%; transition: border-color 150ms, background 150ms;
     }
-    .limits input:focus { border-color: var(--ch); background: var(--os-bg-surface); }
+    .limits input:focus { border-color: var(--os-text-muted); background: var(--os-bg-surface); }
 
     /* Drop / add zone */
     .drop {
@@ -73,7 +77,7 @@
     .drop:hover { border-color: var(--ch); color: var(--os-text-secondary); }
     .drop i { font-size: 26px; color: var(--ch); }
     .drop .big { font-size: var(--os-fs-base); color: var(--os-text); }
-    .drop .hint { font-size: var(--os-fs-2xs); font-family: var(--os-font-mono); }
+    .drop .hint { font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1; }
 
     /* File list */
     .files { display: flex; flex-direction: column; gap: 2px; }
@@ -85,7 +89,7 @@
     .file > i.kind { font-size: 20px; color: var(--os-text-muted); flex: 0 0 auto; line-height: 0; }
     .file .meta { flex: 1; min-width: 0; }
     .file .name { font-size: var(--os-fs-base); word-break: break-word; }
-    .file .sub { font-size: var(--os-fs-2xs); font-family: var(--os-font-mono); color: var(--os-text-muted); }
+    .file .sub { font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1; color: var(--os-text-muted); }
     .iconbtn {
       flex: 0 0 auto; background: none; border: 0; cursor: pointer; padding: 5px; line-height: 0;
       font-size: 17px; color: var(--os-text-subtle); border-radius: var(--os-radius-sm);
@@ -97,14 +101,10 @@
     .iconbtn.del:hover { color: var(--os-cError); }
     .iconbtn.del.armed { opacity: 1; color: var(--os-cError); background: var(--os-cError-muted); }
 
-    .banner {
-      display: flex; align-items: center; gap: var(--os-sp-xs);
-      background: color-mix(in srgb, var(--os-c1-muted) 30%, transparent);
-      border: 1px solid var(--os-c1-muted); border-radius: var(--os-radius-md);
-      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-c1);
-    }
     .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-lg); }
-    .count { font-size: var(--os-fs-2xs); font-family: var(--os-font-mono); color: var(--os-text-muted); padding: 0 var(--os-sp-xs); }
+    .airhero { display: flex; align-items: baseline; gap: var(--os-sp-sm); padding: var(--os-sp-xs) var(--os-sp-sm) var(--os-sp-sm); }
+    .airhero .n { font-size: 32px; font-weight: var(--os-weight-semibold); font-feature-settings: 'tnum' 1; letter-spacing: -0.02em; line-height: 1; color: var(--os-text); }
+    .airhero .u { font-size: var(--os-fs-sm); color: var(--os-text-muted); }
   </style>
 </head>
 <body>
@@ -141,7 +141,7 @@
       useFramePush({ folder_changed: refresh });
 
       if (!st) return html`<div></div>`;
-      const { me, prefs, can_add, can_view, files } = st;
+      const { me, prefs, can_add, files } = st;
       const atLimit = files.length >= prefs.max_files;
 
       async function savePrefs(patch) {
@@ -235,17 +235,6 @@
                   </button>
                 </div>
               </div>
-              <div class="field">
-                <label>Who can download</label>
-                <div class="seg">
-                  <button class=${prefs.who_can_download === "members" ? "active" : ""} onClick=${() => savePrefs({ who_can_download: "members" })}>
-                    <i class="ph-light ph-lock-simple"></i><span>Space members</span>
-                  </button>
-                  <button class=${prefs.who_can_download === "anyone" ? "active" : ""} onClick=${() => savePrefs({ who_can_download: "anyone" })}>
-                    <i class="ph-light ph-globe"></i><span>Anyone with link</span>
-                  </button>
-                </div>
-              </div>
               <div class="limits">
                 <div class="field">
                   <label>Max size (MB)</label>
@@ -269,16 +258,11 @@
                 onChange=${(e) => { uploadFiles(e.target.files); e.target.value = ""; }} />
             </div>` : null}
 
-          ${!can_view ? html`
-            <div class="banner">
-              <i class="ph-light ph-lock-simple"></i>
-              This folder is shared with space members only. Join the space to see and download its files.
-            </div>`
-          : files.length === 0 ? html`
+          ${files.length === 0 ? html`
             <div class="empty">No files yet.${can_add ? " Add one above." : ""}</div>`
           : html`
             <div>
-              <div class="count">${files.length} file${files.length === 1 ? "" : "s"}</div>
+              <div class="airhero"><span class="n">${files.length}</span><span class="u">file${files.length === 1 ? "" : "s"} · ${fmtSize(files.reduce((s, f) => s + (f.size || 0), 0))}</span></div>
               <div class="files">
                 ${files.map((f) => html`
                   <div class="file" key=${f.id}>

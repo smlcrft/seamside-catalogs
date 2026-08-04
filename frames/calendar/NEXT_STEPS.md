@@ -28,9 +28,20 @@ A few directions this frame could grow, roughly in order of value:
   from their own calendar app. Recurrence maps cleanly onto `RRULE`, and the stored `tz` gives the
   `TZID` for each timed event.
 
-## A possible new jig
+## Do not re-add a public/private toggle
 
-This frame is `privacy-public-view` + `storage-simple-files` with a **per-instance public/private
-toggle** layered on top (an editor-controlled `settings.isPublic` that gates the read side for
-non-members). That "owner-flips-public-visibility" pattern shows up in several frames; if it keeps
-recurring it may be worth capturing as its own small jig rather than re-deriving the gate each time.
+This frame used to carry a per-instance `settings.isPublic` that gated the read side for
+non-members. It has been removed, and an earlier version of this note proposed promoting that
+"owner-flips-public-visibility" pattern into a jig — don't. Public access is decided by the
+**platform** (public sharing on the placement), not by the frame. A frame that keeps its own
+gate produces the bug this pattern always produced: you share the frame publicly, the visitor
+opens the link, and the frame tells them it's private because its own flag defaulted to off.
+
+The rule this frame now follows, and the one to follow in new frames:
+
+- If a request reaches the frame, the viewer is allowed to be here. Reads are open.
+- The `parsePeerInfo` flags shape the *view* and gate *writes* — never read access.
+- Gate writes on `is_sfi_editor`, never on `is_sfi_member` (Viewer-role members would slip
+  through) and never on `!is_anon`.
+- A reduced projection for non-members (fewer columns, identities withheld) is fine: that is
+  what a public view looks like, not an access gate.

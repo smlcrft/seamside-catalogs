@@ -24,7 +24,7 @@ import {
 // aspect ratio (see ASPECTS in the frontend). The frontend renders that canvas at any size via
 // a single CSS transform: scale(...), so every element stays precisely placed at any zoom.
 type Show = { settings: Settings; slides: Slide[] };
-type Settings = { palette: string; background: string; aspect: string; syncPresent: boolean };
+type Settings = { background: string; aspect: string; syncPresent: boolean };
 type Slide = { id: string; background: string; elements: SlideElement[] };
 type SlideElement = {
   id: string;
@@ -39,7 +39,7 @@ type SlideElement = {
 };
 
 const DEFAULT_SHOW: Show = {
-  settings: { palette: "c1", background: "paper", aspect: "16:9", syncPresent: false },
+  settings: { background: "paper", aspect: "16:9", syncPresent: false },
   slides: [],
 };
 
@@ -165,8 +165,9 @@ function sanitizeElement(e: any): SlideElement | null {
 
 function sanitizeShow(raw: any): Show {
   const s = raw && typeof raw === "object" ? raw : {};
+  // Legacy decks may still carry settings.palette from when the frame picked its own
+  // accent; it is dropped here — the frame now follows the space channel color.
   const settings: Settings = {
-    palette: oneOf(s.settings?.palette, ["c1","c2","c3","c4","c5","c6","c7","c8","c9","c10","c11","c12"], "c1"),
     background: oneOf(s.settings?.background, ["paper","white","dark","accent","accentmuted"], "paper"),
     aspect: oneOf(s.settings?.aspect, ["16:9","4:3","1:1"], "16:9"),
     syncPresent: s.settings?.syncPresent === true,
@@ -227,7 +228,7 @@ function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
     me: {
       is_anon: peer.is_anon, is_sfi_member: peer.is_sfi_member,
       is_sfi_editor: peer.is_sfi_editor, is_owner: peer.is_owner,
-      user_name: peer.user_name,
+      user_name: peer.user_name, space_color: peer.space_color,
     },
     show: loadShow(peer.sfi_id),
     present: loadPresent(peer.sfi_id),

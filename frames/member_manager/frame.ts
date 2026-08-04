@@ -29,14 +29,12 @@ type Prefs = {
   org_name: string;
   roles: string[];
   owner_only_edit: boolean;
-  allow_public_viewing: boolean;
 };
 
 const DEFAULT_PREFS: Prefs = {
   org_name: "Our Organization",
   roles: ["Owner", "Admin", "Member", "Guest"],
   owner_only_edit: false,
-  allow_public_viewing: false,
 };
 
 const allPrefs: Record<string, Prefs> = loadJsonFile(import.meta.url, "prefs.json", {} as Record<string, Prefs>);
@@ -48,7 +46,6 @@ function getPrefs(sfi_id: string): Prefs {
     org_name: typeof p.org_name === "string" ? p.org_name : DEFAULT_PREFS.org_name,
     roles: Array.isArray(p.roles) && p.roles.length > 0 ? p.roles.map(String) : [...DEFAULT_PREFS.roles],
     owner_only_edit: !!p.owner_only_edit,
-    allow_public_viewing: !!p.allow_public_viewing,
   };
 }
 
@@ -58,10 +55,11 @@ function setPrefs(sfi_id: string, next: Prefs): void {
 }
 
 // ----- Helpers --------------------------------------------------------------------------
+// Writes are editor-only. Never gate on is_sfi_member — a Viewer-role member would slip
+// through and be able to edit the roster.
 function canEdit(peer: ReturnType<typeof parsePeerInfo>, prefs: Prefs): boolean {
-  if (peer.is_anon) return false;
   if (prefs.owner_only_edit) return peer.is_owner;
-  return true;
+  return peer.is_sfi_editor;
 }
 
 // The `phone` column was added after the first release. Tables bound by an older
@@ -117,10 +115,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     });
   }
 
+  // Open to every viewer who reaches the frame. Anonymous viewers get a reduced projection
+  // below (name + role only, no email) — that is the public view, not an access gate.
   if (reqPath === "/api/members" && method === "GET") {
-    if (peer.is_anon && !prefs.allow_public_viewing) {
-      return jsonReply(replyPort, 200, { rows: [], public_disabled: true });
-    }
     const { rows } = await members.query({ limit: 1000 });
     // Group by role (in the configured role order), then alphabetically by name
     // within each role. Legacy/unknown roles sort to the end, then by name.
@@ -174,7 +171,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
   if (reqPath === "/api/settings" && method === "POST") {
     // Settings can always be edited by the owner; non-owners get blocked here regardless of owner_only_edit.
     if (!peer.is_owner) return jsonReply(replyPort, 403, { error: "only the frame owner can change settings" });
-    const v = parseJsonBody<{ org_name?: unknown; roles?: unknown; owner_only_edit?: unknown; allow_public_viewing?: unknown }>(body);
+    const v = parseJsonBody<{ org_name?: unknown; roles?: unknown; owner_only_edit?: unknown }>(body);
     if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
     const org_name = sanitizeText(v.org_name, 120) || DEFAULT_PREFS.org_name;
     const rolesIn: unknown[] = Array.isArray(v.roles) ? v.roles : [];
@@ -184,7 +181,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
       org_name,
       roles,
       owner_only_edit: !!v.owner_only_edit,
-      allow_public_viewing: !!v.allow_public_viewing,
     };
     setPrefs(peer.sfi_id, next);
     pushToInstance(peer.sfi_id, { type: "settings_changed" });

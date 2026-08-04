@@ -19,15 +19,6 @@ body {
 }
 
 /* === PRIVATE / NON-MEMBER VIEW === */
-.sr-private {
-  display: flex; align-items: center; justify-content: center;
-  flex-direction: column; gap: var(--os-sp-sm);
-  min-height: 100vh; padding: var(--os-sp-lg);
-  text-align: center; color: var(--os-text-secondary);
-}
-.sr-private .ph-light { font-size: 24px; color: var(--os-text-subtle); opacity: 0.5; }
-.sr-private .sr-private-title { font-weight: var(--os-weight-medium); font-size: var(--os-fs-md); }
-.sr-private .sr-private-sub { font-size: var(--os-fs-xs); color: var(--os-text-muted); line-height: 1.5; max-width: 280px; }
 
 /* === ROOT === */
 .sr-root {
@@ -36,11 +27,6 @@ body {
   flex-direction: column;
   height: 100vh;
   position: relative;
-}
-.sr-accent {
-  height: 2px;
-  background: var(--ch);
-  flex: 0 0 auto;
 }
 
 /* === TOPLINE === */
@@ -61,7 +47,7 @@ body {
 /* Live indicator — pulses when the room is actually playing. */
 .sr-live {
   display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-2xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -183,7 +169,7 @@ body {
   font-size: var(--os-fs-xs);
   color: var(--os-text-muted);
   margin-top: 2px;
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
 }
 .sr-meta .sr-hint {
   font-size: var(--os-fs-xs);
@@ -227,7 +213,7 @@ body {
 .sr-volume .sr-vol-readout {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 40px; padding: 0 6px;
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-xs);
   color: var(--os-text-muted);
   letter-spacing: 0.02em;
@@ -242,7 +228,7 @@ body {
   text-align: center;
   font-size: var(--os-fs-2xs);
   color: var(--os-text-subtle);
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }

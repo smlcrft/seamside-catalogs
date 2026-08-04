@@ -34,19 +34,6 @@ body {
   flex-wrap: wrap;
 }
 
-.weather-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--os-sp-xs);
-  font-size: var(--os-fs-xs);
-  font-family: var(--os-font-mono);
-  color: var(--os-text-secondary);
-  background: var(--os-bg-subtle);
-  padding: 2px var(--os-sp-sm);
-  border-radius: var(--os-radius-full);
-  border: 1px solid var(--os-border-color-subtle);
-  white-space: nowrap;
-}
 
 /* ----- Notes ----- */
 .note {
@@ -98,7 +85,7 @@ body {
   max-width: 240px;
 }
 .tooltip .t-head {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-2xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -114,7 +101,7 @@ body {
   display: flex;
   justify-content: space-between;
   gap: var(--os-sp-md);
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-2xs);
   color: var(--os-text-secondary);
 }
@@ -128,7 +115,7 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: var(--os-sp-md);
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-2xs);
 }
 .tooltip .t-factor .f-name {
@@ -164,7 +151,7 @@ body {
   padding: 1px 6px;
   border-radius: var(--os-radius-full);
   border: 1px solid transparent;
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -188,7 +175,7 @@ body {
   align-items: center;
   gap: 4px;
   font-size: var(--os-fs-2xs);
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--os-text-muted);
@@ -248,7 +235,7 @@ body {
   line-height: 1.3;
 }
 .peak-card .p-day {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-2xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -259,7 +246,7 @@ body {
   font-weight: var(--os-weight-semibold);
 }
 .peak-card .p-score {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-xs);
   /* Matches the highlighted segment color on the chart so a card and its on-chart
    * peak read as visually paired without an explicit connector. */
@@ -411,7 +398,7 @@ body {
   margin: 4px 0 2px;
 }
 .event-card .event-pct {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: 56px;
   font-weight: var(--os-weight-bold);
   font-variant-numeric: tabular-nums;
@@ -429,7 +416,7 @@ body {
   opacity: 0.7;
 }
 .event-card .event-tier-label {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -437,7 +424,7 @@ body {
   color: var(--os-text-muted);
 }
 .event-card .event-range {
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-xs);
   color: var(--os-text-muted);
   font-variant-numeric: tabular-nums;
@@ -503,11 +490,11 @@ body {
 .event-row select:focus {
   outline: none;
   background: var(--os-bg-surface);
-  border-color: var(--ch, var(--os-c1));
+  border-color: var(--os-text-muted);
 }
 .event-row .ev-arrow {
   color: var(--os-text-subtle);
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-xs);
   text-align: center;
 }
@@ -547,3 +534,31 @@ body {
     grid-column: auto;
   }
 }
+
+
+/* ---------- The reading (ink plate) ---------- */
+.reading {
+  background: var(--os-text);
+  border-radius: var(--os-radius-lg);
+  padding: var(--os-sp-lg) var(--os-sp-lg) var(--os-sp-md);
+  margin: var(--os-sp-md) 0;
+  display: flex; flex-direction: column; gap: var(--os-sp-xs);
+}
+.reading-line {
+  margin: 0; display: flex; flex-direction: column; gap: 2px;
+  font-family: var(--os-font-serif); font-weight: 500;
+  letter-spacing: -0.01em; color: var(--os-bg);
+}
+.reading-line .rl-hero { font-size: 26px; line-height: 1.25; }
+.reading-line .rl-hero i { font-style: italic; }
+.reading-line .rl-sub {
+  font-size: 15px; line-height: 1.4;
+  color: color-mix(in srgb, var(--os-bg) 82%, transparent);
+}
+.reading-meta {
+  display: flex; align-items: center; gap: var(--os-sp-sm);
+  font-size: var(--os-fs-xs); font-feature-settings: 'tnum' 1;
+  color: color-mix(in srgb, var(--os-bg) 72%, transparent);
+}
+.reading-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--os-cSuccess); flex: 0 0 auto; }
+.reading-dot.warn { background: var(--os-cWarn); }

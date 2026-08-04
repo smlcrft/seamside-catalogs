@@ -33,7 +33,6 @@ function roleChannel(role, roles) {
 function App() {
   const [state, setState] = useState(null); // { prefs, viewer, can_edit }
   const [members, setMembers] = useState([]);
-  const [publicDisabled, setPublicDisabled] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -48,7 +47,6 @@ function App() {
   async function loadMembers() {
     const r = await frame.apiSafe("api/members");
     if (r === WAITING) { setWaiting(true); return; }
-    setPublicDisabled(!!r.public_disabled);
     setMembers(r.rows || []);
   }
 
@@ -109,7 +107,7 @@ function App() {
         <h1>${orgName}</h1>
       </div>
       <div class="header-actions">
-        <span class="badge">${publicDisabled ? "—" : String(members.length)}</span>
+        <span class="badge">${String(members.length)}</span>
         ${viewer.is_owner && html`
           <button class="ghost" title="Settings" onClick=${() => setShowSettings(true)}>
             <i class="ph-light ph-gear icon-sm"></i>
@@ -129,7 +127,6 @@ function App() {
 
     <section id="list-wrap">
       <${MemberList}
-        publicDisabled=${publicDisabled}
         members=${members}
         viewer=${viewer}
         canEdit=${canEdit}
@@ -186,16 +183,7 @@ function AddRow({ roles, hasPhone, onAdd }) {
   `;
 }
 
-function MemberList({ publicDisabled, members, viewer, canEdit, hasPhone, roles, onUpdate, onDelete }) {
-  if (publicDisabled) {
-    return html`
-      <div id="list" class="empty">
-        <i class="ph-light ph-eye-slash icon-md"></i>
-        <div>Public view of member list is disabled.</div>
-      </div>
-    `;
-  }
-
+function MemberList({ members, viewer, canEdit, hasPhone, roles, onUpdate, onDelete }) {
   if (!members.length) {
     return html`
       <div id="list" class="empty">
@@ -376,7 +364,6 @@ function SettingsDialog({ prefs, onClose, onSaved }) {
   const [orgName, setOrgName] = useState(prefs.org_name || "");
   const [rolesText, setRolesText] = useState((prefs.roles || []).join("\n"));
   const [ownerOnly, setOwnerOnly] = useState(!!prefs.owner_only_edit);
-  const [allowPublic, setAllowPublic] = useState(!!prefs.allow_public_viewing);
 
   async function save() {
     const roles = rolesText.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
@@ -385,7 +372,6 @@ function SettingsDialog({ prefs, onClose, onSaved }) {
         org_name: orgName.trim(),
         roles,
         owner_only_edit: ownerOnly,
-        allow_public_viewing: allowPublic,
       });
       onSaved();
     } catch (e) {
@@ -413,10 +399,6 @@ function SettingsDialog({ prefs, onClose, onSaved }) {
         <label class="field row-field">
           <input type="checkbox" checked=${ownerOnly} onChange=${(e) => setOwnerOnly(e.target.checked)} />
           <span>Only the frame owner can edit member entries</span>
-        </label>
-        <label class="field row-field">
-          <input type="checkbox" checked=${allowPublic} onChange=${(e) => setAllowPublic(e.target.checked)} />
-          <span>Allow public (anonymous) viewers to see a read-only list of names and roles</span>
         </label>
         <div class="dialog-actions">
           <button class="ghost" onClick=${onClose}>cancel</button>

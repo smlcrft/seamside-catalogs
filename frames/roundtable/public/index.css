@@ -24,20 +24,11 @@ body {
 }
 
 /* === PRIVATE (NON-MEMBER) VIEW === */
-.rt-private {
-  display: flex; align-items: center; justify-content: center;
-  flex-direction: column; gap: var(--os-sp-sm);
-  min-height: 100vh; padding: var(--os-sp-lg);
-  text-align: center; color: var(--os-text-secondary);
-}
-.rt-private .ph-light { font-size: 24px; color: var(--os-text-subtle); opacity: 0.5; }
-.rt-private .rt-private-title { font-weight: var(--os-weight-medium); font-size: var(--os-fs-md); }
-.rt-private .rt-private-sub { font-size: var(--os-fs-xs); color: var(--os-text-muted); line-height: 1.5; max-width: 280px; }
 
 /* === ROOT === */
 .rt-root {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto 1fr auto;
   height: 100vh;
   --ch: var(--os-c1);
   position: relative;
@@ -45,14 +36,9 @@ body {
 /* When both lists are collapsed, the main row shrinks to fit its column headers and
    the chat row claims the remaining viewport. */
 .rt-root.lists-all-collapsed {
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto auto 1fr;
 }
 .rt-root.lists-all-collapsed .rt-chat { max-height: none; }
-.rt-accent {
-  height: 2px;
-  background: var(--ch);
-  flex: 0 0 auto;
-}
 
 /* === TOPLINE === */
 .rt-topline {
@@ -107,7 +93,7 @@ body {
   font-size: var(--os-fs-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -116,11 +102,6 @@ body {
   background: color-mix(in oklab, var(--ch) 12%, var(--os-bg-subtle));
   border: 1px solid color-mix(in oklab, var(--ch) 30%, var(--os-border-color-subtle));
   color: var(--ch);
-}
-.rt-badge-public {
-  background: color-mix(in oklab, var(--os-cWarn) 14%, var(--os-bg-subtle));
-  border: 1px solid color-mix(in oklab, var(--os-cWarn) 38%, var(--os-border-color-subtle));
-  color: var(--os-cWarn);
 }
 
 /* === MAIN AREA: two lists side-by-side, then chat strip === */
@@ -145,8 +126,8 @@ body {
 .rt-col-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: var(--os-sp-xs) 2px var(--os-sp-xs);
-  font-size: var(--os-fs-2xs);
-  font-family: var(--os-font-mono);
+  font-size: 11px;
+  font-weight: var(--os-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--os-text-muted);
@@ -165,7 +146,7 @@ body {
 }
 .rt-col-header .count {
   color: var(--os-text-subtle);
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-2xs);
 }
 .rt-col-header .chev {
@@ -196,9 +177,8 @@ body {
 .rt-item-composer input::placeholder { color: var(--os-text-subtle); }
 .rt-item-composer input:focus {
   outline: 0;
-  border-color: color-mix(in srgb, var(--col-accent), transparent 50%);
+  border-color: var(--os-text-muted);
   background: var(--os-bg-surface);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--col-accent), transparent 88%);
 }
 .rt-item-composer button {
   width: 32px; height: 32px;
@@ -210,7 +190,12 @@ body {
 }
 .rt-item-composer button:hover:not(:disabled) { filter: brightness(1.08); }
 .rt-item-composer button:active { transform: scale(0.92); }
-.rt-item-composer button:disabled { opacity: 0.3; cursor: default; transform: none; }
+/* Binary status: filled = ready to add, stroke = nothing to add yet.
+   A washed fill reads as a dim/bright continuum; the outline doesn't. */
+.rt-item-composer button:disabled {
+  background: transparent; border: 1px solid var(--os-border-color);
+  color: var(--os-text-subtle); opacity: 1; cursor: default; transform: none;
+}
 .rt-item-composer .ph-light { font-size: 14px; }
 
 /* List itself — scrolls inside its column */
@@ -247,7 +232,8 @@ body {
   animation: item-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
   transition: background var(--os-transition-fast), border-color var(--os-transition-fast);
 }
-.rt-item:hover { background: var(--os-bg-surface); }
+/* Hover is a half-step toward surface — a full grey→white flip reads abrupt. */
+.rt-item:hover { background: color-mix(in srgb, var(--os-bg-subtle), var(--os-bg-surface) 55%); }
 
 .rt-vote {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -263,7 +249,7 @@ body {
   transition: background var(--os-transition-fast), border-color var(--os-transition-fast), color var(--os-transition-fast), transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .rt-vote .ph-light { font-size: 12px; color: var(--os-text-muted); }
-.rt-vote .count { font-size: var(--os-fs-2xs); font-weight: var(--os-weight-medium); font-family: var(--os-font-mono); }
+.rt-vote .count { font-size: var(--os-fs-2xs); font-weight: var(--os-weight-medium); font-feature-settings: 'tnum' 1; }
 .rt-vote:hover {
   border-color: var(--col-accent);
   color: var(--col-accent);
@@ -298,25 +284,22 @@ body {
   display: flex; align-items: center; gap: 6px;
 }
 .rt-item-meta .by { color: var(--col-accent); font-weight: var(--os-weight-medium); }
-.rt-item-meta .when { font-family: var(--os-font-mono); }
+.rt-item-meta .when { font-feature-settings: 'tnum' 1; }
 
 .rt-item-actions {
   display: flex; align-items: center;
 }
+/* Delete is a bare ghost glyph: hidden until the row is hovered (binary
+   reveal, no half-opacity step), red only under its own cursor. Dashed
+   borders are drop-target vocabulary and don't belong on an action. */
 .rt-item-delete {
-  background: transparent;
-  border: 1px dashed var(--os-border-color-subtle);
-  border-radius: var(--os-radius-full);
-  padding: 2px 5px;
-  cursor: pointer;
-  color: var(--os-text-muted);
-  display: inline-flex; align-items: center;
-  font-family: inherit;
-  opacity: 0;
-  transition: opacity var(--os-transition-fast), color var(--os-transition-fast), border-color var(--os-transition-fast), transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  background: transparent; border: 0; border-radius: var(--os-radius-sm);
+  padding: 3px; cursor: pointer; color: var(--os-text-subtle);
+  display: inline-flex; align-items: center; font-family: inherit;
+  opacity: 0; transition: color var(--os-transition-fast), opacity var(--os-transition-fast);
 }
-.rt-item:hover .rt-item-delete { opacity: 0.55; }
-.rt-item-delete:hover { opacity: 1 !important; color: var(--os-cError); border-color: var(--os-cError); }
+.rt-item:hover .rt-item-delete { opacity: 1; }
+.rt-item-delete:hover { color: var(--os-cError); }
 .rt-item-delete:active { transform: scale(0.92); }
 .rt-item-delete .ph-light { font-size: 11px; }
 
@@ -350,17 +333,16 @@ body {
 }
 .rt-chat-header .label {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: var(--os-fs-2xs);
-  font-family: var(--os-font-mono);
+  font-size: 11px;
+  font-weight: var(--os-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--ch);
-  font-weight: var(--os-weight-medium);
 }
 .rt-chat-header .label .ph-light { font-size: 12px; }
 .rt-chat-header .count {
   color: var(--os-text-subtle);
-  font-family: var(--os-font-mono);
+  font-feature-settings: 'tnum' 1;
   font-size: var(--os-fs-2xs);
 }
 .rt-chat-header .chev {
@@ -411,7 +393,7 @@ body {
 }
 .rt-msg.mine .rt-msg-meta .author { color: var(--os-text); }
 .rt-msg-meta .time {
-  color: var(--os-text-muted); font-family: var(--os-font-mono);
+  color: var(--os-text-muted); font-feature-settings: 'tnum' 1;
   letter-spacing: 0.02em;
 }
 .rt-msg-body {
@@ -419,20 +401,14 @@ body {
   word-wrap: break-word; overflow-wrap: anywhere; white-space: pre-wrap;
 }
 .rt-msg-delete {
-  background: transparent;
-  border: 1px solid var(--os-border-color-subtle);
-  border-radius: var(--os-radius-full);
-  padding: 1px 4px;
-  margin-left: var(--os-sp-xs);
-  cursor: pointer;
-  color: var(--os-text-muted);
-  display: inline-flex; align-items: center;
-  opacity: 0;
-  font-family: inherit;
-  transition: opacity var(--os-transition-fast), color var(--os-transition-fast), border-color var(--os-transition-fast), transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  background: transparent; border: 0; border-radius: var(--os-radius-sm);
+  padding: 2px; margin-left: var(--os-sp-xs); cursor: pointer;
+  color: var(--os-text-subtle); display: inline-flex; align-items: center;
+  font-family: inherit; opacity: 0;
+  transition: color var(--os-transition-fast), opacity var(--os-transition-fast);
 }
-.rt-msg:hover .rt-msg-delete { opacity: 0.55; }
-.rt-msg-delete:hover { opacity: 1; color: var(--os-cError); border-color: var(--os-cError); }
+.rt-msg:hover .rt-msg-delete { opacity: 1; }
+.rt-msg-delete:hover { color: var(--os-cError); }
 .rt-msg-delete:active { transform: scale(0.92); }
 .rt-msg-delete .ph-light { font-size: 11px; }
 
@@ -457,9 +433,8 @@ body {
 .rt-composer textarea::placeholder { color: var(--os-text-subtle); }
 .rt-composer textarea:focus {
   outline: 0;
-  border-color: color-mix(in srgb, var(--ch), transparent 50%);
+  border-color: var(--os-text-muted);
   background: var(--os-bg-surface);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ch), transparent 88%);
 }
 .rt-composer .rt-send {
   width: 36px; height: 36px;
@@ -471,7 +446,10 @@ body {
 }
 .rt-composer .rt-send:hover { opacity: 0.88; }
 .rt-composer .rt-send:active { transform: scale(0.92); }
-.rt-composer .rt-send:disabled { opacity: 0.3; cursor: default; transform: none; }
+.rt-composer .rt-send:disabled {
+  background: transparent; border: 1px solid var(--os-border-color);
+  color: var(--os-text-subtle); opacity: 1; cursor: default; transform: none;
+}
 .rt-composer .ph-light { font-size: 14px; }
 
 /* === SETTINGS OVERLAY (owner only) === */
@@ -505,71 +483,9 @@ body {
   transition: border-color var(--os-transition-fast), background var(--os-transition-fast);
 }
 .rt-settings input[type="text"]:focus {
-  outline: 0; border-color: color-mix(in srgb, var(--ch), transparent 50%);
+  outline: 0; border-color: var(--os-text-muted);
   background: var(--os-bg-surface);
 }
-.rt-themes {
-  display: flex; flex-wrap: wrap; gap: 6px;
-}
-
-/* Public-access toggle row inside settings overlay. The label flips to flex-row so the
-   description text sits next to the switch instead of stacking below it. */
-.rt-toggle-label {
-  flex-direction: row !important;
-  align-items: flex-start;
-  gap: var(--os-sp-md);
-}
-.rt-toggle-label .rt-toggle-text {
-  flex: 1;
-  display: flex; flex-direction: column; gap: 2px;
-}
-.rt-toggle-label .rt-toggle-title {
-  color: var(--os-text);
-  font-size: var(--os-fs-sm);
-  font-weight: var(--os-weight-medium);
-}
-.rt-toggle-label .rt-toggle-sub {
-  color: var(--os-text-muted);
-  font-size: var(--os-fs-xs);
-  line-height: 1.4;
-}
-.rt-toggle {
-  width: 40px; height: 22px;
-  background: var(--os-bg-inset);
-  border: 1px solid var(--os-border-color-subtle);
-  border-radius: var(--os-radius-full);
-  position: relative;
-  cursor: pointer;
-  padding: 0;
-  flex-shrink: 0;
-  margin-top: 2px;
-  transition: background var(--os-transition-fast), border-color var(--os-transition-fast);
-}
-.rt-toggle-thumb {
-  position: absolute; top: 2px; left: 2px;
-  width: 16px; height: 16px;
-  background: var(--os-bg-surface);
-  border-radius: var(--os-radius-full);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1), background var(--os-transition-fast);
-}
-.rt-toggle[aria-checked="true"] {
-  background: var(--ch);
-  border-color: var(--ch);
-}
-.rt-toggle[aria-checked="true"] .rt-toggle-thumb {
-  transform: translateX(18px);
-  background: var(--ch-fg, var(--os-bg));
-}
-.rt-theme-swatch {
-  width: 26px; height: 26px;
-  border-radius: var(--os-radius-full);
-  border: 2px solid transparent;
-  cursor: pointer;
-  transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color var(--os-transition-fast);
-}
-.rt-theme-swatch:hover { transform: scale(1.12); }
-.rt-theme-swatch.selected { border-color: var(--os-text); }
 .rt-settings-actions {
   display: flex; justify-content: flex-end; gap: var(--os-sp-xs); margin-top: auto;
 }
@@ -664,5 +580,21 @@ body {
 @media (max-width: 250px) {
   .rt-topline { display: none; }
   .rt-composer { display: none; }
-  .rt-accent { height: 1px; }
 }
+
+
+/* Settings live in the shared Modal scaffold; only field internals are ours. */
+.rt-settings-fields { display: flex; flex-direction: column; gap: var(--os-sp-md); }
+.rt-settings-fields label { display: flex; flex-direction: column; gap: var(--os-sp-xs); font-size: var(--os-fs-sm); color: var(--os-text-secondary); }
+.rt-ghost-btn {
+  background: transparent; border: none; border-radius: var(--os-radius-sm);
+  color: var(--os-text-muted); cursor: pointer; padding: 6px 12px;
+  font-family: inherit; font-size: var(--os-fs-sm);
+  transition: color var(--os-transition-fast), background var(--os-transition-fast);
+}
+.rt-ghost-btn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+
+.rt-check-row { flex-direction: row !important; align-items: flex-start; gap: var(--os-sp-sm); cursor: pointer; }
+.rt-check-row .rt-check-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rt-check-row .rt-check-name { font-size: var(--os-fs-sm); color: var(--os-text); line-height: 22px; }
+.rt-check-row .rt-check-sub { font-size: var(--os-fs-2xs); color: var(--os-text-muted); line-height: 1.4; }

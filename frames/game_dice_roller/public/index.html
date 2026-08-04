@@ -8,16 +8,19 @@
   <style>
     body { max-width: 320px; margin: 0 auto; }
     .die {
-      font-size: 48px;
-      width: 80px; height: 80px;
+      font-size: 104px;
+      line-height: 1;
+      width: 144px; height: 144px;
       display: flex; align-items: center; justify-content: center;
-      background: var(--os-bg-subtle);
-      border-radius: var(--os-radius-md);
+      background: var(--os-bg-surface);
+      border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-lg);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), inset 0 -2px 0 rgba(0, 0, 0, 0.04);
       cursor: pointer;
       user-select: none;
       transition: transform var(--os-transition-fast);
     }
-    .die:active { transform: scale(0.92); }
+    .die:active { transform: scale(0.94); }
     .die.rolling { opacity: 0.85; }
     .result { font-size: var(--os-fs-xl); font-weight: var(--os-weight-semibold); }
   </style>

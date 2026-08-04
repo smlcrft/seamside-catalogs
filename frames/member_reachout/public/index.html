@@ -37,7 +37,7 @@ function cleanPhone(p) {
 // ---- root -----------------------------------------------------------------------------
 function App() {
   const [state, setState] = useState(null);   // { settings, viewer, can_edit, roles }
-  const [log, setLog] = useState(null);        // { entries, can_edit?, public_disabled?, anon_view? }
+  const [log, setLog] = useState(null);        // { entries, can_edit?, anon_view? }
   const [waiting, setWaiting] = useState(false);
   const [compose, setCompose] = useState(null); // null | { to_all, roles, subject, message }
   const [showSettings, setShowSettings] = useState(false);
@@ -123,7 +123,6 @@ function App() {
       entries=${entries}
       canEdit=${can_edit}
       isMember=${viewer.is_sfi_member}
-      publicDisabled=${!!log.public_disabled}
       onResend=${resend}
       onRefresh=${loadLog}
     />
@@ -149,14 +148,7 @@ function App() {
 }
 
 // ---- sent-message backlog -------------------------------------------------------------
-function SentLog({ entries, canEdit, isMember, publicDisabled, onResend, onRefresh }) {
-  if (publicDisabled) {
-    return html`
-      <div class="empty">
-        <i class="ph-light ph-eye-slash icon-lg"></i>
-        <div>This reachout board isn't public.</div>
-      </div>`;
-  }
+function SentLog({ entries, canEdit, isMember, onResend, onRefresh }) {
   if (!entries.length) {
     return html`
       <div class="empty">
@@ -447,7 +439,6 @@ function TextRunner({ recipients, message, onFinish }) {
 // ---- settings -------------------------------------------------------------------------
 function SettingsModal({ settings, roles, onClose, onSaved }) {
   const [title, setTitle] = useState(settings.title || "");
-  const [allowPublic, setAllowPublic] = useState(!!settings.allow_public_viewing);
   const [publicRoles, setPublicRoles] = useState(new Set(settings.public_roles || []));
 
   // Roles known from the roster, unioned with any already-saved public roles that may no
@@ -466,7 +457,6 @@ function SettingsModal({ settings, roles, onClose, onSaved }) {
     try {
       await frame.api("api/settings", {
         title: title.trim(),
-        allow_public_viewing: allowPublic,
         public_roles: Array.from(publicRoles),
       });
       onSaved();
@@ -486,26 +476,19 @@ function SettingsModal({ settings, roles, onClose, onSaved }) {
             <input type="text" maxlength="80" value=${title} onInput=${(e) => setTitle(e.target.value)} />
           </label>
 
-          <label class="field row-field">
-            <input type="checkbox" checked=${allowPublic} onChange=${(e) => setAllowPublic(e.target.checked)} />
-            <span><i class="ph-light ph-globe-hemisphere-west"></i> Let public (anonymous) viewers see a message history</span>
-          </label>
-
-          ${allowPublic && html`
-            <div class="field">
-              <span class="field-label">Show messages sent to these roles publicly</span>
-              <div class="role-checks">
-                ${allRoles.length === 0 && html`<div class="muted small">No roles yet — add members first.</div>`}
-                ${allRoles.map((role) => html`
-                  <label class="role-check ${publicRoles.has(role) ? "is-on" : ""}" key=${role}>
-                    <input type="checkbox" checked=${publicRoles.has(role)} onChange=${() => toggle(role)} />
-                    <span>${role}</span>
-                  </label>
-                `)}
-              </div>
-              <p class="muted small">Only role-targeted messages whose every role is checked appear publicly. "Everyone" messages are never shown publicly.</p>
+          <div class="field">
+            <span class="field-label"><i class="ph-light ph-globe-hemisphere-west"></i> Roles whose messages non-members can read</span>
+            <div class="role-checks">
+              ${allRoles.length === 0 && html`<div class="muted small">No roles yet — add members first.</div>`}
+              ${allRoles.map((role) => html`
+                <label class="role-check ${publicRoles.has(role) ? "is-on" : ""}" key=${role}>
+                  <input type="checkbox" checked=${publicRoles.has(role)} onChange=${() => toggle(role)} />
+                  <span>${role}</span>
+                </label>
+              `)}
             </div>
-          `}
+            <p class="muted small">Anyone who can open this frame, including people you share it with publicly, sees messages sent to the roles you check here. Only role-targeted messages whose every role is checked appear; "Everyone" messages never do. Check nothing to show them no history.</p>
+          </div>
         </div>
         <footer class="sheet-footer end">
           <button class="ghost" onClick=${onClose}>cancel</button>

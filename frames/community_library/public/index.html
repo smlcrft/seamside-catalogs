@@ -25,7 +25,7 @@ const fmtDateTime = (ms) => {
 
 const DEFAULT_PREFS = {
   org_name: "Community Library", item_types: [], borrow_options: [],
-  default_borrow_days: 7, owner_only_edit: false, allow_public_viewing: false,
+  default_borrow_days: 7, owner_only_edit: false,
 };
 
 // Only the checked_out → overdue transition is time-based; every other status change is
@@ -40,7 +40,6 @@ function App() {
   const [state, setState] = useState(null); // { prefs, viewer, can_edit, now } | "waiting" | null
   const [assets, setAssets] = useState([]);
   const [members, setMembers] = useState([]);
-  const [publicDisabled, setPublicDisabled] = useState(false);
   const [dialog, setDialog] = useState(null); // { kind, ...payload } | null
 
   // Returns the fetched state object so callers can read viewer without a
@@ -62,7 +61,6 @@ function App() {
   async function loadAssets() {
     const r = await api("api/assets");
     if (r === WAITING || !r) return;
-    setPublicDisabled(!!r.public_disabled);
     setAssets(r.rows || []);
   }
 
@@ -112,7 +110,6 @@ function App() {
         <h1>${prefs.org_name || "Community Library"}</h1>
       </div>
       <div class="header-actions">
-        <span class="badge">${publicDisabled ? "—" : String(assets.length)}</span>
         ${viewer.is_owner && html`
           <button class="ghost" title="Settings" onClick=${() => setDialog({ kind: "settings" })}>
             <i class="ph-light ph-gear icon-sm"></i>
@@ -130,19 +127,24 @@ function App() {
       </p>
     `}
 
-    ${!viewer.is_anon && html`
-      <section class="legend">
-        <span class="status-chip status-available"><span class="dot"></span>available</span>
-        <span class="status-chip status-checked_out"><span class="dot"></span>checked out</span>
-        <span class="status-chip status-overdue"><span class="dot"></span>overdue</span>
-        <span class="status-chip status-issue"><span class="dot"></span>needs attention</span>
-      </section>
+    ${assets.length > 0 && html`
+      <div class="airhero">
+        <span class="n">${assets.length}</span>
+        <span class="u">${assets.length === 1 ? "item" : "items"}${(() => {
+          const out = assets.filter((a) => a.status === "checked_out" || a.status === "overdue").length;
+          const over = assets.filter((a) => a.status === "overdue").length;
+          const attn = assets.filter((a) => a.status === "issue").length;
+          let s = "";
+          if (out) s += " · " + out + " out";
+          if (over) s += " · " + over + " overdue";
+          if (attn) s += " · " + attn + " needs attention";
+          return s;
+        })()}</span>
+      </div>
     `}
 
     <section id="list-wrap">
-      ${publicDisabled
-        ? html`<div class="empty"><i class="ph-light ph-eye-slash icon-md"></i><div>Public view of the library is disabled.</div></div>`
-        : assets.length === 0
+      ${assets.length === 0
           ? html`<div class="empty"><i class="ph-light ph-books icon-md"></i>
               <div>${can_edit ? "No items yet — add the first one above." : "The library is empty."}</div></div>`
           : viewer.is_anon
@@ -193,7 +195,6 @@ function PublicRow({ a, now }) {
   else if (status === "issue")    statusText = "unavailable";
   return html`
     <div class=${"public-row status-" + status}>
-      <span class="status-bar"></span>
       <div class="public-main">
         <div class="public-name">${a.name}</div>
         <div class="public-meta">${a.item_type} · ${statusText}</div>
@@ -222,7 +223,6 @@ function AssetRow({ a, can_edit, onAction, reload, now }) {
 
   return html`
     <div class=${"asset status-" + status}>
-      <span class="status-bar"></span>
       <div class="asset-main">
         <div class="asset-headline">
           <span class="asset-name">${a.name}</span>
@@ -413,7 +413,6 @@ function SettingsDialog({ prefs, onClose }) {
   const [borrowText, setBorrowText] = useState((prefs.borrow_options || []).map((o) => `${o.label}, ${o.days}`).join("\n"));
   const [defaultDays, setDefaultDays] = useState(String(prefs.default_borrow_days || ""));
   const [ownerOnly, setOwnerOnly] = useState(!!prefs.owner_only_edit);
-  const [allowPublic, setAllowPublic] = useState(!!prefs.allow_public_viewing);
 
   // Recompute the default-borrow choices whenever the borrow-lines text changes.
   // If the current selection is no longer valid, fall back to the first option.
@@ -432,7 +431,6 @@ function SettingsDialog({ prefs, onClose }) {
         borrow_options: borrowOpts,
         default_borrow_days: Number(defaultDays) || borrowOpts[0]?.days,
         owner_only_edit: ownerOnly,
-        allow_public_viewing: allowPublic,
       });
       onClose();
     } catch (err) { await frame.alert(err.message || "failed"); }
@@ -461,10 +459,6 @@ function SettingsDialog({ prefs, onClose }) {
       <label class="field row-field">
         <input type="checkbox" checked=${ownerOnly} onChange=${(e) => setOwnerOnly(e.target.checked)} />
         <span>Only the frame owner can edit the library</span>
-      </label>
-      <label class="field row-field">
-        <input type="checkbox" checked=${allowPublic} onChange=${(e) => setAllowPublic(e.target.checked)} />
-        <span>Allow public (anonymous) viewers to see the asset list</span>
       </label>
       <div class="dialog-actions">
         <button class="ghost" onClick=${onClose}>cancel</button>

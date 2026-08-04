@@ -2,9 +2,11 @@
 // File Folder — a simple shared file bucket, one per placement (sfi_id).
 //
 // Design axes:
-//   privacy:        privacy-public-view  — owner configures whether downloads are open to
-//                                           anyone with the link or members-only, and whether
-//                                           only the owner or all editors may add files.
+//   privacy:        privacy-public-view  — anyone who can reach this frame can list and download
+//                                           its files; whether a non-member can reach it at all is
+//                                           the platform's call (public sharing on the placement),
+//                                           never the frame's. The owner only configures the write
+//                                           side: whether only they or all editors may add files.
 //   data_storage:   storage-simple-files — files live on disk in the frame's data dir under a
 //                                           per-sfi subfolder; a single prefs.json holds the
 //                                           owner's per-sfi sharing settings. No DB / SyncTable.
@@ -21,13 +23,11 @@ import {
 // ----- Per-sfi sharing preferences (single local JSON file: { [sfi_id]: Prefs }) --------
 type Prefs = {
   who_can_add: "owner" | "editors";       // who may upload / delete
-  who_can_download: "members" | "anyone";  // who may list / download
-  max_size_mb: number;                     // per-file size cap
-  max_files: number;                       // per-placement file count cap
+  max_size_mb: number;                    // per-file size cap
+  max_files: number;                      // per-placement file count cap
 };
 const DEFAULT_PREFS: Prefs = {
   who_can_add: "owner",
-  who_can_download: "members",
   max_size_mb: 100,
   max_files: 10,
 };
@@ -95,13 +95,9 @@ function fileInBucket(sfiId: string, id: string): { full: string; name: string }
 function canAdd(peer: ReturnType<typeof parsePeerInfo>, p: Prefs): boolean {
   return p.who_can_add === "editors" ? peer.is_sfi_editor : peer.is_owner;
 }
-function canView(peer: ReturnType<typeof parsePeerInfo>, p: Prefs): boolean {
-  return p.who_can_download === "anyone" ? true : peer.is_sfi_member;
-}
 
 function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
   const prefs = getPrefs(peer.sfi_id);
-  const view = canView(peer, prefs);
   return {
     me: {
       is_anon: peer.is_anon, is_sfi_member: peer.is_sfi_member,
@@ -110,8 +106,7 @@ function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
     },
     prefs,
     can_add: canAdd(peer, prefs),
-    can_view: view,
-    files: view ? listFiles(peer.sfi_id) : [],
+    files: listFiles(peer.sfi_id),
   };
 }
 
@@ -134,10 +129,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     if (!peer.is_owner) return jsonReply(replyPort, 403, { error: "owner only" });
     const v = parseJsonBody<Partial<Prefs>>(body) || {};
     const next: Prefs = {
-      who_can_add:      v.who_can_add === "editors" ? "editors" : "owner",
-      who_can_download: v.who_can_download === "anyone" ? "anyone" : "members",
-      max_size_mb:      clampInt(Number(v.max_size_mb) || DEFAULT_PREFS.max_size_mb, 1, 1024),
-      max_files:        clampInt(Number(v.max_files) || DEFAULT_PREFS.max_files, 1, 1000),
+      who_can_add: v.who_can_add === "editors" ? "editors" : "owner",
+      max_size_mb: clampInt(Number(v.max_size_mb) || DEFAULT_PREFS.max_size_mb, 1, 1024),
+      max_files:   clampInt(Number(v.max_files) || DEFAULT_PREFS.max_files, 1, 1000),
     };
     setPrefs(peer.sfi_id, next);
     pushToInstance(peer.sfi_id, { type: "folder_changed" });
@@ -164,10 +158,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, 200, stateFor(peer));
   }
 
-  // Download — gated by who_can_download. Served as an attachment with the original name.
+  // Download — open to every viewer who reaches the frame. Served as an attachment with the
+  // original name.
   if (reqPath.startsWith("/api/download/") && method === "GET") {
-    const prefs = getPrefs(peer.sfi_id);
-    if (!canView(peer, prefs)) return jsonReply(replyPort, 403, { error: "members only" });
     const found = fileInBucket(peer.sfi_id, reqPath.slice("/api/download/".length));
     if (!found) return jsonReply(replyPort, 404, { error: "not found" });
     let buf: Uint8Array;

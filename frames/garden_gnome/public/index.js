@@ -21,6 +21,8 @@ import { frame } from "/lib/js/framelib.js";
     plant_types: [],
     weather: null,
     statuses: [],
+    has_location: false,
+    can_edit: false,
     is_owner: false,
   };
   // working copy used while the settings dialog is open
@@ -59,63 +61,94 @@ import { frame } from "/lib/js/framelib.js";
   };
 
   // ----- Render --------------------------------------------------------------------------
-  function renderHeader() {
-    const chip = $("weather-chip");
-    if (state.weather) {
-      const w = state.weather.summary;
-      const name = state.weather.resolved_name;
-      const now = Math.round(w.current_temp_f);
-      const lo  = Math.round(w.forecast_24h_min_temp);
-      const hi  = Math.round(w.forecast_24h_max_temp);
-      // Show incoming rain when there's anything meaningful (>0.05" rolled up over 24h).
-      // Sub-trace amounts add noise without telling the gardener anything actionable.
-      const rainAhead = w.forecast_24h_rain;
-      const rainPart = rainAhead >= 0.05
-        ? ' + <span class="rain-ahead"><i class="ph-light ph-cloud-rain icon-sm"></i> ' +
-          rainAhead.toFixed(rainAhead >= 1 ? 1 : 2) + '"</span>'
-        : '';
-      // Icon hints at whether rain is happening *now*, vs just somewhere in the next 24h.
-      const headIcon = w.current_precip_in > 0.01 ? 'ph-cloud-rain' : 'ph-sun';
-      chip.classList.remove("hidden");
-      chip.innerHTML =
-        `<i class="ph-light ${headIcon} icon-sm"></i> ` +
-        escapeHTML(name) + ' · ' +
-        now + '°F · ' +
-        'next 24h: ' + lo + '–' + hi + '°F' +
-        rainPart;
+  // The frame's one reading: compose the day's verdict from the weather + the
+  // plants' computed risks, spoken as a sentence on the ink plate.
+  function renderReading() {
+    const plate = $("reading");
+    if (!state.weather) { plate.classList.add("hidden"); return; }
+    const w = state.weather.summary;
+    const name = state.weather.resolved_name;
+    const now = Math.round(w.current_temp_f);
+    const lo  = Math.round(w.forecast_24h_min_temp);
+    const hi  = Math.round(w.forecast_24h_max_temp);
+    const rainAhead = w.forecast_24h_rain;
+    const rainStr = rainAhead.toFixed(rainAhead >= 1 ? 1 : 2);
+    const risks = state.statuses.flatMap((s) => s.risks || []);
+    const dry = risks.some((r) => /DROUGHT|DRY/i.test(r.key || ""));
+    const soaked = risks.some((r) => /WATERLOGGED/i.test(r.key || ""));
+
+    let line;
+    if (w.current_precip_in > 0.01) {
+      line = rainAhead >= 0.05
+        ? `Rain on the garden now, <i>${escapeHTML(rainStr)}"</i> more to come.`
+        : `Rain on the garden right now.`;
+    } else if (rainAhead >= 0.05) {
+      line = `<i>${escapeHTML(rainStr)}"</i> of rain in the next day.`;
+    } else if (dry) {
+      line = `No rain coming. Water within the day.`;
+    } else if (soaked) {
+      line = `The beds are soaked. Hold off watering.`;
     } else {
-      chip.classList.add("hidden");
+      line = `No rain ahead. The garden is holding its own.`;
     }
+    $("reading-line").innerHTML = line;
+    $("reading-dot").className = "reading-dot" + (risks.length ? " warn" : "");
+    // The line already speaks for rain; the meta carries place + temperature.
+    const parts = [];
+    if (name) parts.push(escapeHTML(name));
+    parts.push(now + "°F");
+    parts.push("next day " + lo + "–" + hi + "°F");
+    $("reading-meta-text").textContent = parts.join(" · ");
+    plate.classList.remove("hidden");
   }
 
   function renderSetupNote() {
     const note = $("setup-note");
     const txt  = $("setup-text");
-    if (!state.prefs.location) {
+    // `location` is withheld from non-members, so lean on has_location to tell "not set up"
+    // apart from "set up, but not shown to me", and never point a viewer at settings.
+    if (!state.has_location) {
       note.classList.remove("hidden");
-      txt.textContent = "Set your location in settings to start fetching weather.";
+      txt.textContent = state.can_edit
+        ? "Set your location in settings to start fetching weather."
+        : "This garden hasn't been set up yet.";
     } else if (!state.weather) {
       note.classList.remove("hidden");
-      txt.textContent = `Couldn't find weather for "${state.prefs.location}". Try a different city or zip in settings.`;
+      txt.textContent = state.can_edit
+        ? `Couldn't find weather for "${state.prefs.location}". Try a different city or zip in settings.`
+        : "Weather for this garden is unavailable right now.";
     } else {
       note.classList.add("hidden");
     }
   }
 
-  function spectrumMarker(channel, score, value) {
-    // Continuous mapping: score -2 → 4%, score 0 → 50%, score +2 → 96%.
-    // Margins keep the marker glyph from clipping the rounded ends of the bar.
+  function renderEditAffordances() {
+    // A viewer who can't write shouldn't be shown a settings door that 403s.
+    $("settings-btn").classList.toggle("hidden", !state.can_edit);
+  }
+
+  // One meter row per measure: glyph, a quiet track with the comfort band
+  // marked, a severity-colored dot at the reading, and the value in figures.
+  // Severity is the dot's color alone (semantic colors, never channels):
+  // in the band = green, drifting = amber, extreme = red.
+  function meterRow(channel, score, value) {
     const clamped = Math.max(-2, Math.min(2, score));
     const pct = 50 + (clamped * 23);
-    const iconByChannel = {
-      water: "ph-drop",
-      temp:  "ph-thermometer",
-      sun:   "ph-sun",
-    };
-    const cls = `marker ch-${channel}`;
+    const icon = { water: "ph-drop", temp: "ph-thermometer", sun: "ph-sun" }[channel];
+    const sev = Math.abs(clamped) <= 1 ? "ok" : Math.abs(clamped) <= 1.5 ? "warn" : "bad";
+    const val =
+      channel === "water" ? value.toFixed(1) + '"' :
+      channel === "temp"  ? Math.round(value) + "°F" :
+                            "UV " + value.toFixed(1);
     const tooltip = describeScore(channel, score, value);
-    return `<span class="${cls}" style="left:${pct.toFixed(2)}%" title="${escapeHTML(tooltip)}" aria-label="${escapeHTML(tooltip)}">` +
-      `<i class="ph-light ${iconByChannel[channel]}"></i></span>`;
+    return (
+      `<div class="meter" title="${escapeHTML(tooltip)}" aria-label="${escapeHTML(tooltip)}">` +
+        `<i class="ph-light ${icon} meter-icon"></i>` +
+        `<span class="meter-track"><span class="meter-band"></span><span class="meter-mid"></span>` +
+          `<span class="meter-dot ${sev}" style="left:${pct.toFixed(2)}%"></span></span>` +
+        `<span class="meter-val">${escapeHTML(val)}</span>` +
+      `</div>`
+    );
   }
 
   function riskBadgeHtml(risk) {
@@ -135,10 +168,6 @@ import { frame } from "/lib/js/framelib.js";
   }
 
   function plantCardHtml(s) {
-    const ticks =
-      '<span class="tick" style="left:25%"></span>' +
-      '<span class="tick tick-mid" style="left:50%"></span>' +
-      '<span class="tick" style="left:75%"></span>';
     const risks = Array.isArray(s.risks) && s.risks.length
       ? `<span class="risk-row">${s.risks.map(riskBadgeHtml).join("")}</span>`
       : "";
@@ -149,12 +178,11 @@ import { frame } from "/lib/js/framelib.js";
           `<span class="plant-name">${escapeHTML(s.label)}</span>` +
           risks +
         '</div>' +
-        '<span class="spectrum"><div class="spectrum_bg"></div>' +
-          ticks +
-          spectrumMarker("water", s.water, s.water_value) +
-          spectrumMarker("temp",  s.temp,  s.temp_value)  +
-          spectrumMarker("sun",   s.sun,   s.sun_value)   +
-        '</span>' +
+        '<div class="meters">' +
+          meterRow("water", s.water, s.water_value) +
+          meterRow("temp",  s.temp,  s.temp_value)  +
+          meterRow("sun",   s.sun,   s.sun_value)   +
+        '</div>' +
       '</article>'
     );
   }
@@ -179,7 +207,10 @@ import { frame } from "/lib/js/framelib.js";
     if (!state.weather || state.statuses.length === 0) {
       container.innerHTML = "";
       const noPlantsPicked = state.prefs.plants.length === 0;
-      if (state.prefs.location && state.weather && noPlantsPicked) {
+      if (state.has_location && state.weather && noPlantsPicked) {
+        empty.querySelector("span").textContent = state.can_edit
+          ? "No plants picked yet — open settings to choose what's growing."
+          : "No plants picked yet.";
         empty.classList.remove("hidden");
       } else {
         empty.classList.add("hidden");
@@ -193,7 +224,8 @@ import { frame } from "/lib/js/framelib.js";
   }
 
   function render() {
-    renderHeader();
+    renderReading();
+    renderEditAffordances();
     renderSetupNote();
     renderPlants();
   }

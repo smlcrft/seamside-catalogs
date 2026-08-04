@@ -499,7 +499,6 @@ function statusFor(plant: PlantKey, w: WeatherData, soilFactor: number): PlantSt
 // ----- HTTP handler ---------------------------------------------------------------------
 self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cookies) => {
   const peer = parsePeerInfo(query, cookies);
-  const isAnon  = peer.is_anon || !peer.user_id;
   const isOwner = peer.is_owner;
 
   if (reqPath === "/index.html" && method === "GET") {
@@ -512,12 +511,10 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cook
     });
   }
 
-  // Garden Gnome is a personal/household tool — anonymous FAT visitors are not the
-  // audience. Fail closed on every API call from anon viewers.
-  if (isAnon && reqPath.startsWith("/api/")) {
-    return jsonReply(replyPort, 403, { error: "private frame" });
-  }
-
+  // Reads are open to every viewer who reaches the frame — whether a non-member can reach it
+  // at all is the platform's call (public sharing on the placement), never the frame's.
+  // Non-members get the same garden with the raw location withheld: the derived weather and
+  // plant statuses stay, the town they were computed for does not.
   if (reqPath === "/api/state" && method === "GET") {
     const prefs = getPrefs(peer.sfi_id);
     const soilDef = SOIL_TYPES.find((s) => s.key === prefs.soil) ?? SOIL_TYPES[1];
@@ -526,17 +523,24 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cook
       ? prefs.plants.map((p) => statusFor(p, weather, soilDef.retention_factor))
       : [];
     return jsonReply(replyPort, 200, {
-      prefs,
+      prefs: peer.is_sfi_member ? prefs : { ...prefs, location: "" },
+      // Lets a viewer whose `location` was stripped still tell "not set up yet" apart from
+      // "set up, but I'm not allowed to see where".
+      has_location: !!prefs.location,
       soil_types: SOIL_TYPES,
       plant_types: PLANT_TYPES,
       weather,
       statuses,
+      can_edit: peer.is_sfi_editor,
       is_owner: isOwner,
       now: Date.now(),
     });
   }
 
+  // Editor-only. Never gate on is_sfi_member — a Viewer-role member would slip through and
+  // be able to rewrite the garden.
   if (reqPath === "/api/save" && method === "POST") {
+    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
     const v = parseJsonBody<{ location?: unknown; soil?: unknown; plants?: unknown }>(body);
     if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
     const location = sanitizeText(v.location, 120);

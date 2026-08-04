@@ -20,30 +20,14 @@ body {
 }
 
 /* === PRIVATE (ANON) VIEW === */
-.dc-private {
-  display: flex; align-items: center; justify-content: center;
-  flex-direction: column; gap: var(--os-sp-sm);
-  min-height: 100vh; padding: var(--os-sp-lg);
-  text-align: center; color: var(--os-text-secondary);
-}
-.dc-private .ph-light { font-size: 24px; color: var(--os-text-subtle); opacity: 0.5; }
-.dc-private .dc-private-title { font-weight: var(--os-weight-medium); font-size: var(--os-fs-md); }
-.dc-private .dc-private-sub { font-size: var(--os-fs-xs); color: var(--os-text-muted); line-height: 1.5; max-width: 240px; }
 
 /* === ROOT === */
 .dc-root {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto 1fr auto;
   height: 100vh;
   --ch: var(--os-c1);
   position: relative;
-}
-
-/* === ACCENT LINE === */
-.dc-accent {
-  height: 2px;
-  background: var(--ch);
-  flex: 0 0 auto;
 }
 
 /* === TOPLINE (title + settings — minimal, no chrome) === */
@@ -120,7 +104,7 @@ body {
 }
 .dc-msg.mine .dc-msg-meta .author { color: var(--os-text); }
 .dc-msg-meta .time {
-  color: var(--os-text-muted); font-family: var(--os-font-mono);
+  color: var(--os-text-muted); font-feature-settings: 'tnum' 1;
   letter-spacing: 0.02em;
 }
 .dc-msg-body {
@@ -150,22 +134,20 @@ body {
   color: var(--os-text);
 }
 .dc-reaction .ph-light { font-size: 11px; color: var(--ch); }
+/* Hover actions are bare ghosts: hidden until the message is hovered
+   (binary reveal), colored only under their own cursor. */
 .dc-reaction-add, .dc-msg-delete {
-  background: transparent;
-  border: 1px dashed var(--os-border-color-subtle);
-  border-radius: var(--os-radius-full);
-  padding: 1px 4px; cursor: pointer;
-  color: var(--os-text-muted);
+  background: transparent; border: 0; border-radius: var(--os-radius-sm);
+  padding: 2px 3px; cursor: pointer;
+  color: var(--os-text-subtle);
   display: inline-flex; align-items: center;
   opacity: 0; font-family: inherit; font-size: var(--os-fs-2xs);
-  transition: opacity var(--os-transition-fast), color var(--os-transition-fast), border-color var(--os-transition-fast), transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity var(--os-transition-fast), color var(--os-transition-fast), transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.dc-msg:hover .dc-reaction-add, .dc-msg:hover .dc-msg-delete { opacity: 0.6; }
-.dc-reaction-add:hover, .dc-msg-delete:hover { opacity: 1 !important; }
+.dc-msg:hover .dc-reaction-add, .dc-msg:hover .dc-msg-delete { opacity: 1; }
 .dc-reaction-add:active, .dc-msg-delete:active { transform: scale(0.92); }
-.dc-reaction-add:hover { color: var(--ch); border-color: var(--ch); }
-.dc-msg-delete { border-style: solid; }
-.dc-msg-delete:hover { color: var(--os-cError); border-color: var(--os-cError); }
+.dc-reaction-add:hover { color: var(--ch); }
+.dc-msg-delete:hover { color: var(--os-cError); }
 .dc-reaction-add .ph-light, .dc-msg-delete .ph-light { font-size: 11px; }
 
 /* === COMPOSER === */
@@ -191,9 +173,8 @@ body {
 .dc-composer textarea::placeholder { color: var(--os-text-subtle); }
 .dc-composer textarea:focus {
   outline: 0;
-  border-color: color-mix(in srgb, var(--ch), transparent 50%);
+  border-color: var(--os-text-muted);
   background: var(--os-bg-surface);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ch), transparent 88%);
 }
 .dc-composer .dc-send {
   width: 36px; height: 36px;
@@ -205,7 +186,11 @@ body {
 }
 .dc-composer .dc-send:hover { opacity: 0.88; }
 .dc-composer .dc-send:active { transform: scale(0.92); }
-.dc-composer .dc-send:disabled { opacity: 0.3; cursor: default; transform: none; }
+/* Binary status: filled = ready to send, stroke = nothing to send yet. */
+.dc-composer .dc-send:disabled {
+  background: transparent; border: 1px solid var(--os-border-color);
+  color: var(--os-text-subtle); opacity: 1; cursor: default; transform: none;
+}
 .dc-composer .ph-light { font-size: 14px; }
 
 /* === REACTION PICKER === */
@@ -236,24 +221,11 @@ body {
 .dc-picker .ph-light { font-size: 16px; }
 
 /* === SETTINGS OVERLAY === */
-.dc-settings {
-  position: absolute; inset: 0;
-  background: var(--os-bg);
-  padding: var(--os-sp-lg);
-  display: flex; flex-direction: column; gap: var(--os-sp-md);
-  z-index: 50; overflow-y: auto;
-  animation: pop-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-.dc-settings-header { display: flex; align-items: center; justify-content: space-between; }
-.dc-settings-header h2 {
-  font-size: var(--os-fs-md); font-weight: var(--os-weight-semibold);
-  margin: 0; letter-spacing: -0.01em;
-}
-.dc-settings label {
+.dc-settings-fields > label {
   display: flex; flex-direction: column; gap: 4px;
   font-size: var(--os-fs-xs); color: var(--os-text-muted);
 }
-.dc-settings input[type="text"] {
+.dc-settings-fields input[type="text"] {
   padding: 6px 10px; font-family: inherit; font-size: var(--os-fs-sm);
   border: 1px solid var(--os-border-color-subtle);
   border-radius: var(--os-radius-sm);
@@ -261,22 +233,22 @@ body {
   caret-color: var(--ch);
   transition: border-color var(--os-transition-fast), background var(--os-transition-fast);
 }
-.dc-settings input[type="text"]:focus {
-  outline: 0; border-color: color-mix(in srgb, var(--ch), transparent 50%);
+.dc-settings-fields input[type="text"]:focus {
+  outline: 0; border-color: var(--os-text-muted);
   background: var(--os-bg-surface);
 }
-.dc-settings-actions {
-  display: flex; justify-content: flex-end; gap: var(--os-sp-xs); margin-top: auto;
+/* The settings view lives outside .dc-topline, so its bare buttons would fall
+   through to the frame-prefs channel-fill baseline — a filled Cancel and a
+   filled close × read as three identical primary actions. Re-declare the ghost
+   recipe here at this scope. */
+.dc-settings-fields .dc-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: var(--os-radius-sm);
+  color: var(--os-text-muted); cursor: pointer;
+  transition: color var(--os-transition-fast), background var(--os-transition-fast), transform var(--os-transition-fast);
 }
-.dc-settings-actions .dc-save {
-  background: var(--ch); color: var(--ch-fg, var(--os-bg));
-  border: 0; border-radius: var(--os-radius-sm);
-  padding: 6px 14px; cursor: pointer; font-family: inherit; font-size: var(--os-fs-sm);
-  font-weight: var(--os-weight-medium);
-  transition: opacity var(--os-transition-fast), transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.dc-settings-actions .dc-save:hover { opacity: 0.88; }
-.dc-settings-actions .dc-save:active { transform: scale(0.97); }
+.dc-settings-fields .dc-icon-btn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+.dc-settings-fields .dc-icon-btn:active { transform: scale(0.92); }
 
 /* === TOAST === */
 .dc-toast {
@@ -296,21 +268,39 @@ body {
 @media (max-width: 250px) {
   .dc-topline { display: none; }
   .dc-composer { display: none; }
-  .dc-accent { height: 1px; }
 }
 
 /* Owner access toggles in the settings overlay: checkbox beside a two-line
    label (name + explanatory subtext), horizontal unlike the stacked inputs. */
-.dc-settings label.dc-settings-toggle {
+.dc-settings-fields label.dc-settings-toggle {
   flex-direction: row;
   align-items: flex-start;
   gap: var(--os-sp-sm);
   cursor: pointer;
 }
-.dc-settings-toggle input[type="checkbox"] {
-  margin-top: 2px;
-  accent-color: var(--ch);
-}
+.dc-settings-toggle input[type="checkbox"] { margin-top: 2px; }
 .dc-settings-toggle > span { display: flex; flex-direction: column; gap: 2px; }
 .dc-toggle-name { font-size: var(--os-fs-sm); color: var(--os-text); }
 .dc-toggle-sub { font-size: var(--os-fs-xs); }
+
+
+/* Settings live in the shared Modal scaffold; only field internals are ours. */
+.dc-settings-fields { display: flex; flex-direction: column; gap: var(--os-sp-md); }
+.dc-settings-fields label { display: flex; flex-direction: column; gap: var(--os-sp-xs); font-size: var(--os-fs-sm); color: var(--os-text-secondary); }
+.dc-ghost-btn {
+  background: transparent; border: none; border-radius: var(--os-radius-sm);
+  color: var(--os-text-muted); cursor: pointer; padding: 6px 12px;
+  font-family: inherit; font-size: var(--os-fs-sm);
+  transition: color var(--os-transition-fast), background var(--os-transition-fast);
+}
+.dc-ghost-btn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+
+.dc-save {
+  background: var(--ch); color: var(--ch-fg, var(--os-bg));
+  border: 0; border-radius: var(--os-radius-sm);
+  padding: 6px 14px; cursor: pointer; font-family: inherit; font-size: var(--os-fs-sm);
+  font-weight: var(--os-weight-medium);
+  transition: opacity var(--os-transition-fast), transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.dc-save:hover { opacity: 0.88; }
+.dc-save:active { transform: scale(0.97); }

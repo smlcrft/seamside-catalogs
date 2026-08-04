@@ -37,13 +37,11 @@ declareTables([{
 // ----- Per-sfi settings (local-only JSON file) ------------------------------------------
 type Settings = {
   title: string;
-  allow_public_viewing: boolean;
-  public_roles: string[]; // role(s) whose message history is exposed to anonymous viewers
+  public_roles: string[]; // role(s) whose message history is exposed to non-member viewers
 };
 
 const DEFAULT_SETTINGS: Settings = {
   title: "Reachout",
-  allow_public_viewing: false,
   public_roles: [],
 };
 
@@ -54,7 +52,6 @@ function getSettings(sfi_id: string): Settings {
   if (!s) return { ...DEFAULT_SETTINGS, public_roles: [] };
   return {
     title: typeof s.title === "string" && s.title.trim() ? s.title : DEFAULT_SETTINGS.title,
-    allow_public_viewing: !!s.allow_public_viewing,
     public_roles: Array.isArray(s.public_roles) ? s.public_roles.map(String) : [],
   };
 }
@@ -142,11 +139,12 @@ function resolveRecipients(members: Member[], to_all: boolean, roles: string[]):
   return out;
 }
 
-// An entry is visible to anonymous / non-member viewers only when public viewing is on AND
-// the message was sent to specific role(s), every one of which the owner marked public.
-// "Everyone" sends are never public — they may have reached private-role recipients.
+// Whether a non-member viewer may see this entry. Reaching the frame at all is the
+// platform's call; this only decides WHAT a non-member sees, which the owner controls by
+// marking specific roles public. A message qualifies when it was sent to specific role(s),
+// every one of which the owner marked public. "Everyone" sends are never public — they may
+// have reached private-role recipients.
 function isEntryPublic(entry: SentEntry, settings: Settings): boolean {
-  if (!settings.allow_public_viewing) return false;
   if (entry.to_all) return false;
   if (!entry.roles.length) return false;
   const pub = new Set(settings.public_roles);
@@ -217,9 +215,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
       return jsonReply(replyPort, 200, { entries, can_edit: isEditor });
     }
     // Anonymous / non-member: only the publicly-exposed role messages, stripped down.
-    if (!settings.allow_public_viewing) {
-      return jsonReply(replyPort, 200, { entries: [], public_disabled: true });
-    }
     const pub = entries.filter((e) => isEntryPublic(e, settings)).map(publicEntry);
     return jsonReply(replyPort, 200, { entries: pub, anon_view: true });
   }
@@ -290,13 +285,13 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   // ---- Settings (owner only) ----------------------------------------------------------
   if (reqPath === "/api/settings" && method === "POST") {
     if (!peer.is_owner) return jsonReply(replyPort, 403, { error: "only the frame owner can change settings" });
-    const v = parseJsonBody<{ title?: unknown; allow_public_viewing?: unknown; public_roles?: unknown }>(body);
+    const v = parseJsonBody<{ title?: unknown; public_roles?: unknown }>(body);
     if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
     const title = sanitizeText(v.title, 80) || DEFAULT_SETTINGS.title;
     const public_roles = Array.isArray(v.public_roles)
       ? Array.from(new Set(v.public_roles.map((r) => sanitizeText(r, 80)).filter(Boolean)))
       : [];
-    const next: Settings = { title, allow_public_viewing: !!v.allow_public_viewing, public_roles };
+    const next: Settings = { title, public_roles };
     setSettings(peer.sfi_id, next);
     pushToInstance(peer.sfi_id, { type: "settings_changed" });
     return jsonReply(replyPort, 200, { settings: next });

@@ -20,13 +20,15 @@
     }
 
     /* ---- Header / titlebar ---------------------------------------------------------- */
-    header { display: flex; flex-direction: column; gap: var(--os-sp-sm); }
+    /* Scoped to the page header only — a bare `header` selector would leak
+       flex-direction:column into framelib's modal <header> and stack its title/close. */
+    main > header { display: flex; flex-direction: column; gap: var(--os-sp-sm); }
     .titlebar { display: flex; align-items: center; gap: var(--os-sp-sm); }
     .titlebar > .flag { font-size: 22px; color: var(--ch); line-height: 1; }
     .proj { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
     .proj-name, .proj-name input {
-      font-size: var(--os-fs-xl); font-weight: var(--os-weight-semibold);
-      letter-spacing: -0.01em; color: var(--os-text);
+      font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold);
+      line-height: 24px; letter-spacing: -0.01em; color: var(--os-text);
     }
     .proj-name input {
       width: 100%; font-family: inherit; background: transparent; border: 0;
@@ -37,11 +39,13 @@
     .proj-name .placeholder { color: var(--os-text-muted); }
     .mode {
       flex: 0 0 auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
-      font-family: var(--os-font-mono); text-transform: lowercase; white-space: nowrap;
+      font-feature-settings: 'tnum' 1; text-transform: lowercase; white-space: nowrap;
     }
     .gear {
-      flex: 0 0 auto; background: none; border: 0; cursor: pointer; padding: 4px;
-      font-size: 18px; line-height: 0; color: var(--os-text-subtle); border-radius: var(--os-radius-sm);
+      flex: 0 0 auto; background: none; border: 0; cursor: pointer;
+      width: 28px; height: 28px; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; line-height: 1; color: var(--os-text-subtle); border-radius: var(--os-radius-sm);
       transition: color 150ms, background 150ms;
     }
     .gear:hover { color: var(--ch); background: var(--os-bg-subtle); }
@@ -105,7 +109,7 @@
 
     .ms-spacer { flex: 1 1 auto; }
 
-    .metrics { flex: 0 0 auto; display: flex; align-items: center; gap: 9px; font-family: var(--os-font-mono); }
+    .metrics { flex: 0 0 auto; display: flex; align-items: center; gap: 9px; font-feature-settings: 'tnum' 1; }
     .metric { display: inline-flex; align-items: center; gap: 3px; font-size: var(--os-fs-2xs); color: var(--os-text-muted); }
     .pip { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
     .pip.u { border: 1.5px solid var(--os-text-subtle); }
@@ -115,7 +119,7 @@
     .burn i { font-size: 12px; line-height: 0; color: var(--os-cWarn); }
 
     .chip {
-      flex: 0 0 auto; font-size: var(--os-fs-2xs); font-family: var(--os-font-mono);
+      flex: 0 0 auto; font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1;
       padding: 2px 7px; border-radius: var(--os-radius-full); white-space: nowrap;
       border: 1px solid transparent;
     }
@@ -125,10 +129,10 @@
     .chip.done { color: var(--os-cSuccess); background: var(--os-cSuccess-muted); }
 
     .ms-date {
-      flex: 0 0 auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-family: var(--os-font-mono);
+      flex: 0 0 auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-feature-settings: 'tnum' 1;
     }
     .ms-date input {
-      font: inherit; font-family: var(--os-font-mono); font-size: var(--os-fs-2xs);
+      font: inherit; font-feature-settings: 'tnum' 1; font-size: var(--os-fs-2xs);
       color: var(--os-text-secondary); background: var(--os-bg-inset);
       border: 1px solid var(--os-border-color-subtle); border-radius: var(--os-radius-sm);
       padding: 1px 4px; outline: none; color-scheme: light;
@@ -287,7 +291,7 @@
     }
     .tl-card.done { opacity: 0.6; }
     .tl-head { display: flex; align-items: baseline; gap: var(--os-sp-sm); flex-wrap: wrap; }
-    .tl-date { font-size: var(--os-fs-2xs); font-family: var(--os-font-mono); color: var(--os-text-muted); flex: 0 0 auto; }
+    .tl-date { font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1; color: var(--os-text-muted); flex: 0 0 auto; }
     .tl-title { font-size: var(--os-fs-md); font-weight: var(--os-weight-medium); flex: 0 1 auto; min-width: 0;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tl-sub { display: flex; align-items: center; gap: var(--os-sp-md); flex-wrap: wrap; }
@@ -309,7 +313,7 @@
       border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
       padding: 6px 9px; outline: none; width: 100%;
     }
-    .set-input:focus { border-color: var(--ch); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ch) 25%, transparent); }
+    .set-input:focus { border-color: var(--os-text-muted); background: var(--os-bg-surface); }
     textarea.set-input { resize: vertical; min-height: 52px; line-height: 1.4; }
     .swatches { display: flex; flex-wrap: wrap; gap: 6px; }
     .swatch { width: 22px; height: 22px; border-radius: var(--os-radius-full); border: 2px solid transparent; cursor: pointer; padding: 0; }
@@ -325,31 +329,6 @@
     .link-edit button:hover { color: var(--os-cError); }
     .hint { font-size: var(--os-fs-2xs); color: var(--os-text-muted); margin-top: 2px; }
 
-    /* Squircle toggle (track radius 8 / thumb radius 5). */
-    .toggle-row { display: flex; align-items: flex-start; gap: 10px; }
-    .toggle-text { font-size: var(--os-fs-sm); color: var(--os-text-secondary); line-height: 1.4; }
-    .switch {
-      position: relative; flex: 0 0 auto; width: 38px; height: 22px; padding: 0; margin-top: 1px;
-      border-radius: 8px; border: 1px solid var(--os-border-color); background: var(--os-bg-inset);
-      cursor: pointer; transition: background 160ms, border-color 160ms;
-    }
-    .switch.on { background: var(--ch); border-color: var(--ch); }
-    .switch:active { transform: scale(0.96); }
-    .switch .knob {
-      position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 5px;
-      background: var(--os-bg-surface); box-shadow: 0 1px 2px rgba(0,0,0,0.18);
-      transition: left 160ms cubic-bezier(0.22,1,0.36,1), background 160ms;
-    }
-    .switch.on .knob { left: 18px; background: var(--os-bg); }
-
-    /* Private (public viewing off) message for non-members. */
-    .private-msg {
-      margin: auto; display: flex; flex-direction: column; align-items: center; gap: 8px;
-      text-align: center; padding: var(--os-sp-xl);
-    }
-    .private-msg > i { font-size: 34px; color: var(--os-text-subtle); line-height: 0; }
-    .private-title { font-size: var(--os-fs-lg); font-weight: var(--os-weight-medium); color: var(--os-text-secondary); }
-    .private-msg .hint { max-width: 34ch; }
   </style>
 </head>
 <body>
@@ -503,7 +482,7 @@
 
     function App() {
       const [me, setMe] = useState(null);
-      const [meta, setMeta] = useState({ name: "", overview: "", accent: "c4", links: [], public_view: false });
+      const [meta, setMeta] = useState({ name: "", overview: "", links: [] });
       const [milestones, setMilestones] = useState([]);
       const [tasks, setTasks] = useState([]);
       const [tab, setTab] = useState("board");
@@ -516,7 +495,6 @@
       const [armedMs, setArmedMs] = useState(null);
       const [armedTask, setArmedTask] = useState(null);
       const [editingTaskId, setEditingTaskId] = useState(null);
-      const [isPrivate, setIsPrivate] = useState(false);
       const [loaded, setLoaded] = useState(false);
 
       const isEditor = !!me?.is_sfi_editor;
@@ -530,8 +508,6 @@
       async function refresh() {
         const snap = await frame.api("api/state").catch(() => null);
         setLoaded(true);
-        if (snap && snap.private) { setIsPrivate(true); return; }
-        setIsPrivate(false);
         setAll(snap);
       }
       useEffect(() => {
@@ -539,7 +515,7 @@
         refresh();
       }, []);
       useFramePush({ roadmap_changed: refresh });
-      useEffect(() => { applyChannel(document.body, "var(--os-" + (meta.accent || "c4") + ")"); }, [meta.accent]);
+      useEffect(() => { frame.api("api/whoami").then((m) => applyChannel(document.body, m && m.space_color)).catch(() => {}); }, []);
 
       // group tasks by milestone
       const byMs = useMemo(() => {
@@ -667,18 +643,6 @@
       }
 
       if (!me || !loaded) return html`<div></div>`;
-
-      // Non-members with public viewing turned off (the default) see only this.
-      if (isPrivate) {
-        return html`
-          <main class="read-only">
-            <div class="private-msg">
-              <i class="ph-light ph-lock-simple"></i>
-              <div class="private-title">This roadmap is private</div>
-              <div class="hint">Ask a member of this space to share access with you.</div>
-            </div>
-          </main>`;
-      }
 
       const mode = isEditor ? (me.is_owner ? "editor · owner" : "editor")
         : me.is_sfi_member ? "viewer · read-only"
@@ -903,12 +867,10 @@
         </main>`;
     }
 
-    // ---- Settings modal (name / accent / links / public viewing) ------------------------
+    // ---- Settings modal (name / links) --------------------------------------------------
     function SettingsModal({ meta, onSave, onClose }) {
       const [name, setName] = useState(meta.name);
-      const [accent, setAccent] = useState(meta.accent || "c4");
       const [links, setLinks] = useState(meta.links.length ? meta.links.map((l) => ({ ...l })) : []);
-      const [publicView, setPublicView] = useState(!!meta.public_view);
 
       function setLink(i, patch) { setLinks(links.map((l, j) => j === i ? { ...l, ...patch } : l)); }
       function addLink() { if (links.length < 12) setLinks([...links, { label: "", url: "" }]); }
@@ -916,7 +878,7 @@
       async function save() {
         const clean = links.map((l) => ({ label: (l.label || "").trim(), url: (l.url || "").trim() }))
           .filter((l) => l.label && /^https?:\/\//i.test(l.url));
-        await onSave({ name: name.trim(), accent, links: clean, public_view: publicView ? 1 : 0 });
+        await onSave({ name: name.trim(), links: clean });
         onClose();
       }
 
@@ -930,14 +892,6 @@
             <input class="set-input" value=${name} maxlength="160" onInput=${(e) => setName(e.target.value)} placeholder="e.g. Spring Launch" />
           </div>
           <div class="set-field">
-            <label>Accent color</label>
-            <div class="swatches">
-              ${Array.from({ length: 12 }, (_, i) => "c" + (i + 1)).map((c) => html`
-                <button class=${"swatch" + (accent === c ? " on" : "")} key=${c}
-                  style=${`background:var(--os-${c})`} title=${c} onClick=${() => setAccent(c)}></button>`)}
-            </div>
-          </div>
-          <div class="set-field">
             <label>Quick links</label>
             ${links.map((l, i) => html`
               <div class="link-edit" key=${i}>
@@ -947,18 +901,6 @@
               </div>`)}
             ${links.length < 12 ? html`<button class="btn ghost" style="margin-top:4px" onClick=${addLink}><i class="ph-light ph-plus"></i>Add link</button>` : null}
             <div class="hint">Links open in your browser. Only http(s) links are saved.</div>
-          </div>
-          <div class="set-field">
-            <label>Public viewing</label>
-            <div class="toggle-row">
-              <button class=${"switch" + (publicView ? " on" : "")} role="switch" aria-checked=${publicView}
-                title=${publicView ? "Public viewing is on" : "Public viewing is off"}
-                onClick=${() => setPublicView(!publicView)}><span class="knob"></span></button>
-              <div class="toggle-text">
-                Anyone with a share link can view this roadmap.
-                <div class="hint">Non-members see milestones and tasks read-only — they can't make any changes. Off by default; the roadmap stays private.</div>
-              </div>
-            </div>
           </div>
         <//>`;
     }

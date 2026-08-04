@@ -52,7 +52,7 @@
     .el .bullets li::marker { color: currentColor; }
     .imgph {
       width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-      background: var(--os-bg-inset); color: var(--os-text-subtle); font-family: var(--os-font-mono);
+      background: var(--os-bg-inset); color: var(--os-text-subtle); font-feature-settings: 'tnum' 1;
       border: 1px dashed var(--os-border-color);
     }
     .handle {
@@ -70,21 +70,25 @@
     }
     .ins-head { display: flex; align-items: center; gap: var(--os-sp-xs); }
     .ins-head .lbl {
-      flex: 1; font-family: var(--os-font-mono); font-size: var(--os-fs-2xs);
+      flex: 1; font-feature-settings: 'tnum' 1; font-size: var(--os-fs-2xs);
       text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
     }
     .ins-row { display: flex; align-items: center; gap: var(--os-sp-xs); flex-wrap: wrap; }
     .ins-row > .rlbl {
-      font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
       width: 46px; flex: 0 0 auto;
     }
     .seg { display: inline-flex; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm); overflow: hidden; }
     .seg button {
+      border-radius: 0;
       background: var(--os-bg); border: 0; cursor: pointer; padding: 5px 8px; font: inherit;
       font-size: var(--os-fs-sm); color: var(--os-text-secondary); line-height: 1;
       display: inline-flex; align-items: center; gap: 4px;
     }
     .seg button + button { border-left: 1px solid var(--os-border-color); }
+    /* Press: never scale a clipped interior; darken like a secondary. */
+    .seg button:active { transform: none; background: var(--os-bg-inset); }
+    .seg button.active:active { background: color-mix(in srgb, var(--ch), var(--os-text) 10%); }
     .seg button.active { background: var(--ch); color: var(--ch-fg); }
     .seg.tiny button { padding: 5px 7px; }
     .swatch {
@@ -101,10 +105,9 @@
       background: var(--os-bg); border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm);
       padding: var(--os-sp-xs) var(--os-sp-sm); color: var(--os-text);
     }
-    .ins-row textarea:focus { outline: none; border-color: var(--ch); background: var(--os-bg-surface); }
+    .ins-row textarea:focus { outline: none; border-color: var(--os-text-muted); background: var(--os-bg-surface); }
     .numin { width: 58px; flex: 0 0 auto; padding: 5px 6px; font-size: var(--os-fs-sm); }
     .synctoggle { display: inline-flex; align-items: center; gap: var(--os-sp-xs); cursor: pointer; font-size: var(--os-fs-sm); color: var(--os-text); }
-    .synctoggle input { accent-color: var(--ch); cursor: pointer; }
     .synchint { font-size: var(--os-fs-2xs); line-height: 1.4; color: var(--os-text-muted); }
     .ibtn {
       background: var(--os-bg-subtle); border: 1px solid var(--os-border-color); cursor: pointer;
@@ -128,7 +131,7 @@
     }
     .thumb.active { border-color: var(--ch); box-shadow: 0 0 0 1.5px var(--ch); }
     .thumb .tnum {
-      position: absolute; left: 2px; bottom: 1px; font-family: var(--os-font-mono);
+      position: absolute; left: 2px; bottom: 1px; font-feature-settings: 'tnum' 1;
       font-size: 8px; color: var(--os-text-muted); background: color-mix(in srgb, var(--os-bg-surface) 80%, transparent);
       padding: 0 3px; border-radius: 3px;
     }
@@ -159,11 +162,11 @@
       padding: var(--os-sp-xs) var(--os-sp-sm); border-top: 1px solid var(--os-border-color);
       background: var(--os-bg-surface);
     }
-    .viewerbar .pcount { font-family: var(--os-font-mono); font-size: var(--os-fs-sm); color: var(--os-text-muted); min-width: 54px; text-align: center; }
+    .viewerbar .pcount { font-feature-settings: 'tnum' 1; font-size: var(--os-fs-sm); color: var(--os-text-muted); min-width: 54px; text-align: center; }
     /* Live read-only viewer count in the editor topbar. Present = shown, zero = gone. */
     .vcount {
       display: inline-flex; align-items: center; gap: 5px; padding: 0 6px;
-      font-family: var(--os-font-mono); font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      font-feature-settings: 'tnum' 1; font-size: var(--os-fs-sm); color: var(--os-text-secondary);
     }
     .vcount i { font-size: 16px; line-height: 0; }
 
@@ -179,7 +182,7 @@
     .pexit:hover { background: color-mix(in srgb, #fff 26%, transparent); }
     .pcount-fixed {
       position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 110;
-      font-family: var(--os-font-mono); font-size: var(--os-fs-sm); color: rgba(255,255,255,0.75);
+      font-feature-settings: 'tnum' 1; font-size: var(--os-fs-sm); color: rgba(255,255,255,0.75);
       background: color-mix(in srgb, #fff 10%, transparent); padding: 3px 10px; border-radius: var(--os-radius-full);
     }
     .pnav {
@@ -196,7 +199,7 @@
 <body>
   <script type="module">
     import {
-      frame, html, render, useState, useEffect, useRef, useLayoutEffect, useFramePush, Overlay,
+      frame, html, render, useState, useEffect, useRef, useLayoutEffect, useFramePush, Overlay, applyChannel,
     } from "/lib/js/framelib.js";
 
     // ---- constants & helpers ----------------------------------------------------------
@@ -204,7 +207,6 @@
     const TEXT_COLORS = { text: "var(--os-text)", secondary: "var(--os-text-secondary)", muted: "var(--os-text-muted)", accent: "var(--ch)", accentfg: "var(--ch-fg)", white: "#ffffff" };
     const FILL_COLORS = { accent: "var(--ch)", accentmuted: "var(--ch-muted)", text: "var(--os-text)", muted: "var(--os-text-muted)", white: "#ffffff", none: "transparent" };
     const SLIDE_BG = { paper: "var(--os-bg)", white: "var(--os-bg-surface)", dark: "#1c1917", accent: "var(--ch)", accentmuted: "var(--ch-muted)" };
-    const PALETTES = ["c1","c2","c3","c4","c5","c6","c7","c8","c9","c10","c11","c12"];
     const SESSION = Math.random().toString(36).slice(2);
 
     const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
@@ -217,9 +219,13 @@
       } catch (_) {}
       return p;
     }
-    function paletteVars(show) {
-      const p = show.settings.palette;
-      return { "--ch": `var(--os-${p})`, "--ch-fg": `var(--os-${p}-fg)`, "--ch-muted": `var(--os-${p}-muted)` };
+    // The deck follows the space channel color like every other frame. applyChannel
+    // sets --ch/--ch-fg on <body>; slide fills also want a muted step, which the os
+    // tokens provide per-channel (srgb color-mix fallback for custom hex colors).
+    function applySpaceChannel(me) {
+      const { channel } = applyChannel(document.body, me && me.space_color);
+      document.body.style.setProperty("--ch-muted",
+        channel ? `var(--os-${channel}-muted)` : "color-mix(in srgb, var(--ch) 22%, var(--os-bg))");
     }
     function dims(show) { return ASPECTS[show.settings.aspect] || ASPECTS["16:9"]; }
     function slideBgCss(show, slide) {
@@ -304,7 +310,7 @@
       const stageStyle = {
         width: W + "px", height: H + "px",
         transform: `translate(-50%, -50%) scale(${scale || 0.0001})`,
-        background: slideBgCss(show, slide), ...paletteVars(show),
+        background: slideBgCss(show, slide),
       };
 
       return html`<div class="stagewrap" ref=${wrapRef}>
@@ -429,18 +435,10 @@
     function SettingsSheet({ show, slide, onClose, setSettings, setSlideBg }) {
       const s = show.settings;
       return html`<${Overlay} onClose=${onClose}>
-        <div class="inspector" style=${{ position: "relative", left: "auto", bottom: "auto", transform: "none", maxHeight: "80vh", width: "min(360px, 92vw)", ...paletteVars(show) }}
+        <div class="inspector" style=${{ position: "relative", left: "auto", bottom: "auto", transform: "none", maxHeight: "80vh", width: "min(360px, 92vw)" }}
           onClick=${(e) => e.stopPropagation()}>
           <div class="ins-head"><span class="lbl">show settings</span>
             <button class="ibtn" title="Close" onClick=${onClose}><i class="ph-light ph-x"></i></button>
-          </div>
-          <div class="ins-row">
-            <span class="rlbl">palette</span>
-            <div class="ins-row" style=${{ gap: "6px" }}>
-              ${PALETTES.map((p) => html`<div key=${p} title=${p}
-                class=${"swatch" + (s.palette === p ? " active" : "")} style=${{ background: `var(--os-${p})` }}
-                onClick=${() => setSettings({ palette: p })}></div>`)}
-            </div>
           </div>
           <div class="ins-row">
             <span class="rlbl">backdrop</span>
@@ -465,9 +463,7 @@
             </label>
           </div>
           <div class="ins-row">
-            <span class="synchint">When on, viewers see slides in sync with the presenter and do not have control
-              over manually advancing the slides. Only editors drive the live presentation; the slide each
-              person is editing stays independent.</span>
+            <span class="synchint">Viewers follow the presenter's slide instead of browsing on their own.</span>
           </div>
           ${slide ? html`<div class="ins-row">
             <span class="rlbl">this slide</span>
@@ -512,7 +508,7 @@
       async function refresh() {
         const s = await frame.api("api/state").catch(() => null);
         if (!s) return;
-        setMe(s.me); setShow(s.show); showRef.current = s.show;
+        setMe(s.me); applySpaceChannel(s.me); setShow(s.show); showRef.current = s.show;
         if (typeof s.viewers === "number") setViewerCount(s.viewers);
         if (s.present) sharedPresentRef.current = s.present.index;
         const maxIdx = Math.max(0, s.show.slides.length - 1);
@@ -820,7 +816,7 @@
 
       // ================= VIEWER (read-only) =================
       if (!isEditor) {
-        return html`<div class="app" style=${paletteVars(show)}>
+        return html`<div class="app">
           <div class="topbar">
             <div class="spacer"></div>
             <button class="tbtn primary" title="Present" disabled=${!canPresent} onClick=${enterPresent}><i class="ph-light ph-play"></i></button>
@@ -839,7 +835,7 @@
       }
 
       // ================= EDITOR =================
-      return html`<div class="app" style=${paletteVars(show)}>
+      return html`<div class="app">
         <div class="topbar">
           <button class="tbtn" title="Add heading" onClick=${() => addElement((c) => freshText("heading", W, H, c))}><i class="ph-light ph-text-h-one"></i></button>
           <button class="tbtn" title="Add text" onClick=${() => addElement((c) => freshText("body", W, H, c))}><i class="ph-light ph-text-t"></i></button>

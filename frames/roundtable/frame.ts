@@ -1,27 +1,26 @@
 // ----------------------------------------------------------------------------------------
 // Roundtable — Per-placement private discussion + two prioritized lists.
 //
-// Auth model (two independent owner toggles):
+// Auth model (one owner toggle):
 //   - `public_to_space_viewers` — when true, Viewer-role members of the space (members
 //     with is_sfi_editor=false) are opted into full participation: chat, add items, vote,
 //     delete their own. Editors / owners (is_sfi_editor=true) participate regardless.
 //     When OFF, Viewer-role members can still READ this Roundtable (they're members of
 //     the space) but cannot mutate anything.
-//   - `public_read_view` — when true, even non-members (empty user_id from anonymous FAT
-//     visitors, or signed-in users whose only access is a bookmark to this SFI) can READ
-//     the channel — no mutations of any kind.
+//
+//   Reads are open to every viewer who reaches the frame — whether a non-member can
+//   reach it at all is the platform's call (public sharing on the placement), never
+//   the frame's.
 //
 //   Resolution:
 //     canParticipate = isSfiEditor OR (publicToSpaceViewers AND isSfiMember)
-//     canRead        = canParticipate OR isSfiMember OR publicReadView
-//     /api/state requires canRead. Every mutation route requires canParticipate.
+//     Every mutation route requires canParticipate.
 //     /api/settings additionally requires isOwner.
 //   - Owners can additionally delete anyone's message or item.
 //   - Messages/items/votes live in per-placement LocalTables (encrypted at rest,
 //     host-local, not peer-synced) — each placement is its own roundtable.
 //   - Non-members never participate; the participation toggle only governs Viewer-role
-//     space members, not anonymous / bookmark visitors. Anonymous read access is the
-//     separate `public_read_view` toggle.
+//     space members, not anonymous / bookmark visitors.
 //
 // Realtime: chat, item, vote, and pref changes are broadcast via pushToInstance(sfi_id, …);
 // framecore handles viewer tracking, including anonymous read-only viewers.
@@ -37,7 +36,6 @@ import {
 // ----------------------------------------------------------------------------------------
 type Prefs = {
   title: string;
-  theme: string;
   positive_label: string;
   negative_label: string;
   // When true, Viewer-role space members (members of this space whose role is below
@@ -45,22 +43,13 @@ type Prefs = {
   // default — Viewers can still READ the channel because they're space members, but
   // can't mutate anything. Editors/Owners participate regardless of this toggle.
   public_to_space_viewers: boolean;
-  // When true, non-members (anonymous FAT visitors AND signed-in users whose only
-  // access is a bookmark to this SFI) can read the channel in a fully read-only view.
-  // They can never post, vote, or delete. Default off. Combine with
-  // `public_to_space_viewers` to open up writes to Viewer-role members while keeping a
-  // read-only window for outsiders.
-  public_read_view: boolean;
 };
 const DEFAULT_PREFS: Prefs = {
   title: "Roundtable",
-  theme: "c1",
   positive_label: "Positives",
   negative_label: "Negatives",
   public_to_space_viewers: false,
-  public_read_view: false,
 };
-const VALID_THEMES = new Set(["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10", "c11", "c12"]);
 
 const allPrefs: Record<string, Prefs> = loadJsonFile(import.meta.url, "prefs.json", {});
 function getPrefs(sfiId: string): Prefs {
@@ -200,22 +189,14 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
     });
   }
 
-  // Auth — two-tier:
-  //   canParticipate: full read+write (chat, items, votes). SFI editors (role > Viewer)
-  //     always; Viewer-role space members when the owner has turned on
-  //     `public_to_space_viewers`. Non-members never participate.
-  //   canRead:        canParticipate OR isSfiMember (so Viewer-role members can always
-  //                   follow along read-only) OR (public_read_view AND any visitor).
-  // Mutation routes additionally short-circuit with `if (!canParticipate)` below so a
-  // read-only viewer that tries to POST gets a clean 403 instead of an unauthorized write.
+  // Participation auth: SFI editors (role > Viewer) always; Viewer-role space members
+  // when the owner has turned on `public_to_space_viewers`. Non-members never
+  // participate. Reads are open to every viewer who reaches the frame. Mutation routes
+  // short-circuit with `if (!canParticipate)` below so a read-only viewer that tries
+  // to POST gets a clean 403 instead of an unauthorized write.
   const authPrefs = sfiId ? getPrefs(sfiId) : DEFAULT_PREFS;
   const publicToSpaceViewers = authPrefs.public_to_space_viewers === true;
-  const publicReadView = authPrefs.public_read_view === true;
   const canParticipate = isSfiEditor || (publicToSpaceViewers && isSfiMember);
-  const canRead = canParticipate || isSfiMember || publicReadView;
-  if (!canRead && reqPath.startsWith("/api/")) {
-    return jsonReply(replyPort, 403, { error: "private frame" });
-  }
 
   if (reqPath.startsWith("/api/")) {
     if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
@@ -241,8 +222,8 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
       });
     }
 
-    // Every mutation route below requires canParticipate. Read-only viewers (public_read_view
-    // with no participation rights) get a single uniform 403 here instead of per-route checks.
+    // Every mutation route below requires canParticipate. Read-only viewers get a
+    // single uniform 403 here instead of per-route checks.
     if (!canParticipate) {
       return jsonReply(replyPort, 403, { error: "read-only access" });
     }
@@ -344,18 +325,15 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
     // -------- OWNER SETTINGS --------
     if (reqPath === "/api/settings" && method === "POST") {
       if (!isOwner) return jsonReply(replyPort, 403, { error: "owner only" });
-      const v = parseJsonBody<{ title?: unknown; theme?: unknown; positive_label?: unknown; negative_label?: unknown; public_to_space_viewers?: unknown; public_read_view?: unknown }>(body);
+      const v = parseJsonBody<{ title?: unknown; positive_label?: unknown; negative_label?: unknown; public_to_space_viewers?: unknown }>(body);
       const title = sanitizeText(v?.title, 80) || DEFAULT_PREFS.title;
-      const themeRaw = sanitizeText(v?.theme, 4);
       const positiveLabel = sanitizeText(v?.positive_label, 40) || DEFAULT_PREFS.positive_label;
       const negativeLabel = sanitizeText(v?.negative_label, 40) || DEFAULT_PREFS.negative_label;
       const next: Prefs = {
         title,
-        theme: VALID_THEMES.has(themeRaw) ? themeRaw : DEFAULT_PREFS.theme,
         positive_label: positiveLabel,
         negative_label: negativeLabel,
         public_to_space_viewers: v?.public_to_space_viewers === true,
-        public_read_view: v?.public_read_view === true,
       };
       setPrefs(sfiId, next);
       pushToInstance(sfiId, { type: "rt_prefs", sfi_id: sfiId, prefs: next });

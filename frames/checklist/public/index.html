@@ -6,7 +6,7 @@
   <title>Checklist</title>
   <link rel="stylesheet" href="dyn/frame-prefs.css">
   <style>
-    :root { --ch: var(--os-c1); }          /* frame accent: teal (matches the in-progress state) */
+    :root { --ch: var(--os-c1); --state-progress: var(--os-c1); }   /* --ch follows the space channel at runtime; in-progress stays teal */
     * { box-sizing: border-box; }
     html, body { height: 100%; }
     body {
@@ -20,18 +20,21 @@
     }
 
     .header { display: flex; align-items: center; gap: var(--os-sp-sm); }
-    .header i { font-size: 20px; color: var(--ch); }
+    .header i {
+      font-size: 20px; color: var(--ch);
+      display: inline-flex; width: 24px; height: 24px;
+      align-items: center; justify-content: center; line-height: 1;
+    }
     .header h1 { margin: 0; font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); }
     .header .mode {
       margin-left: auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
-      font-family: var(--os-font-mono); text-transform: lowercase; white-space: nowrap;
+      font-feature-settings: 'tnum' 1; text-transform: lowercase; white-space: nowrap;
     }
 
     .banner {
       display: flex; align-items: center; gap: var(--os-sp-xs);
-      background: color-mix(in srgb, var(--os-c1-muted) 30%, transparent);
-      border: 1px solid var(--os-c1-muted); border-radius: var(--os-radius-md);
-      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-c1);
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-text-secondary);
     }
 
     .list { display: flex; flex-direction: column; gap: 2px; }
@@ -63,11 +66,11 @@
     .status:active:not(:disabled) { transform: scale(0.88); }
     .status:disabled { cursor: default; }
     .status.s0 { color: var(--os-text-subtle); }
-    .status.s1 { color: var(--os-c1); }
+    .status.s1 { color: var(--state-progress); }
     .status.s2 { color: var(--os-cSuccess); }
 
     .text { flex: 1 1 auto; min-width: 0; font-size: var(--os-fs-base); }
-    .text.s1 { color: var(--os-c1); }
+    .text.s1 { color: var(--state-progress); }
     .text.s2 { color: var(--os-text-muted); }
     .text.s2 input {text-decoration: line-through;}
     .text.s2 .static {text-decoration: line-through;}
@@ -75,13 +78,12 @@
       width: 100%; font: inherit; color: inherit; background: transparent;
       border: 0; border-radius: var(--os-radius-sm); padding: 2px 4px; outline: none;
     }
-    .text input:focus { background: var(--os-bg-surface); box-shadow: 0 0 0 2px var(--ch); }
+    .text input:focus { background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color); }
     .text .static { padding: 2px 4px; word-break: break-word; }
     .by {
       padding: 0 4px; margin-top: 1px; font-size: var(--os-fs-2xs);
       font-weight: var(--os-weight-normal); color: var(--os-text-subtle); word-break: break-word;
     }
-    .by.s2 { font-style: italic; }
 
     .trash {
       flex: 0 0 auto; background: none; border: 0; cursor: pointer; padding: 4px;
@@ -97,7 +99,7 @@
     .new {
       display: flex; align-items: center; gap: var(--os-sp-sm);
       padding: var(--os-sp-sm); border-radius: var(--os-radius-md);
-      border: 1px dashed var(--os-border-color);
+      border: 1px solid var(--os-border-color-subtle);
     }
     .new i { color: var(--os-text-subtle); font-size: 20px; line-height: 0; }
     .new input {
@@ -111,7 +113,7 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush } from "/lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "/lib/js/framelib.js";
 
     const ICONS = ["ph-circle", "ph-circle-half", "ph-check-circle"];
     const NEXT  = { 0: 1, 1: 2, 2: 0 };
@@ -140,7 +142,10 @@
         setItems(r.items || []);
       }
       useEffect(() => {
-        frame.api("api/whoami").then(setMe).catch(() => setMe({}));
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
         refresh();
       }, []);
       useFramePush({ checklist_changed: refresh });

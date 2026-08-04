@@ -22,12 +22,17 @@
       </button>
     </nav>
     <div class="header-actions">
-      <span id="weather-chip" class="weather-chip hidden"></span>
       <button id="settings-btn" class="ghost" title="Settings">
         <i class="ph-light ph-gear icon-sm"></i>
       </button>
     </div>
   </header>
+
+  <!-- The frame's one reading: the best market window, spoken -->
+  <div id="reading" class="reading hidden">
+    <p id="reading-line" class="reading-line"></p>
+    <div class="reading-meta"><span id="reading-dot" class="reading-dot"></span><span id="reading-meta-text"></span></div>
+  </div>
 
   <p id="setup-note" class="muted note hidden">
     <i class="ph-light ph-info icon-sm"></i>
@@ -38,7 +43,7 @@
   <section id="events-section" class="events-section hidden">
     <p id="events-empty" class="muted note hidden">
       <i class="ph-light ph-calendar-blank icon-sm"></i>
-      No events yet — open settings to add weekly events.
+      No events yet. Open settings to add weekly events.
     </p>
     <div id="events-grid" class="events-grid"></div>
   </section>

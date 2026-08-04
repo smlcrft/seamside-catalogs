@@ -1,12 +1,13 @@
 {
     "name": "Discussion Channel",
-    "description": "A per-placement realtime chat channel. Members chat, react with Phosphor Light icons, and delete their own messages; owners can rename the channel, pick a theme, and flip two access toggles: let Viewer-role members participate, and open a public read-only view for anyone with the link.",
+    "description": "A per-placement realtime chat channel. Members chat, react with Phosphor Light icons, and delete their own messages; owners can rename the channel, pick a theme, and choose whether Viewer-role members can participate. Non-members, including anyone you share the frame with publicly, read the channel live without posting.",
     "frame_type": "Tandem",
+    "tags": ["community", "chat"],
     "permissions": {
         "net": []
     },
     "created_at": "2026-05-01T00:00:00Z",
-    "modified_at": "2026-07-17T20:12:56Z",
+    "modified_at": "2026-08-04T06:00:00Z",
     "app_version_min": "0.1.12",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,

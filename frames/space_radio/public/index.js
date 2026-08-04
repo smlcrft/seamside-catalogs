@@ -9,12 +9,12 @@
 // via framelib (frame.localStorageSetItem/GetItem) as a single JSON entry. It never
 // travels through the backend and is not synced across viewers.
 // ----------------------------------------------------------------------------------------
-import { frame } from "/lib/js/framelib.js";
+import { frame, applyChannel } from "/lib/js/framelib.js";
 
 (() => {
   const app = document.getElementById("app");
   const peer = window.__peer || {};
-  const isSfiMember = !!peer.is_sfi_member;
+  let canEdit = false;
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -69,27 +69,9 @@ import { frame } from "/lib/js/framelib.js";
   // ---------------------------------------------------------------------------------------
   // Boot
   // ---------------------------------------------------------------------------------------
-  function renderPrivate() {
-    app.className = "sr-private";
-    app.innerHTML = `
-      <i class="ph-light ph-radio"></i>
-      <div class="sr-private-title">Space Radio</div>
-      <div class="sr-private-sub">This radio is private to the space. Ask the owner to invite you to the space to listen along.</div>
-    `;
-  }
-
   async function load() {
-    if (!isSfiMember) { renderPrivate(); return; }
-    let data;
-    try {
-      data = await api("api/state");
-    } catch (err) {
-      if (String(err && err.message || "").indexOf("private frame") >= 0) {
-        renderPrivate();
-        return;
-      }
-      throw err;
-    }
+    const data = await api("api/state");
+    canEdit = data.can_edit === true;
     stations = Array.isArray(data.stations) ? data.stations : [];
     stationById = new Map(stations.map((s) => [s.id, s]));
     playstate = { ...playstate, ...(data.playstate || {}) };
@@ -131,8 +113,8 @@ import { frame } from "/lib/js/framelib.js";
   // ---------------------------------------------------------------------------------------
   function renderShell() {
     app.className = "sr-root";
+    if (peer.space_color) applyChannel(app, peer.space_color);
     app.innerHTML = `
-      <div class="sr-accent"></div>
       <div class="sr-topline">
         <span class="sr-title"><i class="ph-light ph-radio"></i> Space Radio</span>
         <span class="sr-spacer"></span>
@@ -157,15 +139,15 @@ import { frame } from "/lib/js/framelib.js";
           <button class="sr-volup"  id="sr-volup"  title="volume up"     aria-label="volume up"><i class="ph-light ph-plus"></i></button>
         </div>
       </div>
-      <div class="sr-footer">play is shared — volume is yours</div>
+      <div class="sr-footer">play is shared · volume is yours</div>
       <audio id="sr-audio" preload="none"></audio>
     `;
 
-    // Member-only: enable transport. Non-members already get the renderPrivate() branch
-    // before we get here, but keep this explicit so future read-only modes are easy to add.
+    // The dial is editor-only; everyone else gets the listen-along view (transport
+    // disabled, audio still plays what the space is playing).
     const sel = document.getElementById("sr-station");
-    sel.disabled = !isSfiMember;
-    document.getElementById("sr-play").disabled = !isSfiMember;
+    sel.disabled = !canEdit;
+    document.getElementById("sr-play").disabled = !canEdit;
 
     // Once <audio> emits `playing`, mark the session as autoplay-allowed and clear any
     // leftover hint. Subsequent play() rejections must then be non-autoplay causes, so
@@ -215,7 +197,7 @@ import { frame } from "/lib/js/framelib.js";
     if (!el) return;
     if (!playstate.station_id) {
       el.innerHTML = `<div class="sr-station-name">No station selected</div>
-                      <div class="sr-by">${isSfiMember ? "pick a station to play it for everyone" : ""}</div>`;
+                      <div class="sr-by">${canEdit ? "pick a station to play it for everyone" : ""}</div>`;
       return;
     }
     const s = stationById.get(playstate.station_id);
@@ -252,7 +234,7 @@ import { frame } from "/lib/js/framelib.js";
   function wireDropdown() {
     const sel = document.getElementById("sr-station");
     sel.addEventListener("change", async () => {
-      if (!isSfiMember) return;
+      if (!canEdit) return;
       const id = sel.value || null;
       // Changing the station auto-starts playback (the natural expectation for radio).
       // Empty selection clears + stops.
@@ -269,7 +251,7 @@ import { frame } from "/lib/js/framelib.js";
   function wirePlay() {
     const btn = document.getElementById("sr-play");
     btn.addEventListener("click", async () => {
-      if (!isSfiMember) return;
+      if (!canEdit) return;
       if (!playstate.station_id) return;
       const nextPlaying = !playstate.playing;
       try {

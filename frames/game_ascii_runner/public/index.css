@@ -5,9 +5,11 @@
 }
 
 body {
-  font-family: 'Courier New', monospace;
-  background: var(--os-bg, #1a1a2e);
-  color: var(--os-fg, #eee);
+  font-family: var(--os-font-mono, 'Courier New', monospace);
+  /* Deliberately dark: this frame commits to its arcade identity (frame-prefs
+     would resolve --os-bg to the cream ground, which is wrong under this game). */
+  background: #1a1a2e;
+  color: #eee;
   overflow: hidden;
   user-select: none;
 }
@@ -41,6 +43,7 @@ body {
 #health-display {
   font-size: 1.2rem;
 }
+#health { color: #ff6b6b; letter-spacing: 2px; }
 
 #speed-display {
   color: #00ff88;
@@ -66,7 +69,8 @@ body {
 }
 
 #sky-layer::before {
-  content: '☀️';
+  content: '☀';
+  color: #f5b820;
 }
 
 #game-world {
@@ -89,7 +93,9 @@ body {
 .ground-dec {
   position: absolute;
   font-size: 12px;
-  opacity: 0.6;
+  font-weight: bold;
+  color: #2e7d32;
+  opacity: 0.8;
 }
 
 #obstacle-layer {
@@ -103,7 +109,9 @@ body {
 .obstacle {
   position: absolute;
   font-size: 28px;
-  filter: drop-shadow(2px 2px 2px rgba(0, 0, 0, 0.3));
+  font-weight: bold;
+  color: #2f4f4f;
+  filter: drop-shadow(2px 2px 2px rgba(0, 0, 0, 0.25));
   transition: none;
 }
 
@@ -124,8 +132,11 @@ body {
 }
 
 .player-sprite {
-  font-size: 32px;
-  filter: drop-shadow(2px 2px 2px rgba(0, 0, 0, 0.3));
+  font-size: 26px;
+  font-weight: bold;
+  color: #16213e;
+  white-space: nowrap;
+  filter: drop-shadow(2px 2px 2px rgba(0, 0, 0, 0.25));
 }
 
 #player.running .player-sprite {
@@ -139,7 +150,7 @@ body {
 
 #player.ducking .player-sprite {
   animation: none;
-  font-size: 28px;
+  font-size: 22px;
 }
 
 #player.hit {
@@ -175,20 +186,20 @@ body {
   margin-top: 15px;
   padding: 10px 20px;
   background: rgba(0, 0, 0, 0.3);
-  border-radius: 20px;
+  border-radius: 8px;
   font-size: 0.9rem;
   color: #aaa;
 }
 
 .key {
   display: inline-block;
-  background: var(--os-cAccent, #444);
-  color: white;
+  background: #333350;
+  color: #eee;
   padding: 3px 10px;
   border-radius: 5px;
   font-weight: bold;
   margin: 0 3px;
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
 /* Start Screen */
@@ -212,21 +223,18 @@ body {
 
 #start-content, #game-over-content {
   text-align: center;
-  padding: 30px;
-  background: linear-gradient(180deg, #2a2a4a 0%, #1a1a2e 100%);
-  border-radius: 15px;
-  border: 2px solid var(--os-cAccent, #4a9eff);
-  box-shadow: 0 0 30px rgba(74, 158, 255, 0.3);
+  padding: 32px 36px;
+  background: #1e1e34;
+  border-radius: 12px;
+  border: 1px solid rgba(78, 205, 196, 0.45);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
 #start-content h1, #game-over-content h1 {
   font-size: 2rem;
   margin-bottom: 15px;
-  background: linear-gradient(90deg, #ffd700, #ff6b6b, #4ecdc4);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  text-shadow: none;
+  color: #ffd700;
+  letter-spacing: 0.06em;
 }
 
 .instructions {
@@ -237,26 +245,27 @@ body {
 
 #start-btn, #restart-btn {
   margin-top: 20px;
-  padding: 15px 40px;
-  font-size: 1.2rem;
-  font-family: 'Courier New', monospace;
+  padding: 12px 36px;
+  font-size: 1.1rem;
+  font-family: var(--os-font-mono, 'Courier New', monospace);
   font-weight: bold;
-  background: linear-gradient(180deg, #4ecdc4 0%, #44a08d 100%);
-  color: white;
+  letter-spacing: 0.08em;
+  background: #4ecdc4;
+  color: #10241f;
   border: none;
-  border-radius: 30px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 15px rgba(78, 205, 196, 0.4);
+  transition: transform 80ms ease, box-shadow 80ms ease, background 120ms ease;
+  box-shadow: 0 4px 0 #2c8d84;
 }
 
 #start-btn:hover, #restart-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(78, 205, 196, 0.6);
+  background: #5fd9d0;
 }
 
 #start-btn:active, #restart-btn:active {
-  transform: translateY(0);
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #2c8d84;
 }
 
 .high-score-start {

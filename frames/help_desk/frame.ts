@@ -133,14 +133,10 @@ async function ensureDefaultFields(settings: Settings, fields: Tbl): Promise<voi
 }
 
 const MAX_DESK_TITLE = 120;
-const MAX_DESK_SUBTITLE = 240;
 
-/// This placement's public heading ("" = unset; UIs fall back to their defaults).
-async function getMeta(settings: Settings): Promise<{ title: string; subtitle: string }> {
-  return {
-    title: (await settings.get<string>("title", "")) || "",
-    subtitle: (await settings.get<string>("subtitle", "")) || "",
-  };
+/// This placement's display name ("" = unset; UIs fall back to their defaults).
+async function getTitle(settings: Settings): Promise<string> {
+  return (await settings.get<string>("title", "")) || "";
 }
 
 // Route ids are opaque row-id strings (hex); a path segment must not contain '/'.
@@ -185,10 +181,10 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     const settings    = frameSettings(sfiId);
 
     // ----- public: fetch the form field config for this placement (anon or admin).
-    // Includes the placement's heading (title + subtitle) so the public view can show it.
+    // Includes the placement's display title so the public view can show it.
     if (reqPath === "/api/config" && method === "GET") {
       await ensureDefaultFields(settings, fieldsTbl);
-      return send({ fields: await listFields(fieldsTbl), ...(await getMeta(settings)) });
+      return send({ fields: await listFields(fieldsTbl), title: await getTitle(settings) });
     }
 
     // ----- public: anonymous submission endpoint.
@@ -244,23 +240,15 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
         return send({ ok: true });
       }
 
-      // Set this placement's public heading — title and/or subtitle (any space member;
-      // "" clears either back to its default). Shown atop the public view and mirrored
-      // in the admin header.
-      if (reqPath === "/api/admin/meta" && method === "PUT") {
+      // Set this placement's display name (any space member; "" clears it back
+      // to the defaults). Shown as the admin h1 and atop the public view.
+      if (reqPath === "/api/admin/title" && method === "PUT") {
         const data = parseJsonBody(body);
-        if (!data || (typeof data.title !== "string" && typeof data.subtitle !== "string")) {
-          return send({ error: "title or subtitle required (string)" }, 400);
-        }
-        if (typeof data.title === "string") {
-          await settings.set("title", data.title.trim().slice(0, MAX_DESK_TITLE));
-        }
-        if (typeof data.subtitle === "string") {
-          await settings.set("subtitle", data.subtitle.trim().slice(0, MAX_DESK_SUBTITLE));
-        }
-        const meta = await getMeta(settings);
-        pushToInstance(sfiId, { type: "hd_meta_changed", sfi_id: sfiId, ...meta });
-        return send({ ok: true, ...meta });
+        if (!data || typeof data.title !== "string") return send({ error: "title required (string)" }, 400);
+        const title = data.title.trim().slice(0, MAX_DESK_TITLE);
+        await settings.set("title", title);
+        pushToInstance(sfiId, { type: "hd_title_changed", sfi_id: sfiId, title });
+        return send({ ok: true, title });
       }
 
       // Inbox listing.

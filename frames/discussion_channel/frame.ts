@@ -1,19 +1,19 @@
 // ----------------------------------------------------------------------------------------
 // Discussion Channel — Per-placement realtime chat + two owner access toggles.
 //
-// Auth model (mirrors Roundtable's two independent owner toggles):
+// Auth model (mirrors Roundtable's owner toggle):
 //   - `public_to_space_viewers` — when true, Viewer-role members of the space (members
 //     with is_sfi_editor=false) are opted into full participation: chat, react, delete
 //     their own. Editors / owners participate regardless. When OFF, Viewer-role members
 //     can still READ the channel (they're members) but cannot mutate anything.
-//   - `public_read_view` — when true, even non-members (anonymous FAT visitors, or
-//     signed-in users whose only access is a bookmark to this SFI) can READ the channel —
-//     no mutations of any kind.
+//
+//   Reads are open to every viewer who reaches the frame — whether a non-member can
+//   reach it at all is the platform's call (public sharing on the placement), never
+//   the frame's.
 //
 //   Resolution:
 //     canParticipate = isSfiEditor OR (publicToSpaceViewers AND isSfiMember)
-//     canRead        = canParticipate OR isSfiMember OR publicReadView
-//     /api/state requires canRead. Every mutation route requires canParticipate.
+//     Every mutation route requires canParticipate.
 //     /api/settings additionally requires isOwner.
 //   - Owners can additionally delete anyone's message.
 //   - Messages/reactions live in per-placement LocalTables (encrypted at rest, host-local,
@@ -29,23 +29,18 @@ import {
 } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
-// PER-PLACEMENT PREFS (channel name + theme color), stored as JSON
+// PER-PLACEMENT PREFS (channel name), stored as JSON
 // ----------------------------------------------------------------------------------------
 type Prefs = {
   title: string;
-  theme: string;
   // When true, Viewer-role space members can fully participate (chat, react,
   // delete their own). Off by default — Viewers still read as members.
   public_to_space_viewers: boolean;
-  // When true, non-members (anon FAT visitors and bookmark-only users) can
-  // read the channel in a fully read-only view. Default off.
-  public_read_view: boolean;
 };
 const DEFAULT_PREFS: Prefs = {
-  title: "Discussion", theme: "c1",
-  public_to_space_viewers: false, public_read_view: false,
+  title: "Discussion",
+  public_to_space_viewers: false,
 };
-const VALID_THEMES = new Set(["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"]);
 
 const allPrefs: Record<string, Prefs> = loadJsonFile(import.meta.url, "prefs.json", {});
 function getPrefs(sfiId: string): Prefs {
@@ -155,15 +150,11 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
     });
   }
 
-  // Two-tier auth (mirrors Roundtable — see header). Read: members always, plus
-  // anyone when public_read_view. Participate: editors always, plus Viewer-role
-  // members when public_to_space_viewers. Fail closed for everyone else.
+  // Participation auth (mirrors Roundtable — see header): editors always, plus
+  // Viewer-role members when public_to_space_viewers. Reads are open to every
+  // viewer who reaches the frame.
   const authPrefs = sfiId ? getPrefs(sfiId) : DEFAULT_PREFS;
   const canParticipate = peer.is_sfi_editor || (authPrefs.public_to_space_viewers === true && peer.is_sfi_member);
-  const canRead = canParticipate || peer.is_sfi_member || authPrefs.public_read_view === true;
-  if (!canRead && reqPath.startsWith("/api/")) {
-    return jsonReply(replyPort, 403, { error: "private channel" });
-  }
 
   if (reqPath.startsWith("/api/")) {
     if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
@@ -186,8 +177,8 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
     }
 
     // Every mutation route below requires canParticipate — read-only viewers
-    // (members without participation, or public_read_view outsiders) get one
-    // uniform 403 here instead of per-route checks.
+    // (members without participation, and non-member visitors) get one uniform
+    // 403 here instead of per-route checks.
     if (!canParticipate) {
       return jsonReply(replyPort, 403, { error: "read-only access" });
     }
@@ -247,17 +238,13 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
     // read/write, so they're strictly owner-controlled, like Roundtable's).
     if (reqPath === "/api/settings" && method === "POST") {
       if (!isOwner) return jsonReply(replyPort, 403, { error: "owner only" });
-      const v = parseJsonBody<{ title?: unknown; theme?: unknown; public_to_space_viewers?: unknown; public_read_view?: unknown }>(body);
+      const v = parseJsonBody<{ title?: unknown; public_to_space_viewers?: unknown }>(body);
       const current = getPrefs(sfiId);
       const title = sanitizeText(v?.title, 80) || current.title || DEFAULT_PREFS.title;
-      const themeRaw = sanitizeText(v?.theme, 4);
       const next: Prefs = {
         title,
-        theme: VALID_THEMES.has(themeRaw) ? themeRaw : current.theme,
         public_to_space_viewers: v?.public_to_space_viewers !== undefined
           ? v.public_to_space_viewers === true : current.public_to_space_viewers,
-        public_read_view: v?.public_read_view !== undefined
-          ? v.public_read_view === true : current.public_read_view,
       };
       setPrefs(sfiId, next);
       pushToInstance(sfiId, { type: "dc_prefs", sfi_id: sfiId, prefs: next });

@@ -10,15 +10,13 @@
 <body>
   <main id="app" class="rt-loading"></main>
   <script type="module">
-import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, Editable } from "/lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, Editable, Modal, applyChannel } from "/lib/js/framelib.js";
 
 const peer = window.__peer || {};
 const isSfiMember = !!peer.is_sfi_member;
 const isOwner = !!peer.is_owner;
 const userId = peer.user_id || "";
-
-const THEME_KEYS = ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10", "c11", "c12"];
-const DEFAULT_PREFS = { title: "Roundtable", theme: "c1", positive_label: "Positives", negative_label: "Negatives", public_to_space_viewers: false, public_read_view: false };
+const DEFAULT_PREFS = { title: "Roundtable", positive_label: "Positives", negative_label: "Negatives", public_to_space_viewers: false };
 
 const api = frame.api;
 
@@ -43,46 +41,28 @@ function sortItems(list) {
 }
 
 // =====================================================================================
-// Private notice (anon / non-member)
-// =====================================================================================
-function PrivateNotice({ reason }) {
-  const sub = reason === "anon"
-    ? "This Roundtable is private to its space members. Open it from the Seamside app, or ask the owner to enable read-only public view in this frame's settings."
-    : "This Roundtable is private to its space members. Ask the owner to invite you to the space, or to enable read-only public view in this frame's settings.";
-  return html`<${Fragment}>
-    <i class="ph-light ph-lock-key"></i>
-    <div class="rt-private-title">Private Roundtable</div>
-    <div class="rt-private-sub">${sub}</div>
-  </${Fragment}>`;
-}
-
-// =====================================================================================
 // Settings overlay
 // =====================================================================================
 function SettingsOverlay({ prefs, onClose, onSave }) {
   const [title, setTitle] = useState(prefs.title);
   const [positiveLabel, setPositiveLabel] = useState(prefs.positive_label);
   const [negativeLabel, setNegativeLabel] = useState(prefs.negative_label);
-  const [theme, setTheme] = useState(prefs.theme);
   const [publicToSpaceViewers, setPublicToSpaceViewers] = useState(!!prefs.public_to_space_viewers);
-  const [publicReadView, setPublicReadView] = useState(!!prefs.public_read_view);
 
   const save = () => {
     onSave({
       title: title.trim() || "Roundtable",
-      theme,
       positive_label: positiveLabel.trim() || "Positives",
       negative_label: negativeLabel.trim() || "Negatives",
       public_to_space_viewers: publicToSpaceViewers,
-      public_read_view: publicReadView,
     });
   };
 
-  return html`<div class="rt-settings">
-    <div class="rt-settings-header">
-      <h2>Roundtable settings</h2>
-      <button class="rt-icon-btn" title="close" onClick=${onClose}><i class="ph-light ph-x"></i></button>
-    </div>
+  return html`<${Modal} title="Roundtable settings" onClose=${onClose}
+    actions=${html`
+      <button class="rt-ghost-btn" onClick=${onClose}>Cancel</button>
+      <button class="rt-save" onClick=${save}>Save</button>`}>
+    <div class="rt-settings-fields">
     <label>
       Title
       <input type="text" maxlength="80" placeholder="Roundtable"
@@ -98,37 +78,16 @@ function SettingsOverlay({ prefs, onClose, onSave }) {
       <input type="text" maxlength="40" placeholder="Negatives"
         value=${negativeLabel} onInput=${(e) => setNegativeLabel(e.target.value)} />
     </label>
-    <label>
-      Theme color
-      <div class="rt-themes">
-        ${THEME_KEYS.map((k) => html`<button type="button" key=${k}
-          class=${"rt-theme-swatch " + (k === theme ? "selected" : "")}
-          style=${`background: var(--os-${k});`}
-          title=${k}
-          onClick=${() => setTheme(k)}></button>`)}
-      </div>
-    </label>
-    <label class="rt-toggle-label">
-      <span class="rt-toggle-text">
-        <span class="rt-toggle-title">Let Viewer-role space members contribute</span>
-        <span class="rt-toggle-sub">When on, members of this space whose role is Viewer can chat, add items, and vote — not just read. Editors, Admins, and the Owner always participate; this toggle has no effect on non-members.</span>
+    <label class="rt-check-row">
+      <input type="checkbox" checked=${publicToSpaceViewers}
+        onChange=${(e) => setPublicToSpaceViewers(e.target.checked)} />
+      <span class="rt-check-text">
+        <span class="rt-check-name">Viewer-role members can participate</span>
+        <span class="rt-check-sub">Members marked Viewer can chat, add items, and vote. Off: they read only.</span>
       </span>
-      <button type="button" class="rt-toggle" role="switch" aria-checked=${publicToSpaceViewers ? "true" : "false"}
-        onClick=${() => setPublicToSpaceViewers((v) => !v)}><span class="rt-toggle-thumb"></span></button>
     </label>
-    <label class="rt-toggle-label">
-      <span class="rt-toggle-text">
-        <span class="rt-toggle-title">Allow read-only view by anonymous / web visitors</span>
-        <span class="rt-toggle-sub">When on, anyone with the link — including unauthenticated web visitors — can see this Roundtable in a read-only view. They cannot post, vote, or delete.</span>
-      </span>
-      <button type="button" class="rt-toggle" role="switch" aria-checked=${publicReadView ? "true" : "false"}
-        onClick=${() => setPublicReadView((v) => !v)}><span class="rt-toggle-thumb"></span></button>
-    </label>
-    <div class="rt-settings-actions">
-      <button class="rt-icon-btn" style="padding: 4px 10px;" onClick=${onClose}>Cancel</button>
-      <button class="rt-save" onClick=${save}>Save</button>
     </div>
-  </div>`;
+  </${Modal}>`;
 }
 
 // =====================================================================================
@@ -288,8 +247,6 @@ function Badges({ prefs }) {
   return html`<${Fragment}>
     ${prefs.public_to_space_viewers && html`<span class="rt-badge rt-badge-open"
       title="Viewer-role members of this space can contribute, not just observe."><i class="ph-light ph-users-three"></i>viewers contribute</span>`}
-    ${prefs.public_read_view && html`<span class="rt-badge rt-badge-public"
-      title="Anyone with the link can view this Roundtable in read-only mode."><i class="ph-light ph-globe-hemisphere-west"></i>public</span>`}
   </${Fragment}>`;
 }
 
@@ -299,7 +256,6 @@ function Badges({ prefs }) {
 function App() {
   const [state, setState] = useState(null);
   const [err, setErr] = useState(null);
-  const [privateReason, setPrivateReason] = useState(null);
   const [toast, setToast] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [chatCollapsed, setChatCollapsed] = useState(false);
@@ -317,13 +273,7 @@ function App() {
           canParticipate: !!data.can_participate,
         });
       })
-      .catch((e) => {
-        if (String(e.message || "").indexOf("private frame") >= 0) {
-          setPrivateReason(isSfiMember ? "non-member" : (userId ? "non-member" : "anon"));
-        } else {
-          setErr(e.message || String(e));
-        }
-      });
+      .catch((e) => setErr(e.message || String(e)));
   }, []);
 
   useFramePush({
@@ -360,29 +310,23 @@ function App() {
     return () => clearTimeout(id);
   }, [toast]);
 
-  // Apply theme to host element + lists-all-collapsed class.
+  // The frame follows the space channel.
   useEffect(() => {
-    const root = document.getElementById("app");
-    const t = THEME_KEYS.includes(state?.prefs?.theme) ? state.prefs.theme : "c1";
-    root.style.setProperty("--ch", `var(--os-${t})`);
-    root.style.setProperty("--ch-fg", `var(--os-${t}-fg)`);
-  }, [state?.prefs?.theme]);
+    applyChannel(document.getElementById("app"), peer.space_color);
+  }, []);
 
   useEffect(() => {
     const root = document.getElementById("app");
     if (!root) return;
-    if (privateReason) {
-      root.className = "rt-private";
-    } else if (state) {
+    if (state) {
       root.className = "rt-root" + (listCollapsed.positive && listCollapsed.negative ? " lists-all-collapsed" : "");
     } else {
       root.className = "rt-loading";
     }
-  }, [privateReason, state, listCollapsed]);
+  }, [state, listCollapsed]);
 
   const fail = (label) => (e) => setToast(e.message || (label + " failed"));
 
-  if (privateReason) return html`<${PrivateNotice} reason=${privateReason} />`;
   if (err) return html`failed to load: ${err}`;
   if (!state) return "loading…";
 
@@ -437,7 +381,6 @@ function App() {
   const toggleListCollapsed = (kind) => setListCollapsed((c) => ({ ...c, [kind]: !c[kind] }));
 
   return html`<${Fragment}>
-    <div class="rt-accent"></div>
     <div class="rt-topline">
       <${Editable} class="rt-title-input" maxlength="80" placeholder="Roundtable"
         disabled=${!canEditSettings}

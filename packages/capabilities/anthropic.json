@@ -2,7 +2,7 @@
   "name": "anthropic",
   "description": "Anthropic Claude API — chat completions and text generation",
   "category": "ai",
-  "modified_at": "2026-07-07T00:00:00Z",
+  "modified_at": "2026-08-04T00:00:00Z",
   "source": "local_api",
   "kind": "service",
   "aliases": [
@@ -57,7 +57,7 @@
   "models": {
     "quick": "claude-haiku-4-5-20251001",
     "standard": "claude-sonnet-5",
-    "deep": "claude-opus-4-8"
+    "deep": "claude-opus-5"
   },
   "protocols": {
     "ai_chat": {

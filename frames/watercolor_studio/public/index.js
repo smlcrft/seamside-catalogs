@@ -178,7 +178,6 @@ import { frame, applyChannel } from "/lib/js/framelib.js";
   // --------------------------------------------------------------------------------------
   app.className = "ws-root";
   app.innerHTML = `
-    <div class="ws-accent"></div>
     <div class="ws-stage" id="ws-stage">
       <div class="ws-sheet" id="ws-sheet">
         <svg class="ws-guide" id="ws-guide" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet"></svg>
@@ -196,8 +195,10 @@ import { frame, applyChannel } from "/lib/js/framelib.js";
     </div>
 
     <div class="ws-dock" id="ws-dock">
-      <div class="ws-tools" id="ws-tools"></div>
-      <div class="ws-palette" id="ws-palette"></div>
+      <div class="ws-deck" id="ws-deck">
+        <div class="ws-tools" id="ws-tools"></div>
+        <div class="ws-palette" id="ws-palette"></div>
+      </div>
       ${!canEdit ? `<div class="ws-readonly-tag"><i class="ph-light ph-eye"></i> view only</div>` : ""}
     </div>
   `;
@@ -219,6 +220,7 @@ import { frame, applyChannel } from "/lib/js/framelib.js";
   const liveCtx = live.getContext("2d");
 
   if (isOwner) settingsBtn.hidden = false;
+  if (!canEdit) document.getElementById("ws-deck").style.display = "none";
 
   function applySpaceColor() {
     applyChannel(document.querySelector(".ws-root"), peer.space_color);
@@ -871,12 +873,14 @@ import { frame, applyChannel } from "/lib/js/framelib.js";
     const mixer = document.createElement("div");
     mixer.className = "ws-mixer";
     mixer.innerHTML = `
-      <div class="ws-recipe" id="ws-recipe"></div>
       <div class="ws-well-wrap">
         <div class="ws-well" id="ws-well" title="Active paint"></div>
         <button class="ws-rinse" id="ws-rinse" title="Rinse the well"><i class="ph-light ph-drop"></i></button>
       </div>
-      <div class="ws-water" id="ws-water"></div>
+      <div class="ws-mix-side">
+        <div class="ws-recipe" id="ws-recipe"></div>
+        <div class="ws-water" id="ws-water"></div>
+      </div>
     `;
     paletteEl.appendChild(mixer);
 

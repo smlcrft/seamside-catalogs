@@ -1,8 +1,10 @@
 // ----------------------------------------------------------------------------------------
 // Space Radio — synced, shared web radio player for SFI members.
 //
-// Auth model: only `is_sfi_member` peers can read state or push changes. Non-members and
-// anonymous visitors get a uniform private-frame notice — there is no public toggle,
+// Auth model: reads are open to every viewer who reaches the frame — whether a
+// non-member can reach it at all is the platform's call (public sharing on the
+// placement), never the frame's. A visitor gets a listen-along view: they see and
+// hear what the space is playing but cannot touch the dial. Writes are editor-only,
 // because the experience only makes sense for the group of people sitting in the space.
 //
 // Shared state per placement: { station_id, playing, updated_by_name, updated_at }, stored
@@ -190,10 +192,8 @@ function setPlaystate(sfiId: string, next: Playstate): void {
 self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body, cookies) => {
   const peer = parsePeerInfo(query, cookies);
   const sfiId = peer.sfi_id;
-  const isSfiMember = peer.is_sfi_member;
 
-  // UI shell — served to everyone. Non-members render a private-frame notice client-side
-  // after /api/state returns 403, matching the pattern other private frames use.
+  // UI shell — served to everyone.
   if (reqPath === "/index.html" && method === "GET") {
     // The script is a separate ES module file so it can import /lib/js/framelib.js —
     // inlineJs would flatten the <script type="module"> to a non-module <script>,
@@ -204,17 +204,14 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
     });
   }
 
-  // Member-only API. There's no public-toggle for this frame: a shared audio experience
-  // only meaningfully applies to the people already in the space.
-  if (!isSfiMember && reqPath.startsWith("/api/")) {
-    return jsonReply(replyPort, 403, { error: "private frame" });
-  }
-
   if (reqPath === "/api/state" && method === "GET") {
     if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
     return jsonReply(replyPort, 200, {
       stations: STATIONS,
       playstate: getPlaystate(sfiId),
+      // Editor-only dial. Never gate writes on is_sfi_member — a Viewer-role member
+      // would slip through and be able to change the station for everyone.
+      can_edit: peer.is_sfi_editor,
       me: { user_id: peer.user_id, user_name: peer.user_name, device_id: peer.device_id },
     });
   }
@@ -224,6 +221,7 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
   // the station id. An empty / null station_id explicitly clears the station and forces
   // playing=false (you can't be "playing nothing").
   if (reqPath === "/api/set" && method === "POST") {
+    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
     if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
     const v = parseJsonBody<{ station_id?: unknown; playing?: unknown }>(body);
     const cur = getPlaystate(sfiId);

@@ -1,7 +1,8 @@
 {
     "name": "Garden Gnome",
-    "description": "An at-a-glance helper for home gardeners. Set a location, pick your soil, tick the plants you grow, and Garden Gnome fetches local weather (Open-Meteo, keyless) every 15 minutes — past 5 days plus the next 24 hours — and shows three color-coded dots on a +/- spectrum next to each plant for water, temperature, and sunlight so you know when a plant is being naturally pampered or stressed.",
+    "description": "An at-a-glance helper for home gardeners. Set a location, pick your soil, tick the plants you grow, and Garden Gnome fetches local weather (Open-Meteo, keyless) every 15 minutes — past 5 days plus the next 24 hours — and shows three color-coded dots on a +/- spectrum next to each plant for water, temperature, and sunlight so you know when a plant is being naturally pampered or stressed. Space editors set the garden up; everyone else, including anyone you share the frame with publicly, gets the same read-only board with the location withheld.",
     "frame_type": "Tandem",
+    "tags": ["household", "garden", "weather"],
     "permissions": {
         "net": [
             "api.open-meteo.com",
@@ -11,7 +12,7 @@
     "default_width_px": 560,
     "default_height_px": 640,
     "created_at": "2026-05-06T00:00:00Z",
-    "modified_at": "2026-06-03T17:14:57Z",
+    "modified_at": "2026-08-04T02:00:00Z",
     "app_version_min": "0.1.7",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,

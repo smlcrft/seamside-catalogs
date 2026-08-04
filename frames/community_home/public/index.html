@@ -10,26 +10,12 @@
 <body>
 <main id="app" class="ch-root"></main>
 <script type="module">
-import { frame, html, render, useState, useEffect, useRef, useFramePush, Editable } from "/lib/js/framelib.js";
-
-const ACCENTS = [
-  { id: "c1",  label: "Teal" },
-  { id: "c2",  label: "Red-orange" },
-  { id: "c3",  label: "Purple" },
-  { id: "c4",  label: "Amber" },
-  { id: "c5",  label: "Green" },
-  { id: "c6",  label: "Mauve" },
-  { id: "c7",  label: "Blue-grey" },
-  { id: "c8",  label: "Warm orange" },
-  { id: "c9",  label: "Citrine" },
-  { id: "c10", label: "Plum" },
-  { id: "c11", label: "Indigo" },
-  { id: "c12", label: "Sunset" },
-];
+import { frame, html, render, useState, useEffect, useRef, useFramePush, Editable, applyChannel } from "/lib/js/framelib.js";
 
 const peer = window.__peer || {};
+if (peer.space_color) applyChannel(document.body, peer.space_color);
 const me = {
-  is_anon: peer.is_anon || !peer.user_id,
+  can_edit: !!peer.is_sfi_editor,
   sfi_id: peer.sfi_id || new URLSearchParams(location.search).get("sfi") || "",
 };
 
@@ -69,8 +55,8 @@ function App() {
   if (err) return html`<div class="ch-loading center">failed to load: ${err}</div>`;
   if (!page) return html`<div class="ch-loading center">loading…</div>`;
 
-  const view = (me.is_anon || mode === "preview")
-    ? html`<${PublicView} page=${page} mode=${me.is_anon ? "public" : "preview"} onExitPreview=${() => setMode("edit")} />`
+  const view = (!me.can_edit || mode === "preview")
+    ? html`<${PublicView} page=${page} mode=${me.can_edit ? "preview" : "public"} onExitPreview=${() => setMode("edit")} />`
     : html`<${AdminView} page=${page} onPreview=${() => setMode("preview")} onError=${setToast} />`;
 
   return html`
@@ -80,18 +66,17 @@ function App() {
 }
 
 function PublicView({ page, mode, onExitPreview }) {
-  const accent = page.accent || "c1";
   const blocks = (page.blocks || []).map(b => html`<${PublicBlock} block=${b} key=${b.id} />`).filter(Boolean);
   return html`
     ${mode === "preview" && html`
       <div class="ch-preview-bar">
         <span class="muted"><i class="ph-light ph-eye icon-sm"></i> Preview — this is what visitors see</span>
         <button class="ghost" onClick=${onExitPreview}>
-          <i class="ph-light ph-arrow-left icon-sm"></i> back to edit
+          <i class="ph-light ph-arrow-left icon-sm"></i> Back to edit
         </button>
       </div>
     `}
-    <div class="ch-public" style=${`--ch: var(--os-${accent});`}>
+    <div class="ch-public">
       <article class="ch-page">
         <header class="ch-hero">
           <h1>${page.title || "Untitled"}</h1>
@@ -166,7 +151,7 @@ function AdminView({ page, onPreview, onError }) {
   };
 
   return html`
-    <section class="ch-admin" style=${`--ch: var(--os-${page.accent || "c1"});`}>
+    <section class="ch-admin">
       <header class="ch-admin-header">
         <h1><i class="ph-light ph-browsers icon-md"></i> Community Home</h1>
         <div class="row" style="gap: var(--os-sp-sm);">
@@ -188,19 +173,6 @@ function AdminView({ page, onPreview, onError }) {
               value=${page.tagline} onSave=${(v) => savePage({ tagline: v })} />
           </div>
           <div class="ch-edit-block">
-            <label>Accent color</label>
-            <div class="ch-accents">
-              ${ACCENTS.map((a) => html`
-                <button type="button" key=${a.id}
-                  class=${"ch-accent-swatch " + (page.accent === a.id ? "selected" : "")}
-                  style=${`background: var(--os-${a.id});`} title=${a.label}
-                  onClick=${() => savePage({ accent: a.id })}>
-                  ${page.accent === a.id && html`<i class="ph-light ph-check"></i>`}
-                </button>
-              `)}
-            </div>
-          </div>
-          <div class="ch-edit-block">
             <label>Page content</label>
             <div class="ch-blocks-editor">
               ${blocks.length === 0
@@ -209,13 +181,13 @@ function AdminView({ page, onPreview, onError }) {
             </div>
             <div class="ch-add-btns">
               <button type="button" class="ghost ch-add-btn" onClick=${() => addBlock("section")}>
-                <i class="ph-light ph-plus icon-sm"></i> add section
+                <i class="ph-light ph-plus icon-sm"></i> Add section
               </button>
               <button type="button" class="ghost ch-add-btn" onClick=${() => addBlock("link")}>
-                <i class="ph-light ph-plus icon-sm"></i> add link
+                <i class="ph-light ph-plus icon-sm"></i> Add link
               </button>
               <button type="button" class="ghost ch-add-btn" onClick=${() => addBlock("pub_frame")}>
-                <i class="ph-light ph-plus icon-sm"></i> add public frame
+                <i class="ph-light ph-plus icon-sm"></i> Add public frame
               </button>
             </div>
           </div>

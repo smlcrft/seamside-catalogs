@@ -49,17 +49,20 @@
     /* Month/Week segmented toggle */
     .vtoggle { display: inline-flex; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm); overflow: hidden; flex: 0 0 auto; }
     .vtoggle button {
+      border-radius: 0;
       background: var(--os-bg); border: 0; cursor: pointer; padding: 5px 10px; font: inherit;
       font-size: var(--os-fs-xs); color: var(--os-text-secondary); line-height: 1;
     }
     .vtoggle button + button { border-left: 1px solid var(--os-border-color); }
+    .vtoggle button:active { transform: none; background: var(--os-bg-inset); }
+    .vtoggle button.active:active { background: color-mix(in srgb, var(--ch), var(--os-text) 10%); }
     .vtoggle button.active { background: var(--ch); color: var(--ch-fg); }
 
     /* ---- Month grid ---- */
     .gridwrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: var(--os-sp-xs); }
     .dow {
       display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
-      font-family: var(--os-font-mono); font-size: var(--os-fs-2xs);
+      font-feature-settings: 'tnum' 1; font-size: var(--os-fs-2xs);
       color: var(--os-text-muted); text-transform: uppercase; letter-spacing: 0.04em;
       padding: 0 1px var(--os-sp-2xs);
     }
@@ -94,7 +97,7 @@
     }
     .chip.clickable { cursor: pointer; }
     .chip.clickable:hover { background: var(--ch); color: var(--ch-fg); }
-    .chip .t { color: var(--os-text-muted); font-family: var(--os-font-mono); flex: 0 0 auto; }
+    .chip .t { color: var(--os-text-muted); font-feature-settings: 'tnum' 1; flex: 0 0 auto; }
     .chip.clickable:hover .t { color: var(--ch-fg); }
     .chip .rep, .chip .linkico { font-size: 10px; line-height: 0; opacity: 0.8; flex: 0 0 auto; }
     .chip .lbl { overflow: hidden; text-overflow: ellipsis; }
@@ -109,20 +112,20 @@
       text-align: center; padding: 3px 2px; border-right: 1px solid var(--os-border-color);
       display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0;
     }
-    .wk-dcol .wd { font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); color: var(--os-text-muted); text-transform: uppercase; }
+    .wk-dcol .wd { font-feature-settings: 'tnum' 1; font-size: var(--os-fs-2xs); color: var(--os-text-muted); text-transform: uppercase; }
     .wk-dcol .dn { font-size: var(--os-fs-sm); width: 24px; height: 24px; line-height: 24px; border-radius: var(--os-radius-full); }
     .wk-dcol.today .dn { background: var(--ch); color: var(--ch-fg); font-weight: var(--os-weight-medium); }
     .wk-dcol.today .wd { color: var(--ch); }
 
     .wk-allday { display: grid; grid-template-columns: var(--gutter, 48px) repeat(7, 1fr); border-bottom: 1px solid var(--os-border-color); flex: 0 0 auto; max-height: 64px; overflow-y: auto; }
-    .wk-allday .lbl { font-family: var(--os-font-mono); font-size: 9px; color: var(--os-text-subtle); text-align: right; padding: 3px 4px 0 0; text-transform: uppercase; border-right: 1px solid var(--os-border-color); }
+    .wk-allday .lbl { font-feature-settings: 'tnum' 1; font-size: 9px; color: var(--os-text-subtle); text-align: right; padding: 3px 4px 0 0; text-transform: uppercase; border-right: 1px solid var(--os-border-color); }
     .wk-adcol { border-right: 1px solid var(--os-border-color); padding: 2px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .wk-adcol.editable { cursor: pointer; }
 
     .wk-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
     .wk-grid { display: grid; grid-template-columns: var(--gutter, 48px) repeat(7, 1fr); position: relative; }
     .wk-gutter { position: relative; border-right: 1px solid var(--os-border-color); }
-    .wk-hourlabel { height: var(--hour-px); position: relative; font-family: var(--os-font-mono); font-size: 9px; color: var(--os-text-subtle); text-align: right; padding-right: 4px; }
+    .wk-hourlabel { height: var(--hour-px); position: relative; font-feature-settings: 'tnum' 1; font-size: 9px; color: var(--os-text-subtle); text-align: right; padding-right: 4px; }
     .wk-hourlabel span { position: absolute; right: 4px; top: -6px; }
     .wk-col {
       position: relative; border-right: 1px solid var(--os-border-color);
@@ -138,7 +141,7 @@
     }
     .wk-ev.clickable { cursor: pointer; }
     .wk-ev.clickable:hover { filter: brightness(0.97); }
-    .wk-ev .et { font-family: var(--os-font-mono); font-size: 9px; color: var(--os-text-muted); }
+    .wk-ev .et { font-feature-settings: 'tnum' 1; font-size: 9px; color: var(--os-text-muted); }
     .wk-ev .en { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wk-ev .linkico { font-size: 9px; opacity: 0.8; }
     .nowline { position: absolute; left: 0; right: 0; height: 0; border-top: 1.5px solid var(--os-cError); z-index: 3; pointer-events: none; }
@@ -150,27 +153,23 @@
     .ag-empty i { font-size: 28px; color: var(--ch); }
     .ag-day { margin-bottom: var(--os-sp-sm); }
     .ag-date { display: flex; align-items: baseline; gap: 6px; padding: 2px 0 var(--os-sp-2xs); border-bottom: 1px solid var(--os-border-color); margin-bottom: var(--os-sp-2xs); }
-    .ag-date .dow2 { font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); color: var(--os-text-muted); text-transform: uppercase; }
+    .ag-date .dow2 { font-feature-settings: 'tnum' 1; font-size: var(--os-fs-2xs); color: var(--os-text-muted); text-transform: uppercase; }
     .ag-date .num2 { font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium); }
     .ag-date.is-today .num2 { color: var(--ch); }
     .ag-row { display: flex; align-items: center; gap: var(--os-sp-xs); padding: 4px 6px; border-radius: var(--os-radius-sm); border-left: 2px solid var(--ch); background: var(--os-bg-surface); margin-bottom: 2px; cursor: default; }
     .ag-row.clickable { cursor: pointer; }
     .ag-row.clickable:hover { background: var(--os-bg-subtle); }
-    .ag-row .at { font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); color: var(--os-text-muted); flex: 0 0 auto; min-width: 52px; }
+    .ag-row .at { font-feature-settings: 'tnum' 1; font-size: var(--os-fs-2xs); color: var(--os-text-muted); flex: 0 0 auto; min-width: 52px; }
     .ag-row .atitle { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ag-row .rep, .ag-row .linkico { color: var(--os-text-muted); font-size: 13px; line-height: 0; flex: 0 0 auto; }
 
-    /* ---- Private / locked panel ---- */
-    .locked { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--os-sp-sm); color: var(--os-text-muted); text-align: center; padding: var(--os-sp-lg); }
-    .locked i { font-size: 34px; color: var(--ch); }
-    .locked .big { font-size: var(--os-fs-md); color: var(--os-text); }
 
     /* ---- Modal forms ---- */
     .form { display: flex; flex-direction: column; gap: var(--os-sp-sm); min-width: min(340px, 78vw); }
     .field { display: flex; flex-direction: column; gap: var(--os-sp-2xs); }
     .field > label {
-      font-family: var(--os-font-mono); font-size: var(--os-fs-2xs); text-transform: uppercase;
-      letter-spacing: 0.05em; color: var(--os-text-muted);
+      font-size: 11px; font-weight: var(--os-weight-semibold); text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--os-text-muted);
     }
     .form input[type=text], .form input[type=url], .form input[type=date], .form input[type=time], .form textarea, .form select {
       width: 100%; font: inherit; font-size: var(--os-fs-sm); color: var(--os-text);
@@ -178,7 +177,7 @@
       border-radius: var(--os-radius-sm); padding: var(--os-sp-xs) var(--os-sp-sm);
     }
     .form textarea { min-height: 56px; resize: vertical; }
-    .form input:focus, .form textarea:focus, .form select:focus { outline: none; border-color: var(--ch); background: var(--os-bg-surface); }
+    .form input:focus, .form textarea:focus, .form select:focus { outline: none; border-color: var(--os-text-muted); background: var(--os-bg-surface); }
     .form input:disabled, .form select:disabled { opacity: 0.45; }
     .row2 { display: flex; gap: var(--os-sp-sm); }
     .row2 > .field { flex: 1 1 0; min-width: 0; }
@@ -210,7 +209,6 @@
     .swatch.active { box-shadow: 0 0 0 2px var(--ch); border-color: var(--ch); }
     .swatch.def { border-style: dashed; border-width: 1.5px; }
     .toggle { display: inline-flex; align-items: center; gap: var(--os-sp-xs); cursor: pointer; font-size: var(--os-fs-sm); color: var(--os-text); }
-    .toggle input { accent-color: var(--ch); cursor: pointer; width: 16px; height: 16px; }
     .fb-btn { background: none; border: 0; cursor: pointer; color: var(--os-text-secondary); font: inherit; font-size: var(--os-fs-sm); padding: var(--os-sp-xs) var(--os-sp-sm); border-radius: var(--os-radius-sm); display: inline-flex; align-items: center; gap: 5px; }
     .fb-btn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
     .fb-btn.danger:hover { color: var(--os-cError); }
@@ -293,10 +291,6 @@
       return `GMT${sign}${hh}${mm ? ":" + pad2(mm) : ""}`;
     }
 
-    function paletteVars(palette) {
-      const p = palette || "c1";
-      return { "--ch": `var(--os-${p})`, "--ch-fg": `var(--os-${p}-fg)`, "--ch-muted": `var(--os-${p}-muted)` };
-    }
     // Per-event accent override; undefined → inherit the space accent set on .app.
     function evVars(ev) {
       if (!ev.color) return undefined;
@@ -385,7 +379,7 @@
     function blankEvent(dateIso) {
       return { id: "", title: "", date: dateIso || isoOf(new Date()), time: "", tz: "", dur: 0, color: "", url: "", note: "", recur: null };
     }
-    function EventModal({ initial, spacePalette, occDate, onClose, onSave, onDelete }) {
+    function EventModal({ initial, occDate, onClose, onSave, onDelete }) {
       const todayIso = isoOf(new Date());
       const [confirmDel, setConfirmDel] = useState(false);
       const [title, setTitle] = useState(initial.title);
@@ -489,7 +483,7 @@
             <label>Color</label>
             <div class="swatches">
               <div class=${"swatch def" + (!color ? " active" : "")} title="Space color (default)"
-                style=${{ background: `var(--os-${spacePalette || "c1"})` }} onClick=${() => setColor("")}></div>
+                style=${{ background: "var(--ch, var(--os-c1))" }} onClick=${() => setColor("")}></div>
               ${PALETTES.map((p) => html`<div key=${p} title=${p}
                 class=${"swatch" + (color === p ? " active" : "")} style=${{ background: `var(--os-${p})` }}
                 onClick=${() => setColor(p)}></div>`)}
@@ -561,38 +555,6 @@
             <span>Shown in your time zone. Set in ${tzCityLabel(ev.tz)} (${tzOffsetLabel(ev.tz)}).</span></div>` : null}
           ${ev.url ? html`<div class="tzhint"><i class="ph-light ph-link"></i><span style="word-break:break-all">${ev.url}</span></div>` : null}
           ${ev.note ? html`<div class="hint" style="font-size:var(--os-fs-sm);white-space:pre-wrap">${ev.note}</div>` : null}
-        </div>
-      </${Modal}>`;
-    }
-
-    // ---- settings modal ----------------------------------------------------------------
-    function SettingsModal({ settings, onClose, onSave }) {
-      const [palette, setPalette] = useState(settings.palette);
-      const [isPublic, setIsPublic] = useState(settings.isPublic);
-      const actions = html`<span style="flex:1"></span>
-        <button class="fb-btn" onClick=${onClose}>Cancel</button>
-        <button class="fb-btn primary" onClick=${() => onSave({ palette, isPublic })}>Save</button>`;
-      return html`<${Modal} title="Calendar settings" onClose=${onClose} actions=${actions}>
-        <div class="form">
-          <div class="field">
-            <label>Who can see this calendar</label>
-            <label class="toggle">
-              <input type="checkbox" checked=${isPublic} onChange=${(e) => setIsPublic(e.target.checked)} />
-              <span>Public — anyone with the link can view it</span>
-            </label>
-            <span class="hint">${isPublic
-              ? "Anyone who can open this frame sees the calendar (read-only). Only space editors can change events."
-              : "Only members of this space can see the calendar. People outside the space get a “private” notice."}</span>
-          </div>
-          <div class="field">
-            <label>Default accent</label>
-            <div class="swatches">
-              ${PALETTES.map((p) => html`<div key=${p} title=${p}
-                class=${"swatch" + (palette === p ? " active" : "")} style=${{ background: `var(--os-${p})` }}
-                onClick=${() => setPalette(p)}></div>`)}
-            </div>
-            <span class="hint">Events without their own color use this accent.</span>
-          </div>
         </div>
       </${Modal}>`;
     }
@@ -788,7 +750,6 @@
       const [editing, setEditing] = useState(null);
       const [editOcc, setEditOcc] = useState(null);   // { srcIso, localIso } of the clicked occurrence
       const [peeking, setPeeking] = useState(null);
-      const [showSettings, setShowSettings] = useState(false);
       const [overflow, setOverflow] = useState(null);
       const [today, setToday] = useState(() => startOfDay(new Date()));
       const [now, setNow] = useState(() => new Date());
@@ -804,8 +765,8 @@
       function chooseView(v) { setViewMode(v); frame.localStorageSetItem("view", v).catch(() => {}); }
 
       useEffect(() => {
-        if (data && data.settings) applyChannel(document.body, "var(--os-" + (data.settings.palette || "c1") + ")");
-      }, [data && data.settings && data.settings.palette]);
+        if (data && data.me) applyChannel(document.body, data.me.space_color);
+      }, [data && data.me && data.me.space_color]);
 
       useEffect(() => {
         const t = setInterval(() => { const n = new Date(); setNow(n); setToday((cur) => sameDay(cur, n) ? cur : startOfDay(n)); }, 60_000);
@@ -826,17 +787,6 @@
       if (!data) return html`<div class="app" ref=${rootRef}></div>`;
       const { me, settings } = data;
       const isEditor = me.is_sfi_editor;
-      const vars = paletteVars(settings.palette);
-
-      if (data.private) {
-        return html`<div class="app" ref=${rootRef} style=${vars}>
-          <div class="locked">
-            <i class="ph-light ph-lock-simple"></i>
-            <span class="big">This calendar is private</span>
-            <span>Only members of this space can view it.</span>
-          </div>
-        </div>`;
-      }
 
       function saveEvent(ev) {
         const prev = data;
@@ -860,12 +810,6 @@
           if (!ev.recur.start || newUntil < ev.recur.start) deleteEvent(ev.id);
           else saveEvent({ ...ev, recur: { ...ev.recur, until: newUntil } });
         }
-      }
-      function saveSettings(next) {
-        setShowSettings(false);
-        const prev = data;
-        setData({ ...data, settings: { ...settings, ...next } });
-        frame.api("api/settings", { settings: next, by: SESSION }).then(refresh).catch(() => setData(prev));
       }
       function onEventClick(ev, srcIso, localIso) {
         if (isEditor) { setEditOcc(srcIso ? { srcIso, localIso } : null); setEditing(ev); }
@@ -894,7 +838,7 @@
         title = html`<span class="title">${label}<span class="yr">${we.getFullYear()}</span></span>`;
       } else title = html`<span class="title">${MONTHS[anchor.getMonth()]}<span class="yr">${anchor.getFullYear()}</span></span>`;
 
-      return html`<div class="app" ref=${rootRef} style=${vars}>
+      return html`<div class="app" ref=${rootRef}>
         <div class="topbar">
           ${title}
           <div class="spacer"></div>
@@ -908,7 +852,6 @@
             <button class="tbtn" title="Next" onClick=${() => step(1)}><i class="ph-light ph-caret-right"></i></button>
           ` : null}
           ${isEditor ? html`
-            <button class="tbtn" title="Settings" onClick=${() => setShowSettings(true)}><i class="ph-light ph-gear-six"></i></button>
             <button class="tbtn primary" title="Add event" onClick=${() => newOn(today)}><i class="ph-light ph-plus"></i></button>
           ` : null}
         </div>
@@ -923,11 +866,9 @@
               onDayClick=${(d) => newOn(d)} onEventClick=${onEventClick}
               onOverflow=${(date, occs) => setOverflow({ date, occs })} />`}
 
-        ${editing ? html`<${EventModal} initial=${editing} spacePalette=${settings.palette} occDate=${editOcc ? editOcc.localIso : ""}
+        ${editing ? html`<${EventModal} initial=${editing} occDate=${editOcc ? editOcc.localIso : ""}
           onClose=${() => setEditing(null)} onSave=${saveEvent} onDelete=${performDelete} />` : null}
         ${peeking ? html`<${EventPeek} ev=${peeking} onClose=${() => setPeeking(null)} />` : null}
-        ${showSettings ? html`<${SettingsModal} settings=${settings}
-          onClose=${() => setShowSettings(false)} onSave=${saveSettings} />` : null}
         ${overflow ? html`<${DayPopover} date=${overflow.date} occs=${overflow.occs}
           onClose=${() => setOverflow(null)} onPick=${(ev, s, l) => { setOverflow(null); onEventClick(ev, s, l); }} />` : null}
       </div>`;
