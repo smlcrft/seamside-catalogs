@@ -17,7 +17,7 @@
 // e.g. Mon/Wed/Fri). Recurrence is expanded for display on the frontend; the backend only stores.
 // ----------------------------------------------------------------------------------------
 import {
-  log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance,
+  log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance, onUiMessage,
   frameDataDir, serveFileAtPath, path,
 } from "@frame-core";
 
@@ -158,6 +158,58 @@ function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
   return { me, settings: cal.settings, events: cal.events };
 }
 
+// ----- Mutations ------------------------------------------------------------------------
+// Shared by the HTTP arms and the bus dispatcher — the two entry points must never drift
+// on validation or role gates. Role gates live here.
+type MutPeer = ReturnType<typeof parsePeerInfo>;
+type MutResult = { status: number; body: unknown };
+
+// Create or update one event — editors only. id present + known → update; else insert.
+function mutEvent(sfiId: string, v: { event?: any; by?: unknown }, peer: MutPeer): MutResult {
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  const ev = sanitizeEvent(v.event);
+  if (!ev) return { status: 400, body: { error: "invalid event" } };
+  const cal = loadCal(sfiId);
+  const i = cal.events.findIndex((e) => e.id === ev.id);
+  if (i >= 0) cal.events[i] = ev;
+  else {
+    if (cal.events.length >= MAX_EVENTS) return { status: 413, body: { error: "calendar is full" } };
+    cal.events.push(ev);
+  }
+  saveCal(sfiId, cal);
+  pushToInstance(sfiId, { type: "cal_changed", by: str(v.by, 64) });
+  return { status: 200, body: { ok: true, id: ev.id } };
+}
+
+// Delete one event — editors only.
+function mutEventDelete(sfiId: string, v: { id?: unknown; by?: unknown }, peer: MutPeer): MutResult {
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  const id = String(v.id || "");
+  const cal = loadCal(sfiId);
+  const next = cal.events.filter((e) => e.id !== id);
+  if (next.length !== cal.events.length) {
+    cal.events = next;
+    saveCal(sfiId, cal);
+    pushToInstance(sfiId, { type: "cal_changed", by: str(v.by, 64) });
+  }
+  return { status: 200, body: { ok: true } };
+}
+
+// ----- Bus dispatcher -------------------------------------------------------------------
+// The frontend's write path (frame.busSend → BusUiToFrame → here). `peer` is the sender's
+// platform-resolved identity, same shape as parsePeerInfo; the role gates live inside the
+// mutation functions. Denials are logged, not answered — a legitimate client never sends
+// a write it isn't allowed to make.
+onUiMessage((sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  const r =
+    d.op === "event"          ? mutEvent(sfiId, d, peer)
+    : d.op === "event_delete" ? mutEventDelete(sfiId, d, peer)
+    : null;
+  if (r && r.status !== 200) log(`calendar: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 // ----- Networking -----------------------------------------------------------------------
 self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
@@ -172,37 +224,14 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, 200, stateFor(peer));
   }
 
-  // Create or update one event — editors only. id present + known → update; else insert.
+  // Writes — kept as HTTP arms for older viewers; same shared logic as the bus dispatcher.
   if (reqPath === "/api/event" && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const v = parseJsonBody<{ event?: any; by?: string }>(body) || {};
-    const ev = sanitizeEvent(v.event);
-    if (!ev) return jsonReply(replyPort, 400, { error: "invalid event" });
-    const cal = loadCal(peer.sfi_id);
-    const i = cal.events.findIndex((e) => e.id === ev.id);
-    if (i >= 0) cal.events[i] = ev;
-    else {
-      if (cal.events.length >= MAX_EVENTS) return jsonReply(replyPort, 413, { error: "calendar is full" });
-      cal.events.push(ev);
-    }
-    saveCal(peer.sfi_id, cal);
-    pushToInstance(peer.sfi_id, { type: "cal_changed", by: str(v.by, 64) });
-    return jsonReply(replyPort, 200, { ok: true, id: ev.id });
+    const r = mutEvent(peer.sfi_id, parseJsonBody<{ event?: any; by?: unknown }>(body) || {}, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
-
-  // Delete one event — editors only.
   if (reqPath === "/api/event_delete" && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const v = parseJsonBody<{ id?: string; by?: string }>(body) || {};
-    const id = String(v.id || "");
-    const cal = loadCal(peer.sfi_id);
-    const next = cal.events.filter((e) => e.id !== id);
-    if (next.length !== cal.events.length) {
-      cal.events = next;
-      saveCal(peer.sfi_id, cal);
-      pushToInstance(peer.sfi_id, { type: "cal_changed", by: str(v.by, 64) });
-    }
-    return jsonReply(replyPort, 200, { ok: true });
+    const r = mutEventDelete(peer.sfi_id, parseJsonBody<{ id?: unknown; by?: unknown }>(body) || {}, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });

@@ -109,7 +109,7 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush } from "/lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useRef, useFramePush } from "./lib/js/framelib.js";
 
     function fmtSize(n) {
       if (n < 1024) return n + " B";
@@ -123,6 +123,18 @@
         if (sfi && !/[?&]sfi=/.test(p)) return p + (p.includes("?") ? "&" : "?") + "sfi=" + encodeURIComponent(sfi);
       } catch (_) {}
       return p;
+    }
+
+    // JSON writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
+    // dropped on Android, and the folder_changed push — which reaches the sender too — is
+    // the confirmation the UI renders from. Feature-detect: an older viewer's framelib has
+    // no busSend, so fall back to the HTTP write it was using before.
+    function write(path, body) {
+      if (typeof frame.busSend === "function") {
+        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+        return Promise.resolve({});
+      }
+      return frame.api(path, body || {}, "POST");
     }
 
     function App() {
@@ -144,11 +156,10 @@
       const { me, prefs, can_add, files } = st;
       const atLimit = files.length >= prefs.max_files;
 
-      async function savePrefs(patch) {
+      function savePrefs(patch) {
         const next = { ...prefs, ...patch };
-        setSt({ ...st, prefs: next });          // optimistic
-        const s = await frame.api("api/prefs", next).catch(() => null);
-        if (s) setSt(s);
+        setSt({ ...st, prefs: next });          // optimistic; the push confirms
+        write("api/prefs", next).catch(() => {});
       }
 
       async function uploadFiles(list) {
@@ -193,7 +204,7 @@
       }
 
       function disarm() { setArmed(null); if (armTimer.current) clearTimeout(armTimer.current); }
-      async function del(f) {
+      function del(f) {
         if (armed !== f.id) {
           setArmed(f.id);
           if (armTimer.current) clearTimeout(armTimer.current);
@@ -201,8 +212,7 @@
           return;
         }
         disarm();
-        const s = await frame.api("api/delete/" + f.id, {}, "POST").catch(() => null);
-        if (s) setSt(s);
+        write("api/delete/" + f.id, {}).catch(() => {});
       }
 
       const mode = me.is_owner ? "owner"

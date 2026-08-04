@@ -1,4 +1,4 @@
-import { frame } from "/lib/js/framelib.js";
+import { frame } from "./lib/js/framelib.js";
 
 (function () {
   const peer = window.__peer || {};
@@ -288,6 +288,11 @@ import { frame } from "/lib/js/framelib.js";
   async function saveSettings() {
     if (!draft) return closeSettings();
     draft.location = $("cfg-location").value.trim().slice(0, 120);
+    if (typeof frame.busSend === "function") {
+      frame.busSend({ op: "save", ...draft });
+      closeSettings();
+      return;
+    }
     try {
       await frame.api("api/save", draft);
       closeSettings();

@@ -14,7 +14,7 @@
 //   settings_scope: settings-per-sfi     — everything is keyed by peer.sfi_id.
 // ----------------------------------------------------------------------------------------
 import {
-  log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance,
+  log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance, onUiMessage,
   frameDataDir, serveFileAtPath, contentType, extname, path,
 } from "@frame-core";
 
@@ -236,6 +236,59 @@ function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
   };
 }
 
+// ----- Mutations ------------------------------------------------------------------------
+// Shared by the HTTP arms and the bus dispatcher — same validation, same role gates,
+// either entry point.
+type MutPeer = ReturnType<typeof parsePeerInfo>;
+type MutResult = { status: number; body: unknown };
+
+// Save the whole deck — editors only. Last-write-wins; viewers refresh on the push.
+function mutSave(sfiId: string, v: { show?: any; by?: string } | null, peer: MutPeer): MutResult {
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  const show = sanitizeShow(v?.show);
+  saveShow(sfiId, show);
+  gcImages(sfiId, show);
+  pushToInstance(sfiId, { type: "deck_changed", by: str(v?.by, 64) });
+  return { status: 200, body: { ok: true } };
+}
+
+// Advance the live shared presentation — editors only (they are the presenters). The new
+// index is persisted and pushed to EVERY viewer of the placement: peers AND our own sibling
+// devices both receive it via pushToInstance, so a follower's present view tracks the presenter.
+function mutPresent(sfiId: string, v: { index?: number; by?: string } | null, peer: MutPeer): MutResult {
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  const show = loadShow(sfiId);
+  const index = num(v?.index, 0, 0, Math.max(0, show.slides.length - 1));
+  savePresent(sfiId, index);
+  pushToInstance(sfiId, { type: "present_changed", index, by: str(v?.by, 64) });
+  return { status: 200, body: { ok: true } };
+}
+
+// Viewer presence ping — read-only viewers announce themselves so editors can see a live
+// "N watching" count. Editors are never counted, so this is deliberately not editor-gated;
+// it only touches the in-memory viewer map (broadcastViewerCount pushes on change).
+function mutViewerPing(sfiId: string, v: { by?: string } | null, peer: MutPeer): MutResult {
+  if (!peer.is_sfi_editor) {
+    const sid = str(v?.by, 64);
+    if (sid) { recordViewer(sfiId, sid); broadcastViewerCount(sfiId); }
+  }
+  return { status: 200, body: { ok: true } };
+}
+
+// Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame). `peer` is the
+// sender's platform-resolved identity, same shape as parsePeerInfo; role gates live inside
+// the mutation functions. Denials are logged, not answered.
+onUiMessage((sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  const r =
+    d.op === "save"          ? mutSave(sfiId, d as { show?: any; by?: string }, peer)
+    : d.op === "present"     ? mutPresent(sfiId, d as { index?: number; by?: string }, peer)
+    : d.op === "viewer_ping" ? mutViewerPing(sfiId, d as { by?: string }, peer)
+    : null;
+  if (r && r.status !== 200) log(`slideshow: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 // ----- Networking -----------------------------------------------------------------------
 self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
@@ -250,39 +303,21 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, 200, stateFor(peer));
   }
 
-  // Save the whole deck — editors only. Last-write-wins; viewers refresh on the push.
+  // HTTP arms kept for API compatibility (older viewers, web viewer fallback); the frame's
+  // own UI writes over the bus (see the dispatcher above). Same functions, same gates.
   if (reqPath === "/api/save" && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const v = parseJsonBody<{ show?: any; by?: string }>(body) || {};
-    const show = sanitizeShow(v.show);
-    saveShow(peer.sfi_id, show);
-    gcImages(peer.sfi_id, show);
-    pushToInstance(peer.sfi_id, { type: "deck_changed", by: str(v.by, 64) });
-    return jsonReply(replyPort, 200, { ok: true });
+    const r = mutSave(peer.sfi_id, parseJsonBody<{ show?: any; by?: string }>(body), peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
-  // Advance the live shared presentation — editors only (they are the presenters). The new
-  // index is persisted and pushed to EVERY viewer of the placement: peers AND our own sibling
-  // devices both receive it via pushToInstance, so a follower's present view tracks the presenter.
   if (reqPath === "/api/present" && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const v = parseJsonBody<{ index?: number; by?: string }>(body) || {};
-    const show = loadShow(peer.sfi_id);
-    const index = num(v.index, 0, 0, Math.max(0, show.slides.length - 1));
-    savePresent(peer.sfi_id, index);
-    pushToInstance(peer.sfi_id, { type: "present_changed", index, by: str(v.by, 64) });
-    return jsonReply(replyPort, 200, { ok: true });
+    const r = mutPresent(peer.sfi_id, parseJsonBody<{ index?: number; by?: string }>(body), peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
-  // Viewer presence ping — read-only viewers announce themselves so editors can see a live
-  // "N watching" count. Editors are never counted.
   if (reqPath === "/api/viewer_ping" && method === "POST") {
-    if (!peer.is_sfi_editor) {
-      const v = parseJsonBody<{ by?: string }>(body) || {};
-      const sid = str(v.by, 64);
-      if (sid) { recordViewer(peer.sfi_id, sid); broadcastViewerCount(peer.sfi_id); }
-    }
-    return jsonReply(replyPort, 200, { ok: true });
+    const r = mutViewerPing(peer.sfi_id, parseJsonBody<{ by?: string }>(body), peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   // Image upload — editors only. Bytes are the raw body; ext rides in ?ext=. Client resizes

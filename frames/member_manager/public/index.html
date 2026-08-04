@@ -10,7 +10,18 @@
 <body class="ch1">
 <div id="root"></div>
 <script type="module">
-import { frame, html, render, useState, useEffect, useFramePush, WAITING, WaitingForOwner } from "/lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useFramePush, WAITING, WaitingForOwner } from "./lib/js/framelib.js";
+
+// Writes go over the tether (frame.busSend) — HTTP POST bodies are dropped on Android.
+// Fire-and-forget: resulting state arrives via the members_changed / settings_changed
+// pushes. Feature-detect: an older viewer's framelib has no busSend — fall back to HTTP.
+const write = (path, body) => {
+  if (typeof frame.busSend === "function") {
+    frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+    return Promise.resolve({});
+  }
+  return frame.api(path, body);
+};
 
 function fmtDate(ms) {
   const n = Number(ms);
@@ -77,7 +88,7 @@ function App() {
 
   async function addMember(name, email, phone, role) {
     try {
-      await frame.api("api/member", { name, email, phone, role });
+      await write("api/member", { name, email, phone, role });
     } catch (e) {
       await frame.alert(e.message || "failed");
     }
@@ -85,7 +96,7 @@ function App() {
 
   async function updateMember(row, patch) {
     try {
-      await frame.api("api/member", { row_id: row._row_id, name: row.name, email: row.email, phone: row.phone || "", role: row.role, ...patch });
+      await write("api/member", { row_id: row._row_id, name: row.name, email: row.email, phone: row.phone || "", role: row.role, ...patch });
     } catch (e) {
       await frame.alert(e.message || "failed");
       loadMembers();
@@ -94,7 +105,7 @@ function App() {
 
   async function delMember(row) {
     try {
-      await frame.api("api/member/delete", { row_id: row._row_id });
+      await write("api/member/delete", { row_id: row._row_id });
     } catch (e) {
       await frame.alert(e.message || "failed");
     }
@@ -368,7 +379,7 @@ function SettingsDialog({ prefs, onClose, onSaved }) {
   async function save() {
     const roles = rolesText.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
     try {
-      await frame.api("api/settings", {
+      await write("api/settings", {
         org_name: orgName.trim(),
         roles,
         owner_only_edit: ownerOnly,

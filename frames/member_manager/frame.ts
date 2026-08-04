@@ -6,7 +6,7 @@
 // in a local JSON file keyed by sfi_id (space_frame_instance_id).
 // ----------------------------------------------------------------------------------------
 import {
-  log, serveFileAtPath, pushToInstance, parsePeerInfo,
+  log, serveFileAtPath, pushToInstance, parsePeerInfo, onUiMessage,
   declareTables, ensureTables, table, renderWaitingForOwner,
   jsonReply, parseJsonBody, sanitizeText,
   loadJsonFile, saveJsonFile, wireTableChangeListener,
@@ -81,6 +81,85 @@ async function ensurePhoneColumn(
   }
 }
 
+// ----- Shared write logic ---------------------------------------------------------------
+// Both entry points (HTTP arms and the bus dispatcher) land here; role gates live inside.
+// Member writes reach every viewer via the wired members_changed table-change push;
+// settings pushes settings_changed explicitly.
+type WriteResult = { status: number; body: unknown };
+
+async function handleWrite(
+  op: string,
+  v: Record<string, unknown> | null,
+  sfiId: string,
+  peer: ReturnType<typeof parsePeerInfo>,
+): Promise<WriteResult> {
+  const p = peer.sfi_id === sfiId ? peer : { ...peer, sfi_id: sfiId };
+  const tables = ensureTables(p);
+  if (!tables.ready) return { status: 503, body: { error: "table not yet bound", missing: tables.missingKeys } };
+  wireTableChangeListener("members", sfiId, "members_changed");
+  const members = table("members", sfiId);
+  const prefs = getPrefs(sfiId);
+
+  if (op === "member") {
+    if (!canEdit(p, prefs)) return { status: 403, body: { error: "editing is restricted to the frame owner" } };
+    if (!v) return { status: 400, body: { error: "invalid JSON" } };
+    const hasPhone = await ensurePhoneColumn(p, tables.byKey["members"].colIdByName);
+    const name = sanitizeText(v.name, 120);
+    const email = sanitizeText(v.email, 200);
+    const phone = sanitizeText(v.phone, 40); // optional
+    const role = sanitizeText(v.role, 80);
+    if (!name) return { status: 400, body: { error: "name required" } };
+    if (!email) return { status: 400, body: { error: "email required" } };
+    if (!role) return { status: 400, body: { error: "role required" } };
+    if (!prefs.roles.includes(role)) return { status: 400, body: { error: "role not in allowed list" } };
+    const rowId = v.row_id ? String(v.row_id) : null;
+    const values: Record<string, unknown> = { name, email, role };
+    if (hasPhone) values.phone = phone; // only write phone once the column exists
+    const { row_id } = await members.upsert(rowId, values);
+    return { status: 200, body: { row_id } };
+  }
+
+  if (op === "member/delete") {
+    if (!canEdit(p, prefs)) return { status: 403, body: { error: "editing is restricted to the frame owner" } };
+    const rowId = String(v?.row_id ?? "");
+    if (!rowId) return { status: 400, body: { error: "row_id required" } };
+    await members.delete(rowId);
+    return { status: 204, body: null };
+  }
+
+  if (op === "settings") {
+    // Settings can always be edited by the owner; non-owners get blocked here regardless of owner_only_edit.
+    if (!p.is_owner) return { status: 403, body: { error: "only the frame owner can change settings" } };
+    if (!v) return { status: 400, body: { error: "invalid JSON" } };
+    const org_name = sanitizeText(v.org_name, 120) || DEFAULT_PREFS.org_name;
+    const rolesIn: unknown[] = Array.isArray(v.roles) ? v.roles : [];
+    const roles = Array.from(new Set(rolesIn.map((r: unknown) => sanitizeText(r, 80)).filter((r: string) => r.length > 0)));
+    if (roles.length === 0) return { status: 400, body: { error: "at least one role is required" } };
+    const next: Prefs = {
+      org_name,
+      roles,
+      owner_only_edit: !!v.owner_only_edit,
+    };
+    setPrefs(sfiId, next);
+    pushToInstance(sfiId, { type: "settings_changed" });
+    return { status: 200, body: { prefs: next } };
+  }
+
+  return { status: 404, body: { error: "unknown op" } };
+}
+
+// ----- Bus dispatcher (frame.busSend → BusUiToFrame) ------------------------------------
+// Fire-and-forget: denied or invalid writes are logged, not answered — the UI is
+// role-gated and never sends them.
+onUiMessage(async (sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  const op = typeof d.op === "string" ? d.op : "";
+  if (!op) return;
+  const r = await handleWrite(op, d, sfiId, peer);
+  if (r.status >= 400) log(`member_manager: bus op ${op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 // ----- HTTP handler ---------------------------------------------------------------------
 self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
@@ -141,50 +220,19 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
   }
 
   if (reqPath === "/api/member" && method === "POST") {
-    if (!editable) return jsonReply(replyPort, 403, { error: "editing is restricted to the frame owner" });
-    const v = parseJsonBody<{ row_id?: unknown; name?: unknown; email?: unknown; phone?: unknown; role?: unknown }>(body);
-    if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
-    const name = sanitizeText(v.name, 120);
-    const email = sanitizeText(v.email, 200);
-    const phone = sanitizeText(v.phone, 40); // optional
-    const role = sanitizeText(v.role, 80);
-    if (!name) return jsonReply(replyPort, 400, { error: "name required" });
-    if (!email) return jsonReply(replyPort, 400, { error: "email required" });
-    if (!role) return jsonReply(replyPort, 400, { error: "role required" });
-    if (!prefs.roles.includes(role)) return jsonReply(replyPort, 400, { error: "role not in allowed list" });
-    const rowId = v.row_id ? String(v.row_id) : null;
-    const values: Record<string, unknown> = { name, email, role };
-    if (hasPhone) values.phone = phone; // only write phone once the column exists
-    const { row_id } = await members.upsert(rowId, values);
-    return jsonReply(replyPort, 200, { row_id });
+    const r = await handleWrite("member", parseJsonBody(body), peer.sfi_id, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   if (reqPath === "/api/member/delete" && method === "POST") {
-    if (!editable) return jsonReply(replyPort, 403, { error: "editing is restricted to the frame owner" });
-    const v = parseJsonBody<{ row_id?: unknown }>(body);
-    const rowId = String(v?.row_id ?? "");
-    if (!rowId) return jsonReply(replyPort, 400, { error: "row_id required" });
-    await members.delete(rowId);
-    return replyPort.postMessage({ status: 204, contentType: "text/plain", body: null });
+    const r = await handleWrite("member/delete", parseJsonBody(body), peer.sfi_id, peer);
+    if (r.status === 204) return replyPort.postMessage({ status: 204, contentType: "text/plain", body: null });
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   if (reqPath === "/api/settings" && method === "POST") {
-    // Settings can always be edited by the owner; non-owners get blocked here regardless of owner_only_edit.
-    if (!peer.is_owner) return jsonReply(replyPort, 403, { error: "only the frame owner can change settings" });
-    const v = parseJsonBody<{ org_name?: unknown; roles?: unknown; owner_only_edit?: unknown }>(body);
-    if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
-    const org_name = sanitizeText(v.org_name, 120) || DEFAULT_PREFS.org_name;
-    const rolesIn: unknown[] = Array.isArray(v.roles) ? v.roles : [];
-    const roles = Array.from(new Set(rolesIn.map((r: unknown) => sanitizeText(r, 80)).filter((r: string) => r.length > 0)));
-    if (roles.length === 0) return jsonReply(replyPort, 400, { error: "at least one role is required" });
-    const next: Prefs = {
-      org_name,
-      roles,
-      owner_only_edit: !!v.owner_only_edit,
-    };
-    setPrefs(peer.sfi_id, next);
-    pushToInstance(peer.sfi_id, { type: "settings_changed" });
-    return jsonReply(replyPort, 200, { prefs: next });
+    const r = await handleWrite("settings", parseJsonBody(body), peer.sfi_id, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   if (method === "GET") {

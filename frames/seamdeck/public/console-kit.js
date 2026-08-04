@@ -2,7 +2,7 @@
 // its game modules. A game imports { useInput, animator, wait, rng } from here
 // and everything else from its own files. Keep this file small on purpose: it IS
 // the console's public API for forks.
-import { useEffect, useRef, useState } from "/lib/js/framelib.js";
+import { useEffect, useRef, useState } from "./lib/js/framelib.js";
 
 // ---------------------------------------------------------------------------
 // Input bus — input is UI, not shared state. A tiny emitter fans key/touch

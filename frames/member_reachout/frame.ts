@@ -12,7 +12,7 @@
 // `mailto:` (all recipients bcc'd) or a per-person `sms:` link and asks the OS to open it.
 // ----------------------------------------------------------------------------------------
 import {
-  log, serveFileAtPath, pushToInstance, parsePeerInfo,
+  log, serveFileAtPath, pushToInstance, parsePeerInfo, onUiMessage,
   declareTables, ensureTables, table, renderWaitingForOwner,
   jsonReply, parseJsonBody, sanitizeText, clampInt,
   loadJsonFile, saveJsonFile,
@@ -169,6 +169,92 @@ function newId(): string {
   return `s_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
+// ----- Shared write logic ---------------------------------------------------------------
+// Both entry points (HTTP arms and the bus dispatcher) land here; role gates live inside.
+// Every mutation ends in a pushToInstance so all viewers — the sender included — re-render.
+type WriteResult = { status: number; body: unknown };
+
+function handleWrite(
+  op: string,
+  v: Record<string, unknown> | null,
+  sfiId: string,
+  peer: ReturnType<typeof parsePeerInfo>,
+): WriteResult {
+  const p = peer.sfi_id === sfiId ? peer : { ...peer, sfi_id: sfiId };
+  const tables = ensureTables(p);
+  if (!tables.ready) return { status: 503, body: { error: "table not yet bound", missing: tables.missingKeys } };
+
+  // ---- Record a send into the local log (editor only) ---------------------------------
+  if (op === "log") {
+    if (!p.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+    if (!v) return { status: 400, body: { error: "invalid JSON" } };
+    const sendMethod = v.method === "text" ? "text" : "email";
+    const to_all = !!v.to_all;
+    const roles = Array.isArray(v.roles) ? v.roles.map((r) => sanitizeText(r, 80)).filter(Boolean) : [];
+    const message = sanitizeText(v.message, 5000);
+    const subject = sendMethod === "email" ? sanitizeText(v.subject, 200) : "";
+    if (!message) return { status: 400, body: { error: "message required" } };
+    if (!to_all && roles.length === 0) return { status: 400, body: { error: "audience required" } };
+    const recipient_count = clampInt(Number(v.recipient_count) || 0, 0, 100000);
+    const attempted_count = clampInt(Number(v.attempted_count ?? recipient_count) || 0, 0, recipient_count);
+    const entry: SentEntry = {
+      id: newId(),
+      sent_at_ms: Date.now(),
+      to_all,
+      roles: to_all ? [] : roles,
+      method: sendMethod,
+      subject,
+      message,
+      recipient_count,
+      attempted_count,
+    };
+    const entries = getLog(sfiId);
+    entries.push(entry);
+    saveLog(sfiId, entries);
+    pushToInstance(sfiId, { type: "log_changed" });
+    return { status: 200, body: { entry } };
+  }
+
+  // ---- Delete a logged message (editor only) ------------------------------------------
+  if (op === "log/delete") {
+    if (!p.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+    const id = String(v?.id ?? "");
+    if (!id) return { status: 400, body: { error: "id required" } };
+    const entries = getLog(sfiId).filter((e) => e.id !== id);
+    saveLog(sfiId, entries);
+    pushToInstance(sfiId, { type: "log_changed" });
+    return { status: 204, body: null };
+  }
+
+  // ---- Settings (owner only) ----------------------------------------------------------
+  if (op === "settings") {
+    if (!p.is_owner) return { status: 403, body: { error: "only the frame owner can change settings" } };
+    if (!v) return { status: 400, body: { error: "invalid JSON" } };
+    const title = sanitizeText(v.title, 80) || DEFAULT_SETTINGS.title;
+    const public_roles = Array.isArray(v.public_roles)
+      ? Array.from(new Set(v.public_roles.map((r) => sanitizeText(r, 80)).filter(Boolean)))
+      : [];
+    const next: Settings = { title, public_roles };
+    setSettings(sfiId, next);
+    pushToInstance(sfiId, { type: "settings_changed" });
+    return { status: 200, body: { settings: next } };
+  }
+
+  return { status: 404, body: { error: "unknown op" } };
+}
+
+// ----- Bus dispatcher (frame.busSend → BusUiToFrame) ------------------------------------
+// Fire-and-forget: denied or invalid writes are logged, not answered — the UI is
+// role-gated and never sends them.
+onUiMessage((sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  const op = typeof d.op === "string" ? d.op : "";
+  if (!op) return;
+  const r = handleWrite(op, d, sfiId, peer);
+  if (r.status >= 400) log(`member_reachout: bus op ${op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 // ----- HTTP handler ---------------------------------------------------------------------
 self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
@@ -220,12 +306,24 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   }
 
   // ---- Resolve an audience to concrete recipients (editor only — exposes contacts) ----
-  if (reqPath === "/api/resolve" && method === "POST") {
+  // A read that needs its response (it builds the mailto:/sms: links), so it can't ride
+  // the bus; GET carries the audience in the query string because Android's webview
+  // drops HTTP request bodies. The POST arm stays for older cached frontends.
+  if (reqPath === "/api/resolve" && (method === "GET" || method === "POST")) {
     if (!isEditor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const v = parseJsonBody<{ to_all?: unknown; roles?: unknown }>(body);
-    if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
-    const to_all = !!v.to_all;
-    const roles = Array.isArray(v.roles) ? v.roles.map((r) => sanitizeText(r, 80)).filter(Boolean) : [];
+    let to_all: boolean;
+    let roles: string[];
+    if (method === "GET") {
+      to_all = query.to_all === "1";
+      let parsed: unknown = [];
+      try { parsed = JSON.parse(String(query.roles ?? "[]")); } catch { parsed = []; }
+      roles = Array.isArray(parsed) ? parsed.map((r) => sanitizeText(r, 80)).filter(Boolean) : [];
+    } else {
+      const v = parseJsonBody<{ to_all?: unknown; roles?: unknown }>(body);
+      if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
+      to_all = !!v.to_all;
+      roles = Array.isArray(v.roles) ? v.roles.map((r) => sanitizeText(r, 80)).filter(Boolean) : [];
+    }
     if (!to_all && roles.length === 0) return jsonReply(replyPort, 400, { error: "pick an audience" });
     const members = await loadMembers(peer.sfi_id);
     const recipients = resolveRecipients(members, to_all, roles).map((m) => ({
@@ -237,64 +335,21 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
 
   // ---- Record a send into the local log (editor only) ---------------------------------
   if (reqPath === "/api/log" && method === "POST") {
-    if (!isEditor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const v = parseJsonBody<{
-      to_all?: unknown; roles?: unknown; method?: unknown;
-      subject?: unknown; message?: unknown; recipient_count?: unknown; attempted_count?: unknown;
-    }>(body);
-    if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
-    const sendMethod = v.method === "text" ? "text" : "email";
-    const to_all = !!v.to_all;
-    const roles = Array.isArray(v.roles) ? v.roles.map((r) => sanitizeText(r, 80)).filter(Boolean) : [];
-    const message = sanitizeText(v.message, 5000);
-    const subject = sendMethod === "email" ? sanitizeText(v.subject, 200) : "";
-    if (!message) return jsonReply(replyPort, 400, { error: "message required" });
-    if (!to_all && roles.length === 0) return jsonReply(replyPort, 400, { error: "audience required" });
-    const recipient_count = clampInt(Number(v.recipient_count) || 0, 0, 100000);
-    const attempted_count = clampInt(Number(v.attempted_count ?? recipient_count) || 0, 0, recipient_count);
-    const entry: SentEntry = {
-      id: newId(),
-      sent_at_ms: Date.now(),
-      to_all,
-      roles: to_all ? [] : roles,
-      method: sendMethod,
-      subject,
-      message,
-      recipient_count,
-      attempted_count,
-    };
-    const entries = getLog(peer.sfi_id);
-    entries.push(entry);
-    saveLog(peer.sfi_id, entries);
-    pushToInstance(peer.sfi_id, { type: "log_changed" });
-    return jsonReply(replyPort, 200, { entry });
+    const r = handleWrite("log", parseJsonBody(body), peer.sfi_id, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   // ---- Delete a logged message (editor only) ------------------------------------------
   if (reqPath === "/api/log/delete" && method === "POST") {
-    if (!isEditor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const v = parseJsonBody<{ id?: unknown }>(body);
-    const id = String(v?.id ?? "");
-    if (!id) return jsonReply(replyPort, 400, { error: "id required" });
-    const entries = getLog(peer.sfi_id).filter((e) => e.id !== id);
-    saveLog(peer.sfi_id, entries);
-    pushToInstance(peer.sfi_id, { type: "log_changed" });
-    return replyPort.postMessage({ status: 204, contentType: "text/plain", body: null });
+    const r = handleWrite("log/delete", parseJsonBody(body), peer.sfi_id, peer);
+    if (r.status === 204) return replyPort.postMessage({ status: 204, contentType: "text/plain", body: null });
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   // ---- Settings (owner only) ----------------------------------------------------------
   if (reqPath === "/api/settings" && method === "POST") {
-    if (!peer.is_owner) return jsonReply(replyPort, 403, { error: "only the frame owner can change settings" });
-    const v = parseJsonBody<{ title?: unknown; public_roles?: unknown }>(body);
-    if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
-    const title = sanitizeText(v.title, 80) || DEFAULT_SETTINGS.title;
-    const public_roles = Array.isArray(v.public_roles)
-      ? Array.from(new Set(v.public_roles.map((r) => sanitizeText(r, 80)).filter(Boolean)))
-      : [];
-    const next: Settings = { title, public_roles };
-    setSettings(peer.sfi_id, next);
-    pushToInstance(peer.sfi_id, { type: "settings_changed" });
-    return jsonReply(replyPort, 200, { settings: next });
+    const r = handleWrite("settings", parseJsonBody(body), peer.sfi_id, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   if (method === "GET") {

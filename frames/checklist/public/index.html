@@ -113,10 +113,22 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "/lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
 
     const ICONS = ["ph-circle", "ph-circle-half", "ph-check-circle"];
     const NEXT  = { 0: 1, 1: 2, 2: 0 };
+
+    // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
+    // dropped on Android (issue #750). Fire-and-forget — the resulting list arrives via
+    // the checklist_changed push, sender included. Feature-detect: an older viewer's
+    // framelib has no busSend — fall back to the HTTP write it was using before.
+    const write = (path, body) => {
+      if (typeof frame.busSend === "function") {
+        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+        return Promise.resolve({});
+      }
+      return frame.api(path, body);
+    };
 
     // Find the item the cursor is hovering above, for drop positioning.
     function dragAfter(list, y) {
@@ -153,31 +165,28 @@
       if (!me) return html`<div></div>`;
       const isEditor = !!me.is_sfi_editor;
 
-      // Apply the server's authoritative item list after any mutation.
-      const apply = (r) => { if (r && r.items) setItems(r.items); };
-
       async function add() {
         const text = draft.trim();
         if (!text) return;
         setDraft("");
-        apply(await frame.api("api/add", { text }).catch(() => null));
+        write("api/add", { text }).catch(() => {});
       }
-      async function cycle(it) {
+      function cycle(it) {
         if (!isEditor) return;
         const next = NEXT[it.state];
-        // optimistic — credit (or clear) the byline immediately; server reply confirms.
+        // optimistic — credit (or clear) the byline immediately; the push confirms.
         setItems(items.map((x) => x.id === it.id
           ? { ...x, state: next, actor_name: next === 0 ? "" : (me.user_name || "you") }
           : x));
-        apply(await frame.api("api/item/" + it.id, { state: next }).catch(() => null));
+        write("api/item/" + it.id, { state: next }).catch(() => {});
       }
-      async function saveText(it, text) {
+      function saveText(it, text) {
         const v = text.trim();
         if (!v || v === it.text) return;
-        apply(await frame.api("api/item/" + it.id, { text: v }).catch(() => null));
+        write("api/item/" + it.id, { text: v }).catch(() => {});
       }
       function disarm() { setArmed(null); if (armTimer.current) clearTimeout(armTimer.current); }
-      async function trash(it) {
+      function trash(it) {
         if (armed !== it.id) {
           setArmed(it.id);
           if (armTimer.current) clearTimeout(armTimer.current);
@@ -186,7 +195,7 @@
         }
         disarm();
         setItems(items.filter((x) => x.id !== it.id));
-        apply(await frame.api("api/delete/" + it.id, {}, "POST").catch(() => null));
+        write("api/delete/" + it.id, {}).catch(() => {});
       }
 
       // --- drag reorder -----------------------------------------------------------------
@@ -212,7 +221,7 @@
         const byId = new Map(items.map((x) => [x.id, x]));
         const reordered = ids.map((x) => byId.get(x));
         setItems(reordered);
-        frame.api("api/reorder", { ids }).then(apply).catch(() => {});
+        write("api/reorder", { ids }).catch(() => {});
       }
 
       const mode = isEditor ? (me.is_owner ? "editor · owner" : "editor")

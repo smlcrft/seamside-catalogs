@@ -37,7 +37,7 @@
 import {
   log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance,
   sanitizeText, toIntOrNull, clampInt, frameDataDir, serveFileAtPath, path,
-  declareTables, ensureTables, table, frameSettings,
+  declareTables, ensureTables, table, frameSettings, onUiMessage,
 } from "@frame-core";
 
 // ----- LocalTable (per-placement — no sfi_id column needed) ------------------------------
@@ -218,6 +218,127 @@ async function stateFor(t: Tables, peer: Peer) {
   };
 }
 
+// ----- Shared write logic ---------------------------------------------------------------
+// Both entry points land here: the HTTP POST arms (kept for older viewers whose framelib
+// lacks busSend) and the bus dispatcher (frame.busSend → onUiMessage). `op` is the API
+// path with the leading "api/" stripped. Role gates live here so the two paths can never
+// drift. Binary uploads (/api/upload, /api/upload/<id>/thumb) stay HTTP-only.
+type WriteResult = { status: number; body: unknown };
+
+async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>, peer: Peer): Promise<WriteResult> {
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  const ready = ensureTables(peer);
+  if (!ready.ready) return { status: 503, body: { error: "table not bound" } };
+  const t: Tables = { settings: frameSettings(sfiId), photos: table("photos", sfiId) };
+
+  // Set what the frame is displaying. This is the shared wall state: it persists and pushes
+  // to every viewer. Non-editors never reach here; they browse in local frontend state instead.
+  if (op === "display") {
+    const [d, photos] = await Promise.all([getDisplay(t), listPhotos(t)]);
+
+    const patch: Partial<Display> = {};
+    if (v.mode === "grid" || v.mode === "single") patch.mode = v.mode;
+    if (typeof v.photo_id === "string" && v.photo_id) {
+      const hit = photos.find((p) => p.id === v.photo_id);
+      if (!hit) return { status: 404, body: { error: "photo not found" } };
+      patch.current_photo_id = hit.id;
+      // Stepping by hand while the show runs restarts the dwell on the chosen photo.
+      if (d.slideshow_on) { patch.anchor_photo_id = hit.id; patch.anchor_ms = Date.now(); }
+    }
+    if (Object.keys(patch).length) await setDisplay(t, patch);
+    pushToInstance(sfiId, { type: "display_changed" });
+    return { status: 200, body: await stateFor(t, peer) };
+  }
+
+  // Fit / slideshow settings.
+  if (op === "settings") {
+    const [d, photos] = await Promise.all([getDisplay(t), listPhotos(t)]);
+
+    const patch: Partial<Display> = {};
+    if (v.fit === "contain" || v.fit === "cover") patch.fit = v.fit;
+    if (v.slideshow_secs !== undefined) {
+      patch.slideshow_secs = clampInt(toIntOrNull(v.slideshow_secs) ?? DEFAULT_SECS, MIN_SECS, MAX_SECS);
+    }
+
+    if (v.slideshow_on !== undefined) {
+      const on = v.slideshow_on === true;
+      patch.slideshow_on = on;
+      // The photo the client says is on screen right now — the pivot in both directions.
+      const showing = resolveCurrent(photos, sanitizeText(v.current_photo_id, 64) || d.current_photo_id);
+      if (on) {
+        // Starting: anchor the show to what's already up, from this instant.
+        patch.anchor_photo_id = showing ? showing.id : "";
+        patch.anchor_ms = Date.now();
+      } else if (showing) {
+        // Stopping: the client holds the computed position, so it rides in on this same write.
+        // Persisting it here is the handoff from a derived position back to a stored one.
+        patch.current_photo_id = showing.id;
+      }
+    } else if (patch.slideshow_secs !== undefined && d.slideshow_on) {
+      // Changing the interval mid-show would otherwise teleport the position, because the whole
+      // elapsed span gets re-divided by the new dwell. Re-anchor to what's showing instead.
+      const showing = resolveCurrent(photos, sanitizeText(v.current_photo_id, 64) || d.current_photo_id);
+      patch.anchor_photo_id = showing ? showing.id : "";
+      patch.anchor_ms = Date.now();
+    }
+
+    if (Object.keys(patch).length) await setDisplay(t, patch);
+    pushToInstance(sfiId, { type: "display_changed" });
+    return { status: 200, body: await stateFor(t, peer) };
+  }
+
+  // Delete a photo. Removes the row and both files, then repairs the display state so the
+  // frame is never left pointing at something that no longer exists.
+  if (op.startsWith("delete/")) {
+    const id = op.slice("delete/".length);
+    if (!ID_RE.test(id)) return { status: 400, body: { error: "bad id" } };
+    if (!(await t.photos.get(id))) return { status: 404, body: { error: "not found" } };
+
+    const [before, d] = await Promise.all([listPhotos(t), getDisplay(t)]);
+    const idx = before.findIndex((p) => p.id === id);
+
+    await t.photos.delete(id);
+    try { Deno.removeSync(fullPath(sfiId, id)); } catch { /* already gone */ }
+    try { Deno.removeSync(thumbPath(sfiId, id)); } catch { /* never had one */ }
+
+    const after = before.filter((p) => p.id !== id);
+    const patch: Partial<Display> = {};
+    if (!after.length) {
+      // Nothing left to show — the grid (with its empty state) is the only sane resting place.
+      patch.mode = "grid";
+      patch.current_photo_id = "";
+      patch.anchor_photo_id = "";
+    } else if (d.current_photo_id === id) {
+      // Advance to the next photo in order, wrapping past the end.
+      patch.current_photo_id = after[idx % after.length].id;
+    }
+    // A removed photo shifts the modulus; re-anchor so a running show doesn't jump.
+    if (d.slideshow_on) {
+      patch.anchor_photo_id = after.length
+        ? (patch.current_photo_id ?? resolveCurrent(after, d.current_photo_id)?.id ?? after[0].id)
+        : "";
+      patch.anchor_ms = Date.now();
+    }
+    await setDisplay(t, patch);
+
+    pushToInstance(sfiId, { type: "photos_changed" });
+    return { status: 200, body: await stateFor(t, peer) };
+  }
+
+  return { status: 404, body: { error: "not found" } };
+}
+
+// Bus dispatcher — the frontend's JSON write path (frame.busSend → BusUiToFrame → here).
+// Fire-and-forget: denials are logged, not answered — a legitimate client never sends a
+// write it isn't allowed to make, and every mutation confirms itself via pushToInstance.
+onUiMessage(async (sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const { op, ...v } = data as Record<string, unknown>;
+  if (typeof op !== "string") return;
+  const r = await handleWrite(sfiId, op, v, peer);
+  if (r.status !== 200) log(`picture_frame: bus op ${op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 // ----- Networking -----------------------------------------------------------------------
 self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
@@ -238,67 +359,16 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, 200, await stateFor(t, peer));
   }
 
-  // Set what the frame is displaying — editors only. This is the shared wall state: it persists
-  // and pushes to every viewer. Non-editors never reach here; they browse in local frontend
-  // state instead.
+  // Set what the frame is displaying — editors only; the logic lives in handleWrite.
   if (reqPath === "/api/display" && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const v = parseJsonBody<{ mode?: string; photo_id?: string }>(body) || {};
-    const [d, photos] = await Promise.all([getDisplay(t), listPhotos(t)]);
-
-    const patch: Partial<Display> = {};
-    if (v.mode === "grid" || v.mode === "single") patch.mode = v.mode;
-    if (typeof v.photo_id === "string" && v.photo_id) {
-      const hit = photos.find((p) => p.id === v.photo_id);
-      if (!hit) return jsonReply(replyPort, 404, { error: "photo not found" });
-      patch.current_photo_id = hit.id;
-      // Stepping by hand while the show runs restarts the dwell on the chosen photo.
-      if (d.slideshow_on) { patch.anchor_photo_id = hit.id; patch.anchor_ms = Date.now(); }
-    }
-    if (Object.keys(patch).length) await setDisplay(t, patch);
-    pushToInstance(peer.sfi_id, { type: "display_changed" });
-    return jsonReply(replyPort, 200, await stateFor(t, peer));
+    const r = await handleWrite(peer.sfi_id, "display", parseJsonBody<Record<string, unknown>>(body) || {}, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
-  // Fit / slideshow settings — editors only.
+  // Fit / slideshow settings — editors only; the logic lives in handleWrite.
   if (reqPath === "/api/settings" && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const v = parseJsonBody<{
-      fit?: string; slideshow_on?: boolean; slideshow_secs?: number; current_photo_id?: string;
-    }>(body) || {};
-    const [d, photos] = await Promise.all([getDisplay(t), listPhotos(t)]);
-
-    const patch: Partial<Display> = {};
-    if (v.fit === "contain" || v.fit === "cover") patch.fit = v.fit;
-    if (v.slideshow_secs !== undefined) {
-      patch.slideshow_secs = clampInt(toIntOrNull(v.slideshow_secs) ?? DEFAULT_SECS, MIN_SECS, MAX_SECS);
-    }
-
-    if (v.slideshow_on !== undefined) {
-      const on = v.slideshow_on === true;
-      patch.slideshow_on = on;
-      // The photo the client says is on screen right now — the pivot in both directions.
-      const showing = resolveCurrent(photos, sanitizeText(v.current_photo_id, 64) || d.current_photo_id);
-      if (on) {
-        // Starting: anchor the show to what's already up, from this instant.
-        patch.anchor_photo_id = showing ? showing.id : "";
-        patch.anchor_ms = Date.now();
-      } else if (showing) {
-        // Stopping: the client holds the computed position, so it rides in on this same POST.
-        // Persisting it here is the handoff from a derived position back to a stored one.
-        patch.current_photo_id = showing.id;
-      }
-    } else if (patch.slideshow_secs !== undefined && d.slideshow_on) {
-      // Changing the interval mid-show would otherwise teleport the position, because the whole
-      // elapsed span gets re-divided by the new dwell. Re-anchor to what's showing instead.
-      const showing = resolveCurrent(photos, sanitizeText(v.current_photo_id, 64) || d.current_photo_id);
-      patch.anchor_photo_id = showing ? showing.id : "";
-      patch.anchor_ms = Date.now();
-    }
-
-    if (Object.keys(patch).length) await setDisplay(t, patch);
-    pushToInstance(peer.sfi_id, { type: "display_changed" });
-    return jsonReply(replyPort, 200, await stateFor(t, peer));
+    const r = await handleWrite(peer.sfi_id, "settings", parseJsonBody<Record<string, unknown>>(body) || {}, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   // Upload a photo — editors only. Bytes are the raw body; metadata rides in the query string.
@@ -398,43 +468,10 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return serveBytes(replyPort, buf, mime);
   }
 
-  // Delete a photo — editors only. Removes the row and both files, then repairs the display
-  // state so the frame is never left pointing at something that no longer exists.
+  // Delete a photo — editors only; the logic lives in handleWrite.
   if (reqPath.startsWith("/api/delete/") && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const id = reqPath.slice("/api/delete/".length);
-    if (!ID_RE.test(id)) return jsonReply(replyPort, 400, { error: "bad id" });
-    if (!(await t.photos.get(id))) return jsonReply(replyPort, 404, { error: "not found" });
-
-    const [before, d] = await Promise.all([listPhotos(t), getDisplay(t)]);
-    const idx = before.findIndex((p) => p.id === id);
-
-    await t.photos.delete(id);
-    try { Deno.removeSync(fullPath(peer.sfi_id, id)); } catch { /* already gone */ }
-    try { Deno.removeSync(thumbPath(peer.sfi_id, id)); } catch { /* never had one */ }
-
-    const after = before.filter((p) => p.id !== id);
-    const patch: Partial<Display> = {};
-    if (!after.length) {
-      // Nothing left to show — the grid (with its empty state) is the only sane resting place.
-      patch.mode = "grid";
-      patch.current_photo_id = "";
-      patch.anchor_photo_id = "";
-    } else if (d.current_photo_id === id) {
-      // Advance to the next photo in order, wrapping past the end.
-      patch.current_photo_id = after[idx % after.length].id;
-    }
-    // A removed photo shifts the modulus; re-anchor so a running show doesn't jump.
-    if (d.slideshow_on) {
-      patch.anchor_photo_id = after.length
-        ? (patch.current_photo_id ?? resolveCurrent(after, d.current_photo_id)?.id ?? after[0].id)
-        : "";
-      patch.anchor_ms = Date.now();
-    }
-    await setDisplay(t, patch);
-
-    pushToInstance(peer.sfi_id, { type: "photos_changed" });
-    return jsonReply(replyPort, 200, await stateFor(t, peer));
+    const r = await handleWrite(peer.sfi_id, reqPath.slice("/api/".length), {}, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });

@@ -18,7 +18,7 @@
 // ============================================================================
 import {
   serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, sanitizeText,
-  pushToInstance, loadJsonFile, saveJsonFile,
+  pushToInstance, onUiMessage, loadJsonFile, saveJsonFile, log,
 } from "@frame-core";
 import { SIMS } from "./frame.sim.ts";
 
@@ -129,6 +129,225 @@ function standUpEverywhere(sfi: string, client_id: string) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Writes — one shared path for the HTTP arms and the bus dispatcher. `op` is
+// the API path with the leading `api/` stripped. Player identity is the
+// body's client_id (anonymous link viewers are first-class players by
+// design), so the per-op host/seat checks are the gates here.
+// ---------------------------------------------------------------------------
+type MutResult = { status: number; body: unknown };
+
+function handleWrite(sfi: string, op: string, b: any, peer: ReturnType<typeof parsePeerInfo>): MutResult {
+  // Open a NEW lobby for a game, seating the caller as host (seat 1). The
+  // caller implicitly stands up from anywhere else — one seat per person.
+  if (op === "create_session") {
+    const game = String(b?.game_id ?? "");
+    const client_id = String(b?.client_id ?? "");
+    if (!game || !client_id) return { status: 400, body: { error: "game_id and client_id required" } };
+    if (!SIMS[game]) return { status: 400, body: { error: "unknown game" } };
+    if (sessionsOf(sfi).length >= 12) return { status: 409, body: { error: "too many sessions" } };
+    // Bus writes carry no response, so the frontend may mint the session_id itself
+    // and navigate to it; HTTP callers omit it and get the minted id back.
+    const requested = typeof b?.session_id === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(b.session_id)
+      ? b.session_id : "";
+    if (requested && findSession(sfi, requested)) return { status: 409, body: { error: "session exists" } };
+    standUpEverywhere(sfi, client_id);
+    const session: Session = {
+      session_id: requested || crypto.randomUUID(), game_id: game, phase: "lobby",
+      round_id: 0, turn_index: 0, seed: null, deadline: null, started_at: Date.now(),
+      seats: [{
+        seat_no: 1, display_name: playerName(b, peer), initials: null, client_id,
+        runs: null, x: null, y: null, heading: 0, note: "",
+      }],
+    };
+    sessionsOf(sfi).push(session);
+    pushState(sfi);
+    return { status: 200, body: { ok: true, session_id: session.session_id } };
+  }
+
+  // Claim a seat in a lobby (lowest free, or the requested one if open).
+  if (op === "claim") {
+    const client_id = String(b?.client_id ?? "");
+    const session = findSession(sfi, String(b?.session_id ?? ""));
+    if (!client_id || !session) return { status: 400, body: { error: "client_id and session_id required" } };
+    if (session.phase !== "lobby") return { status: 409, body: { error: "not in lobby" } };
+    if (session.seats.some((s) => s.client_id === client_id)) return { status: 200, body: { ok: true, already: true } };
+    if (session.seats.length >= 6) return { status: 409, body: { error: "lobby full" } };
+    standUpEverywhere(sfi, client_id); // can't GC this session — caller isn't in it
+    const taken = new Set(session.seats.map((s) => s.seat_no));
+    const requested = Number(b?.seat_no);
+    let seat_no: number;
+    if (Number.isInteger(requested) && requested >= 1 && requested <= 6 && !taken.has(requested)) {
+      seat_no = requested;
+    } else {
+      seat_no = 1;
+      while (taken.has(seat_no)) seat_no++;
+    }
+    session.seats.push({
+      seat_no, display_name: playerName(b, peer), initials: null, client_id,
+      runs: null, x: null, y: null, heading: 0, note: "",
+    });
+    session.seats.sort((a, b2) => a.seat_no - b2.seat_no);
+    pushState(sfi);
+    return { status: 200, body: { ok: true, seat_no } };
+  }
+
+  // Stand up (from everywhere — a client holds at most one seat anyway).
+  if (op === "leave") {
+    const client_id = String(b?.client_id ?? "");
+    if (!client_id) return { status: 400, body: { error: "client_id required" } };
+    standUpEverywhere(sfi, client_id);
+    pushState(sfi);
+    return { status: 200, body: { ok: true } };
+  }
+
+  // Start the round_id: host (lowest seat) only, lobby only. Bumps the round
+  // (which makes every seat's previous runs stale), draws the shared seed;
+  // race sessions get their force-resolve deadline.
+  if (op === "start") {
+    const client_id = String(b?.client_id ?? "");
+    const session = findSession(sfi, String(b?.session_id ?? ""));
+    if (!session || session.phase !== "lobby") return { status: 409, body: { error: "not in lobby" } };
+    if (!session.seats.length) return { status: 409, body: { error: "no players seated" } };
+    if (session.seats[0].client_id !== client_id) return { status: 403, body: { error: "only the host can start" } };
+    const sim = SIMS[session.game_id];
+    session.phase = "playing";
+    session.round_id += 1;
+    session.turn_index = 0;
+    session.seed = drawSeed();
+    session.deadline = sim && sim.mode === "race" ? Date.now() + (sim.raceMs || 60000) + 20000 : null;
+    for (const s of session.seats) { s.x = null; s.note = ""; }
+    pushState(sfi);
+    return { status: 200, body: { ok: true } };
+  }
+
+  // Submit a turn. TURNS mode: players rotate through the seats `attempts`
+  // times. RACE mode: any seated player submits their finished run whenever
+  // they cross the line (one per seat per round). Either way the worker
+  // recomputes the authoritative result via the game's pure sim.
+  if (op === "turn") {
+    const client_id = String(b?.client_id ?? "");
+    const session = findSession(sfi, String(b?.session_id ?? ""));
+    if (!client_id || !session) return { status: 400, body: { error: "client_id and session_id required" } };
+    if (JSON.stringify(b?.payload ?? null).length > 16000) return { status: 400, body: { error: "payload too large" } };
+    if (session.phase !== "playing") return { status: 409, body: { error: "not playing" } };
+    const sim = SIMS[session.game_id];
+    if (!sim) return { status: 409, body: { error: "unknown game" } };
+    const mine = session.seats.find((s) => s.client_id === client_id);
+    if (!mine) return { status: 403, body: { error: "not seated" } };
+    const myAttempts = attemptsOf(mine, session.round_id);
+
+    if (sim.mode === "race") {
+      if (myAttempts.length >= 1) return { status: 200, body: { ok: true, duplicate: true } };
+    } else {
+      const n = session.seats.length;
+      const attempt = Math.floor(session.turn_index / n);
+      const active = session.seats[session.turn_index % n];
+      if (attempt >= sim.attempts || !active) return { status: 409, body: { error: "no active seat" } };
+      if (active.client_id !== client_id) return { status: 403, body: { error: "not your turn" } };
+      if (myAttempts.length > attempt) return { status: 200, body: { ok: true, duplicate: true } };
+    }
+
+    const { points, summary } = sim.resolve(b?.payload, session.seed || 0);
+    mine.runs = {
+      round_id: session.round_id,
+      attempts: [...myAttempts, { points, summary: sanitizeText(summary, 40) || "", payload: b?.payload ?? null }],
+    };
+
+    if (sim.mode === "race") {
+      if (session.seats.every((s) => attemptsOf(s, session.round_id).length > 0)) {
+        finishSession(sfi, session);
+      } else {
+        // first finisher starts the clock for stragglers
+        const cutoff = Date.now() + 30000;
+        if (!session.deadline || session.deadline > cutoff) session.deadline = cutoff;
+      }
+    } else {
+      session.turn_index += 1;
+      if (session.turn_index >= session.seats.length * sim.attempts) finishSession(sfi, session);
+    }
+    pushState(sfi);
+    return { status: 200, body: { ok: true, points, summary } };
+  }
+
+  // Race-mode position beacon (and heartbeat). Racers post their live position
+  // a few times a second; finished players and spectators post empty
+  // heartbeats. Every beacon also checks the race deadline, so the session
+  // force-resolves (unfinished seats = DNF) even if a straggler never submits.
+  if (op === "beacon") {
+    const client_id = String(b?.client_id ?? "");
+    const session = findSession(sfi, String(b?.session_id ?? ""));
+    if (!session || session.phase !== "playing") return { status: 200, body: { ok: true, stale: true } };
+    if (session.deadline && Date.now() > session.deadline) {
+      finishSession(sfi, session);
+      pushState(sfi);
+      return { status: 200, body: { ok: true, ended: true } };
+    }
+    if (Number.isFinite(Number(b?.x))) {
+      const mine = session.seats.find((s) => s.client_id === client_id);
+      if (mine) {
+        mine.x = Number(b.x);
+        mine.y = Number(b?.y) || 0;
+        mine.heading = Number(b?.heading) || 0;
+        mine.note = sanitizeText(String(b?.note ?? ""), 24) || "";
+        pushState(sfi);
+      }
+    }
+    return { status: 200, body: { ok: true } };
+  }
+
+  // Set the caller's arcade initials (1–3 chars). Updates their seat + relabels
+  // their placeholder ("???") high-score rows for the given game.
+  if (op === "initials") {
+    const client_id = String(b?.client_id ?? "");
+    const game = String(b?.game_id ?? "");
+    const initials = String(b?.initials ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3);
+    if (!client_id || !initials) return { status: 400, body: { error: "client_id and initials required" } };
+    for (const session of sessionsOf(sfi)) {
+      const mine = session.seats.find((s) => s.client_id === client_id);
+      if (mine) mine.initials = initials;
+    }
+    if (game) {
+      for (const row of scoresOf(sfi)) {
+        if (row.game_id === game && row.client_id === client_id && row.initials === "???") row.initials = initials;
+      }
+      saveScores();
+    }
+    pushState(sfi);
+    return { status: 200, body: { ok: true, initials } };
+  }
+
+  // Play again: host sends results → lobby, keeping seats. Old runs go stale
+  // automatically when the next start bumps the round.
+  if (op === "next") {
+    const client_id = String(b?.client_id ?? "");
+    const session = findSession(sfi, String(b?.session_id ?? ""));
+    if (!session || session.phase !== "results") return { status: 409, body: { error: "not in results" } };
+    if (session.seats.length && session.seats[0].client_id !== client_id && !peer.is_owner) {
+      return { status: 403, body: { error: "only the host can continue" } };
+    }
+    session.phase = "lobby";
+    session.seed = null;
+    session.turn_index = 0;
+    session.deadline = null;
+    pushState(sfi);
+    return { status: 200, body: { ok: true } };
+  }
+
+  return { status: 405, body: { error: "method not allowed" } };
+}
+
+// Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame → here).
+// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo.
+// Denials are logged, not answered — clients render from the state_changed push.
+onUiMessage((sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  if (typeof d.op !== "string" || !d.op) return;
+  const r = handleWrite(sfiId, d.op, d, peer);
+  if (r.status !== 200) log(`seamdeck: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
   // Static assets.
   if (method === "GET" && !reqPath.startsWith("/api/")) {
@@ -170,203 +389,11 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     });
   }
 
-  // Open a NEW lobby for a game, seating the caller as host (seat 1). The
-  // caller implicitly stands up from anywhere else — one seat per person.
-  if (reqPath === "/api/create_session" && method === "POST") {
-    const b = parseJsonBody<any>(body);
-    const game = String(b?.game_id ?? "");
-    const client_id = String(b?.client_id ?? "");
-    if (!game || !client_id) return jsonReply(replyPort, 400, { error: "game_id and client_id required" });
-    if (!SIMS[game]) return jsonReply(replyPort, 400, { error: "unknown game" });
-    if (sessionsOf(sfi).length >= 12) return jsonReply(replyPort, 409, { error: "too many sessions" });
-    standUpEverywhere(sfi, client_id);
-    const session: Session = {
-      session_id: crypto.randomUUID(), game_id: game, phase: "lobby",
-      round_id: 0, turn_index: 0, seed: null, deadline: null, started_at: Date.now(),
-      seats: [{
-        seat_no: 1, display_name: playerName(b, peer), initials: null, client_id,
-        runs: null, x: null, y: null, heading: 0, note: "",
-      }],
-    };
-    sessionsOf(sfi).push(session);
-    pushState(sfi);
-    return jsonReply(replyPort, 200, { ok: true, session_id: session.session_id });
-  }
-
-  // Claim a seat in a lobby (lowest free, or the requested one if open).
-  if (reqPath === "/api/claim" && method === "POST") {
-    const b = parseJsonBody<any>(body);
-    const client_id = String(b?.client_id ?? "");
-    const session = findSession(sfi, String(b?.session_id ?? ""));
-    if (!client_id || !session) return jsonReply(replyPort, 400, { error: "client_id and session_id required" });
-    if (session.phase !== "lobby") return jsonReply(replyPort, 409, { error: "not in lobby" });
-    if (session.seats.some((s) => s.client_id === client_id)) return jsonReply(replyPort, 200, { ok: true, already: true });
-    if (session.seats.length >= 6) return jsonReply(replyPort, 409, { error: "lobby full" });
-    standUpEverywhere(sfi, client_id); // can't GC this session — caller isn't in it
-    const taken = new Set(session.seats.map((s) => s.seat_no));
-    const requested = Number(b?.seat_no);
-    let seat_no: number;
-    if (Number.isInteger(requested) && requested >= 1 && requested <= 6 && !taken.has(requested)) {
-      seat_no = requested;
-    } else {
-      seat_no = 1;
-      while (taken.has(seat_no)) seat_no++;
-    }
-    session.seats.push({
-      seat_no, display_name: playerName(b, peer), initials: null, client_id,
-      runs: null, x: null, y: null, heading: 0, note: "",
-    });
-    session.seats.sort((a, b2) => a.seat_no - b2.seat_no);
-    pushState(sfi);
-    return jsonReply(replyPort, 200, { ok: true, seat_no });
-  }
-
-  // Stand up (from everywhere — a client holds at most one seat anyway).
-  if (reqPath === "/api/leave" && method === "POST") {
-    const b = parseJsonBody<any>(body);
-    const client_id = String(b?.client_id ?? "");
-    if (!client_id) return jsonReply(replyPort, 400, { error: "client_id required" });
-    standUpEverywhere(sfi, client_id);
-    pushState(sfi);
-    return jsonReply(replyPort, 200, { ok: true });
-  }
-
-  // Start the round_id: host (lowest seat) only, lobby only. Bumps the round
-  // (which makes every seat's previous runs stale), draws the shared seed;
-  // race sessions get their force-resolve deadline.
-  if (reqPath === "/api/start" && method === "POST") {
-    const b = parseJsonBody<any>(body);
-    const client_id = String(b?.client_id ?? "");
-    const session = findSession(sfi, String(b?.session_id ?? ""));
-    if (!session || session.phase !== "lobby") return jsonReply(replyPort, 409, { error: "not in lobby" });
-    if (!session.seats.length) return jsonReply(replyPort, 409, { error: "no players seated" });
-    if (session.seats[0].client_id !== client_id) return jsonReply(replyPort, 403, { error: "only the host can start" });
-    const sim = SIMS[session.game_id];
-    session.phase = "playing";
-    session.round_id += 1;
-    session.turn_index = 0;
-    session.seed = drawSeed();
-    session.deadline = sim && sim.mode === "race" ? Date.now() + (sim.raceMs || 60000) + 20000 : null;
-    for (const s of session.seats) { s.x = null; s.note = ""; }
-    pushState(sfi);
-    return jsonReply(replyPort, 200, { ok: true });
-  }
-
-  // Submit a turn. TURNS mode: players rotate through the seats `attempts`
-  // times. RACE mode: any seated player submits their finished run whenever
-  // they cross the line (one per seat per round). Either way the worker
-  // recomputes the authoritative result via the game's pure sim.
-  if (reqPath === "/api/turn" && method === "POST") {
-    const b = parseJsonBody<any>(body);
-    const client_id = String(b?.client_id ?? "");
-    const session = findSession(sfi, String(b?.session_id ?? ""));
-    if (!client_id || !session) return jsonReply(replyPort, 400, { error: "client_id and session_id required" });
-    if (JSON.stringify(b?.payload ?? null).length > 16000) return jsonReply(replyPort, 400, { error: "payload too large" });
-    if (session.phase !== "playing") return jsonReply(replyPort, 409, { error: "not playing" });
-    const sim = SIMS[session.game_id];
-    if (!sim) return jsonReply(replyPort, 409, { error: "unknown game" });
-    const mine = session.seats.find((s) => s.client_id === client_id);
-    if (!mine) return jsonReply(replyPort, 403, { error: "not seated" });
-    const myAttempts = attemptsOf(mine, session.round_id);
-
-    if (sim.mode === "race") {
-      if (myAttempts.length >= 1) return jsonReply(replyPort, 200, { ok: true, duplicate: true });
-    } else {
-      const n = session.seats.length;
-      const attempt = Math.floor(session.turn_index / n);
-      const active = session.seats[session.turn_index % n];
-      if (attempt >= sim.attempts || !active) return jsonReply(replyPort, 409, { error: "no active seat" });
-      if (active.client_id !== client_id) return jsonReply(replyPort, 403, { error: "not your turn" });
-      if (myAttempts.length > attempt) return jsonReply(replyPort, 200, { ok: true, duplicate: true });
-    }
-
-    const { points, summary } = sim.resolve(b?.payload, session.seed || 0);
-    mine.runs = {
-      round_id: session.round_id,
-      attempts: [...myAttempts, { points, summary: sanitizeText(summary, 40) || "", payload: b?.payload ?? null }],
-    };
-
-    if (sim.mode === "race") {
-      if (session.seats.every((s) => attemptsOf(s, session.round_id).length > 0)) {
-        finishSession(sfi, session);
-      } else {
-        // first finisher starts the clock for stragglers
-        const cutoff = Date.now() + 30000;
-        if (!session.deadline || session.deadline > cutoff) session.deadline = cutoff;
-      }
-    } else {
-      session.turn_index += 1;
-      if (session.turn_index >= session.seats.length * sim.attempts) finishSession(sfi, session);
-    }
-    pushState(sfi);
-    return jsonReply(replyPort, 200, { ok: true, points, summary });
-  }
-
-  // Race-mode position beacon (and heartbeat). Racers post their live position
-  // a few times a second; finished players and spectators post empty
-  // heartbeats. Every beacon also checks the race deadline, so the session
-  // force-resolves (unfinished seats = DNF) even if a straggler never submits.
-  if (reqPath === "/api/beacon" && method === "POST") {
-    const b = parseJsonBody<any>(body);
-    const client_id = String(b?.client_id ?? "");
-    const session = findSession(sfi, String(b?.session_id ?? ""));
-    if (!session || session.phase !== "playing") return jsonReply(replyPort, 200, { ok: true, stale: true });
-    if (session.deadline && Date.now() > session.deadline) {
-      finishSession(sfi, session);
-      pushState(sfi);
-      return jsonReply(replyPort, 200, { ok: true, ended: true });
-    }
-    if (Number.isFinite(Number(b?.x))) {
-      const mine = session.seats.find((s) => s.client_id === client_id);
-      if (mine) {
-        mine.x = Number(b.x);
-        mine.y = Number(b?.y) || 0;
-        mine.heading = Number(b?.heading) || 0;
-        mine.note = sanitizeText(String(b?.note ?? ""), 24) || "";
-        pushState(sfi);
-      }
-    }
-    return jsonReply(replyPort, 200, { ok: true });
-  }
-
-  // Set the caller's arcade initials (1–3 chars). Updates their seat + relabels
-  // their placeholder ("???") high-score rows for the given game.
-  if (reqPath === "/api/initials" && method === "POST") {
-    const b = parseJsonBody<any>(body);
-    const client_id = String(b?.client_id ?? "");
-    const game = String(b?.game_id ?? "");
-    const initials = String(b?.initials ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3);
-    if (!client_id || !initials) return jsonReply(replyPort, 400, { error: "client_id and initials required" });
-    for (const session of sessionsOf(sfi)) {
-      const mine = session.seats.find((s) => s.client_id === client_id);
-      if (mine) mine.initials = initials;
-    }
-    if (game) {
-      for (const row of scoresOf(sfi)) {
-        if (row.game_id === game && row.client_id === client_id && row.initials === "???") row.initials = initials;
-      }
-      saveScores();
-    }
-    pushState(sfi);
-    return jsonReply(replyPort, 200, { ok: true, initials });
-  }
-
-  // Play again: host sends results → lobby, keeping seats. Old runs go stale
-  // automatically when the next start bumps the round.
-  if (reqPath === "/api/next" && method === "POST") {
-    const b = parseJsonBody<any>(body);
-    const client_id = String(b?.client_id ?? "");
-    const session = findSession(sfi, String(b?.session_id ?? ""));
-    if (!session || session.phase !== "results") return jsonReply(replyPort, 409, { error: "not in results" });
-    if (session.seats.length && session.seats[0].client_id !== client_id && !peer.is_owner) {
-      return jsonReply(replyPort, 403, { error: "only the host can continue" });
-    }
-    session.phase = "lobby";
-    session.seed = null;
-    session.turn_index = 0;
-    session.deadline = null;
-    pushState(sfi);
-    return jsonReply(replyPort, 200, { ok: true });
+  // HTTP arms kept for API compatibility (older viewers, scripted clients); the
+  // frame's own UI writes over the bus (see the dispatcher above). Same logic.
+  if (reqPath.startsWith("/api/") && method === "POST") {
+    const r = handleWrite(sfi, reqPath.slice("/api/".length), parseJsonBody<any>(body), peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   return jsonReply(replyPort, 405, { error: "method not allowed" });

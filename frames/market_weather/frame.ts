@@ -29,7 +29,7 @@
 // ----------------------------------------------------------------------------------------
 import {
   log, parsePeerInfo, serveFileAtPath, serveHtmlShell,
-  jsonReply, parseJsonBody, sanitizeText, pushToInstance,
+  jsonReply, parseJsonBody, sanitizeText, pushToInstance, onUiMessage,
   loadJsonFile, saveJsonFile,
 } from "@frame-core";
 
@@ -410,6 +410,37 @@ function scoreForecast(w: WeatherData): HourReading[] {
   return w.forecast_hours.map((h) => ({ ...h, ...scoreHour(h, w.past_30d_mean_temp_f) }));
 }
 
+// ----- Save mutation (shared by the HTTP arm and the bus dispatcher) --------------------
+type MutPeer = ReturnType<typeof parsePeerInfo>;
+type MutResult = { status: number; body: Record<string, unknown> };
+
+// Editor-only. Never gate on is_sfi_member — a Viewer-role member would slip through and
+// be able to rewrite the market.
+function mutSave(sfi_id: string, v: { location?: unknown; events?: unknown } | null, peer: MutPeer): MutResult {
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  if (!v) return { status: 400, body: { error: "invalid JSON" } };
+  // Events: drop anything that doesn't sanitize cleanly, cap the list at 32 so a
+  // misbehaving / pasted-in payload can't blow up the prefs JSON.
+  const events: WeeklyEvent[] = Array.isArray(v.events)
+    ? (v.events.map(sanitizeEvent).filter((e): e is WeeklyEvent => e !== null).slice(0, 32))
+    : [];
+  const next: Prefs = {
+    location: sanitizeText(v.location, 120),
+    events,
+  };
+  setPrefs(sfi_id, next);
+  pushToInstance(sfi_id, { type: "settings_changed" });
+  return { status: 200, body: { prefs: next } };
+}
+
+onUiMessage((sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  if (d.op !== "save") return;
+  const r = mutSave(sfiId, d, peer);
+  if (r.status !== 200) log(`market weather: bus op save → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 // ----- HTTP handler ---------------------------------------------------------------------
 self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cookies) => {
   const peer = parsePeerInfo(query, cookies);
@@ -448,19 +479,8 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cook
 
   if (reqPath === "/api/save" && method === "POST") {
     const v = parseJsonBody<{ location?: unknown; events?: unknown }>(body);
-    if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
-    // Events: drop anything that doesn't sanitize cleanly, cap the list at 32 so a
-    // misbehaving / pasted-in payload can't blow up the prefs JSON.
-    const events: WeeklyEvent[] = Array.isArray(v.events)
-      ? (v.events.map(sanitizeEvent).filter((e): e is WeeklyEvent => e !== null).slice(0, 32))
-      : [];
-    const next: Prefs = {
-      location: sanitizeText(v.location, 120),
-      events,
-    };
-    setPrefs(peer.sfi_id, next);
-    pushToInstance(peer.sfi_id, { type: "settings_changed" });
-    return jsonReply(replyPort, 200, { prefs: next });
+    const r = mutSave(peer.sfi_id, v, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   if (method === "GET") {

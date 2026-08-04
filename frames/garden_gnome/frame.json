@@ -12,8 +12,8 @@
     "default_width_px": 560,
     "default_height_px": 640,
     "created_at": "2026-05-06T00:00:00Z",
-    "modified_at": "2026-08-04T02:00:00Z",
-    "app_version_min": "0.1.7",
+    "modified_at": "2026-08-04T21:00:00Z",
+    "app_version_min": "0.2.5",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
     "attribution_log": []

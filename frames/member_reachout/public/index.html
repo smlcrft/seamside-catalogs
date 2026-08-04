@@ -13,7 +13,7 @@
 import {
   frame, html, render, useState, useEffect, useMemo,
   useFramePush, applyChannel, WAITING, WaitingForOwner,
-} from "/lib/js/framelib.js";
+} from "./lib/js/framelib.js";
 
 // ---- small helpers --------------------------------------------------------------------
 function fmtWhen(ms) {
@@ -33,6 +33,18 @@ function audienceLabel(entry) {
 function cleanPhone(p) {
   return String(p || "").replace(/[^0-9+]/g, "");
 }
+
+// Writes go over the tether (frame.busSend) — HTTP POST bodies are dropped on Android.
+// Fire-and-forget: resulting state arrives via the log_changed / settings_changed pushes.
+// Feature-detect: an older viewer's framelib has no busSend — fall back to HTTP.
+// (api/resolve is a GET — it needs the response to build the links, so it can't ride the bus.)
+const write = (path, body) => {
+  if (typeof frame.busSend === "function") {
+    frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+    return Promise.resolve({});
+  }
+  return frame.api(path, body);
+};
 
 // ---- root -----------------------------------------------------------------------------
 function App() {
@@ -169,7 +181,7 @@ function LogEntry({ entry, canEdit, onResend, onRefresh }) {
   async function del() {
     if (!(await frame.confirm("Remove this message from the log?", { danger: true, okLabel: "Remove" }))) return;
     try {
-      await frame.api("api/log/delete", { id: entry.id });
+      await write("api/log/delete", { id: entry.id });
       await onRefresh();
     } catch (e) { await frame.alert(e.message || "failed"); }
   }
@@ -260,7 +272,8 @@ function ComposeModal({ roles, initial, onClose, onSent }) {
   }
 
   async function resolve() {
-    const r = await frame.api("api/resolve", audiencePayload());
+    const a = audiencePayload();
+    const r = await frame.api(`api/resolve?to_all=${a.to_all ? 1 : 0}&roles=${encodeURIComponent(JSON.stringify(a.roles))}`);
     return r.recipients || [];
   }
 
@@ -276,7 +289,7 @@ function ComposeModal({ roles, initial, onClose, onSent }) {
       if (subject.trim()) parts.push(`subject=${encodeURIComponent(subject.trim())}`);
       parts.push(`body=${encodeURIComponent(message)}`);
       frame.openExternalUrl(`mailto:?${parts.join("&")}`);
-      await frame.api("api/log", {
+      await write("api/log", {
         ...audiencePayload(), method: "email",
         subject: subject.trim(), message, recipient_count: recipients.length,
       });
@@ -307,7 +320,7 @@ function ComposeModal({ roles, initial, onClose, onSent }) {
     setRunner(null);
     if (attempted > 0) {
       try {
-        await frame.api("api/log", {
+        await write("api/log", {
           ...audiencePayload(), method: "text",
           subject: "", message, recipient_count: total, attempted_count: attempted,
         });
@@ -455,7 +468,7 @@ function SettingsModal({ settings, roles, onClose, onSaved }) {
 
   async function save() {
     try {
-      await frame.api("api/settings", {
+      await write("api/settings", {
         title: title.trim(),
         public_roles: Array.from(publicRoles),
       });

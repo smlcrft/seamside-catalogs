@@ -34,7 +34,7 @@
     </button>
   </div>
   <script type="module">
-    import { frame } from "/lib/js/framelib.js";
+    import { frame } from "./lib/js/framelib.js";
 
     const FACES = ['⚀','⚁','⚂','⚃','⚄','⚅'];
     const die = document.getElementById('die');
@@ -67,6 +67,10 @@
 
     function roll() {
       if (rolling) return;
+      // Writes go over the tether (frame.busSend); feature-detect and fall back to the
+      // HTTP POST for older viewer builds. Fire-and-forget — the result arrives via the
+      // 'rolled' push below.
+      if (typeof frame.busSend === 'function') { frame.busSend({ op: 'roll' }); return; }
       frame.api('api/roll', null, 'POST').catch(() => {});
     }
 

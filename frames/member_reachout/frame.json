@@ -9,8 +9,8 @@
         "web_scripts": []
     },
     "created_at": "2026-06-27T14:00:00Z",
-    "modified_at": "2026-08-04T00:00:00Z",
-    "app_version_min": "0.1.8",
+    "modified_at": "2026-08-04T21:00:00Z",
+    "app_version_min": "0.2.5",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
     "attribution_log": []

@@ -26,7 +26,7 @@
 // framecore handles viewer tracking, including anonymous read-only viewers.
 // ----------------------------------------------------------------------------------------
 import {
-  log, parsePeerInfo, serveFileAtPath, serveHtmlShell, pushToInstance,
+  log, parsePeerInfo, serveFileAtPath, serveHtmlShell, pushToInstance, onUiMessage,
   jsonReply, parseJsonBody, sanitizeText,
   loadJsonFile, saveJsonFile, declareTables, ensureTables, table,
 } from "@frame-core";
@@ -167,6 +167,154 @@ async function listItems(t: Tables, kind: string, meUserId: string) {
 }
 
 // ----------------------------------------------------------------------------------------
+// SHARED WRITE LOGIC — one implementation behind both entry points (the HTTP POST arms
+// and the bus dispatcher below); the participation/owner gates live here so the two
+// paths can never drift. `op` is the API path with the leading "/api/" stripped.
+// ----------------------------------------------------------------------------------------
+type WritePeer = ReturnType<typeof parsePeerInfo>;
+type WriteResult = { status: number; body: Record<string, unknown> };
+
+async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: WritePeer): Promise<WriteResult> {
+  // Local tables are always ready; the gate stays so a future graduation to
+  // synced tables needs no code change here.
+  const ready = ensureTables(peer);
+  if (!ready.ready) return { status: 503, body: { error: "table not bound" } };
+  const t: Tables = {
+    messages: table("messages", sfiId),
+    items: table("items", sfiId),
+    votes: table("votes", sfiId),
+  };
+  const isOwner = peer.is_owner;
+
+  // Every write requires canParticipate (see header) — read-only viewers get one
+  // uniform 403 here instead of per-op checks.
+  const prefs = getPrefs(sfiId);
+  const canParticipate = peer.is_sfi_editor || (prefs.public_to_space_viewers === true && peer.is_sfi_member);
+  if (!canParticipate) return { status: 403, body: { error: "read-only access" } };
+
+  if (op === "send") {
+    const text = sanitizeText(v?.body, MESSAGE_MAX_LEN);
+    if (!text) return { status: 400, body: { error: "body required" } };
+    const userName = sanitizeText(peer.user_name, 80) || "user";
+    const now = Date.now();
+    const { row_id } = await t.messages.upsert(null, {
+      user_id: peer.user_id, user_name: userName, body: text, created_at: now,
+    });
+    const msg = { id: row_id, user_id: peer.user_id, user_name: userName, body: text, created_at: now };
+    pushToInstance(sfiId, { type: "rt_message", sfi_id: sfiId, message: msg });
+    return { status: 200, body: { ok: true, id: row_id } };
+  }
+
+  if (op === "delete-message") {
+    const id = typeof v?.id === "string" ? v.id : "";
+    if (!id) return { status: 400, body: { error: "id required" } };
+    const row = await t.messages.get(id);
+    if (!row) return { status: 404, body: { error: "not found" } };
+    if (!isOwner && row.user_id !== peer.user_id) return { status: 403, body: { error: "forbidden" } };
+    await t.messages.delete(id);
+    pushToInstance(sfiId, { type: "rt_message_delete", sfi_id: sfiId, id });
+    return { status: 200, body: { ok: true } };
+  }
+
+  // -------- LIST ITEMS --------
+  if (op === "item-add") {
+    const kind = sanitizeText(v?.kind, 20);
+    if (!VALID_KINDS.has(kind)) return { status: 400, body: { error: "invalid kind" } };
+    const text = sanitizeText(v?.body, ITEM_MAX_LEN);
+    if (!text) return { status: 400, body: { error: "body required" } };
+    const userName = sanitizeText(peer.user_name, 80) || "user";
+    const now = Date.now();
+    const { row_id } = await t.items.upsert(null, {
+      kind, user_id: peer.user_id, user_name: userName, body: text, created_at: now,
+    });
+    // Adding an item counts as the author's own +1 — sharing an idea is itself a vote
+    // for it. Other viewers will receive votes=1 / i_voted=false (their personal flag
+    // gets corrected on receive based on whether they authored the item).
+    // One vote row per (item, user): key it by a stable id so it can never fork.
+    await t.votes.upsert(`${row_id}:${peer.user_id}`, {
+      item_id: row_id, user_id: peer.user_id, user_name: userName, created_at: now,
+    });
+    const item = {
+      id: row_id, user_id: peer.user_id, user_name: userName,
+      body: text, created_at: now, votes: 1, i_voted: true,
+    };
+    pushToInstance(sfiId, { type: "rt_item_add", sfi_id: sfiId, kind, item });
+    return { status: 200, body: { ok: true, id: row_id } };
+  }
+
+  if (op === "item-delete") {
+    const id = typeof v?.id === "string" ? v.id : "";
+    if (!id) return { status: 400, body: { error: "id required" } };
+    const row = await t.items.get(id);
+    if (!row) return { status: 404, body: { error: "not found" } };
+    if (!isOwner && row.user_id !== peer.user_id) return { status: 403, body: { error: "forbidden" } };
+    await t.votes.deleteWhere({ item_id: id });
+    await t.items.delete(id);
+    pushToInstance(sfiId, { type: "rt_item_delete", sfi_id: sfiId, kind: row.kind, id });
+    return { status: 200, body: { ok: true } };
+  }
+
+  // Toggle a +1 from the requesting user. Self-votes are allowed — the value of an item
+  // is the count of distinct members who think it matters, including its author.
+  if (op === "item-vote") {
+    const id = typeof v?.id === "string" ? v.id : "";
+    if (!id) return { status: 400, body: { error: "id required" } };
+    const row = await t.items.get(id);
+    if (!row) return { status: 404, body: { error: "not found" } };
+    const userName = sanitizeText(peer.user_name, 80) || "user";
+    // One vote row per (item, user), keyed by a stable id — toggling is get→delete/upsert
+    // on that id, so concurrent votes can never fork it into two rows.
+    const voteId = `${id}:${peer.user_id}`;
+    const hadVote = !!(await t.votes.get(voteId));
+    if (hadVote) {
+      await t.votes.delete(voteId);
+    } else {
+      await t.votes.upsert(voteId, {
+        item_id: id, user_id: peer.user_id, user_name: userName, created_at: Date.now(),
+      });
+    }
+    const votes = (await t.votes.query({ where: { item_id: id }, limit: 1 })).total;
+    pushToInstance(sfiId, {
+      type: "rt_item_vote", sfi_id: sfiId, kind: row.kind, id,
+      votes,
+    });
+    return { status: 200, body: { ok: true, votes, i_voted: !hadVote } };
+  }
+
+  // -------- OWNER SETTINGS --------
+  if (op === "settings") {
+    if (!isOwner) return { status: 403, body: { error: "owner only" } };
+    const title = sanitizeText(v?.title, 80) || DEFAULT_PREFS.title;
+    const positiveLabel = sanitizeText(v?.positive_label, 40) || DEFAULT_PREFS.positive_label;
+    const negativeLabel = sanitizeText(v?.negative_label, 40) || DEFAULT_PREFS.negative_label;
+    const next: Prefs = {
+      title,
+      positive_label: positiveLabel,
+      negative_label: negativeLabel,
+      public_to_space_viewers: v?.public_to_space_viewers === true,
+    };
+    setPrefs(sfiId, next);
+    pushToInstance(sfiId, { type: "rt_prefs", sfi_id: sfiId, prefs: next });
+    return { status: 200, body: { ok: true, prefs: next } };
+  }
+
+  return { status: 404, body: { error: "unknown op" } };
+}
+
+// ----------------------------------------------------------------------------------------
+// BUS DISPATCHER — the frontend's write path (frame.busSend → BusUiToFrame). `peer` is the
+// sender's platform-resolved identity, same shape as parsePeerInfo; the gates live inside
+// handleWrite. Denials are logged, not answered.
+// ----------------------------------------------------------------------------------------
+onUiMessage(async (sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  const op = typeof d.op === "string" ? d.op : "";
+  const r = await handleWrite(sfiId, op, d, peer);
+  if (r.status !== 200) log(`roundtable: bus op ${op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
+// ----------------------------------------------------------------------------------------
 // HANDLER
 // ----------------------------------------------------------------------------------------
 self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body, cookies) => {
@@ -191,26 +339,26 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
 
   // Participation auth: SFI editors (role > Viewer) always; Viewer-role space members
   // when the owner has turned on `public_to_space_viewers`. Non-members never
-  // participate. Reads are open to every viewer who reaches the frame. Mutation routes
-  // short-circuit with `if (!canParticipate)` below so a read-only viewer that tries
-  // to POST gets a clean 403 instead of an unauthorized write.
+  // participate. Reads are open to every viewer who reaches the frame. Writes are gated
+  // inside handleWrite (shared by the HTTP arms and the bus dispatcher above) so a
+  // read-only viewer that tries one gets a clean 403 instead of an unauthorized write.
   const authPrefs = sfiId ? getPrefs(sfiId) : DEFAULT_PREFS;
   const publicToSpaceViewers = authPrefs.public_to_space_viewers === true;
   const canParticipate = isSfiEditor || (publicToSpaceViewers && isSfiMember);
 
   if (reqPath.startsWith("/api/")) {
     if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
-    // Local tables are always ready; the gate stays so a future graduation to
-    // synced tables needs no code change here.
-    const ready = ensureTables(peer);
-    if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
-    const t: Tables = {
-      messages: table("messages", sfiId),
-      items: table("items", sfiId),
-      votes: table("votes", sfiId),
-    };
 
     if (reqPath === "/api/state" && method === "GET") {
+      // Local tables are always ready; the gate stays so a future graduation to
+      // synced tables needs no code change here.
+      const ready = ensureTables(peer);
+      if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
+      const t: Tables = {
+        messages: table("messages", sfiId),
+        items: table("items", sfiId),
+        votes: table("votes", sfiId),
+      };
       return jsonReply(replyPort, 200, {
         prefs: getPrefs(sfiId),
         messages: await listMessages(t),
@@ -222,122 +370,16 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
       });
     }
 
-    // Every mutation route below requires canParticipate. Read-only viewers get a
-    // single uniform 403 here instead of per-route checks.
-    if (!canParticipate) {
-      return jsonReply(replyPort, 403, { error: "read-only access" });
-    }
-
-    if (reqPath === "/api/send" && method === "POST") {
-      const v = parseJsonBody<{ body?: unknown }>(body);
-      const text = sanitizeText(v?.body, MESSAGE_MAX_LEN);
-      if (!text) return jsonReply(replyPort, 400, { error: "body required" });
-      const userName = sanitizeText(peer.user_name, 80) || "user";
-      const now = Date.now();
-      const { row_id } = await t.messages.upsert(null, {
-        user_id: peer.user_id, user_name: userName, body: text, created_at: now,
-      });
-      const msg = { id: row_id, user_id: peer.user_id, user_name: userName, body: text, created_at: now };
-      pushToInstance(sfiId, { type: "rt_message", sfi_id: sfiId, message: msg });
-      return jsonReply(replyPort, 200, { ok: true, id: row_id });
-    }
-
-    if (reqPath === "/api/delete-message" && method === "POST") {
-      const v = parseJsonBody<{ id?: unknown }>(body);
-      const id = typeof v?.id === "string" ? v.id : "";
-      if (!id) return jsonReply(replyPort, 400, { error: "id required" });
-      const row = await t.messages.get(id);
-      if (!row) return jsonReply(replyPort, 404, { error: "not found" });
-      if (!isOwner && row.user_id !== peer.user_id) return jsonReply(replyPort, 403, { error: "forbidden" });
-      await t.messages.delete(id);
-      pushToInstance(sfiId, { type: "rt_message_delete", sfi_id: sfiId, id });
-      return jsonReply(replyPort, 200, { ok: true });
-    }
-
-    // -------- LIST ITEMS --------
-    if (reqPath === "/api/item-add" && method === "POST") {
-      const v = parseJsonBody<{ kind?: unknown; body?: unknown }>(body);
-      const kind = sanitizeText(v?.kind, 20);
-      if (!VALID_KINDS.has(kind)) return jsonReply(replyPort, 400, { error: "invalid kind" });
-      const text = sanitizeText(v?.body, ITEM_MAX_LEN);
-      if (!text) return jsonReply(replyPort, 400, { error: "body required" });
-      const userName = sanitizeText(peer.user_name, 80) || "user";
-      const now = Date.now();
-      const { row_id } = await t.items.upsert(null, {
-        kind, user_id: peer.user_id, user_name: userName, body: text, created_at: now,
-      });
-      // Adding an item counts as the author's own +1 — sharing an idea is itself a vote
-      // for it. Other viewers will receive votes=1 / i_voted=false (their personal flag
-      // gets corrected on receive based on whether they authored the item).
-      // One vote row per (item, user): key it by a stable id so it can never fork.
-      await t.votes.upsert(`${row_id}:${peer.user_id}`, {
-        item_id: row_id, user_id: peer.user_id, user_name: userName, created_at: now,
-      });
-      const item = {
-        id: row_id, user_id: peer.user_id, user_name: userName,
-        body: text, created_at: now, votes: 1, i_voted: true,
-      };
-      pushToInstance(sfiId, { type: "rt_item_add", sfi_id: sfiId, kind, item });
-      return jsonReply(replyPort, 200, { ok: true, id: row_id });
-    }
-
-    if (reqPath === "/api/item-delete" && method === "POST") {
-      const v = parseJsonBody<{ id?: unknown }>(body);
-      const id = typeof v?.id === "string" ? v.id : "";
-      if (!id) return jsonReply(replyPort, 400, { error: "id required" });
-      const row = await t.items.get(id);
-      if (!row) return jsonReply(replyPort, 404, { error: "not found" });
-      if (!isOwner && row.user_id !== peer.user_id) return jsonReply(replyPort, 403, { error: "forbidden" });
-      await t.votes.deleteWhere({ item_id: id });
-      await t.items.delete(id);
-      pushToInstance(sfiId, { type: "rt_item_delete", sfi_id: sfiId, kind: row.kind, id });
-      return jsonReply(replyPort, 200, { ok: true });
-    }
-
-    // Toggle a +1 from the requesting user. Self-votes are allowed — the value of an item
-    // is the count of distinct members who think it matters, including its author.
-    if (reqPath === "/api/item-vote" && method === "POST") {
-      const v = parseJsonBody<{ id?: unknown }>(body);
-      const id = typeof v?.id === "string" ? v.id : "";
-      if (!id) return jsonReply(replyPort, 400, { error: "id required" });
-      const row = await t.items.get(id);
-      if (!row) return jsonReply(replyPort, 404, { error: "not found" });
-      const userName = sanitizeText(peer.user_name, 80) || "user";
-      // One vote row per (item, user), keyed by a stable id — toggling is get→delete/upsert
-      // on that id, so concurrent votes can never fork it into two rows.
-      const voteId = `${id}:${peer.user_id}`;
-      const hadVote = !!(await t.votes.get(voteId));
-      if (hadVote) {
-        await t.votes.delete(voteId);
-      } else {
-        await t.votes.upsert(voteId, {
-          item_id: id, user_id: peer.user_id, user_name: userName, created_at: Date.now(),
-        });
+    // HTTP arms kept for API compatibility (older viewers, web viewer fallback); the
+    // frame's own UI writes over the bus (see the dispatcher above). Same logic, same
+    // gates, either way.
+    if (method === "POST") {
+      const op = reqPath.slice("/api/".length);
+      if (op === "send" || op === "delete-message" || op === "item-add"
+        || op === "item-delete" || op === "item-vote" || op === "settings") {
+        const r = await handleWrite(sfiId, op, parseJsonBody<Record<string, unknown>>(body), peer);
+        return jsonReply(replyPort, r.status, r.body);
       }
-      const votes = (await t.votes.query({ where: { item_id: id }, limit: 1 })).total;
-      pushToInstance(sfiId, {
-        type: "rt_item_vote", sfi_id: sfiId, kind: row.kind, id,
-        votes,
-      });
-      return jsonReply(replyPort, 200, { ok: true, votes, i_voted: !hadVote });
-    }
-
-    // -------- OWNER SETTINGS --------
-    if (reqPath === "/api/settings" && method === "POST") {
-      if (!isOwner) return jsonReply(replyPort, 403, { error: "owner only" });
-      const v = parseJsonBody<{ title?: unknown; positive_label?: unknown; negative_label?: unknown; public_to_space_viewers?: unknown }>(body);
-      const title = sanitizeText(v?.title, 80) || DEFAULT_PREFS.title;
-      const positiveLabel = sanitizeText(v?.positive_label, 40) || DEFAULT_PREFS.positive_label;
-      const negativeLabel = sanitizeText(v?.negative_label, 40) || DEFAULT_PREFS.negative_label;
-      const next: Prefs = {
-        title,
-        positive_label: positiveLabel,
-        negative_label: negativeLabel,
-        public_to_space_viewers: v?.public_to_space_viewers === true,
-      };
-      setPrefs(sfiId, next);
-      pushToInstance(sfiId, { type: "rt_prefs", sfi_id: sfiId, prefs: next });
-      return jsonReply(replyPort, 200, { ok: true, prefs: next });
     }
   }
 

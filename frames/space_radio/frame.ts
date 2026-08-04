@@ -15,7 +15,7 @@
 // localStorage — it never travels through the backend and is not synced across viewers.
 // ----------------------------------------------------------------------------------------
 import {
-  log, parsePeerInfo, serveFileAtPath, serveHtmlShell, pushToInstance,
+  log, parsePeerInfo, serveFileAtPath, serveHtmlShell, pushToInstance, onUiMessage,
   jsonReply, parseJsonBody, sanitizeText,
   loadJsonFile, saveJsonFile,
 } from "@frame-core";
@@ -187,6 +187,63 @@ function setPlaystate(sfiId: string, next: Playstate): void {
 }
 
 // ----------------------------------------------------------------------------------------
+// MUTATION — shared by the HTTP arm and the bus dispatcher below; same validation, same
+// role gate, either entry point.
+//
+// Set station and/or playing. Both fields are optional — omitted fields preserve the
+// current value, so the UI can toggle just play/pause without re-sending the station id.
+// An empty / null station_id explicitly clears the station and forces playing=false
+// (you can't be "playing nothing").
+// ----------------------------------------------------------------------------------------
+type MutPeer = ReturnType<typeof parsePeerInfo>;
+type MutResult = { status: number; body: unknown };
+
+function mutSet(sfiId: string, v: { station_id?: unknown; playing?: unknown } | null, peer: MutPeer): MutResult {
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  if (!sfiId) return { status: 400, body: { error: "sfi_id missing" } };
+  const cur = getPlaystate(sfiId);
+
+  let stationId: string | null = cur.station_id;
+  if (Object.prototype.hasOwnProperty.call(v ?? {}, "station_id")) {
+    const raw = v?.station_id;
+    if (raw === null || raw === "") {
+      stationId = null;
+    } else {
+      const sid = sanitizeText(raw, 80);
+      if (!STATION_INDEX.has(sid)) return { status: 400, body: { error: "unknown station" } };
+      stationId = sid;
+    }
+  }
+
+  let playing = cur.playing;
+  if (Object.prototype.hasOwnProperty.call(v ?? {}, "playing")) {
+    playing = v?.playing === true;
+  }
+  if (!stationId) playing = false;
+
+  const userName = sanitizeText(peer.user_name, 80) || "user";
+  const next: Playstate = {
+    station_id: stationId,
+    playing,
+    updated_at: Date.now(),
+    updated_by_name: userName,
+  };
+  setPlaystate(sfiId, next);
+  pushToInstance(sfiId, { type: "radio_state", sfi_id: sfiId, playstate: next });
+  return { status: 200, body: { ok: true, playstate: next } };
+}
+
+// Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame). `peer` is the
+// sender's platform-resolved identity, same shape as parsePeerInfo; the role gate lives
+// inside mutSet. Denials are logged, not answered.
+onUiMessage((sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  const r = d.op === "set" ? mutSet(sfiId, d, peer) : null;
+  if (r && r.status !== 200) log(`space_radio: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
+// ----------------------------------------------------------------------------------------
 // HANDLER
 // ----------------------------------------------------------------------------------------
 self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body, cookies) => {
@@ -216,44 +273,11 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
     });
   }
 
-  // Set station and/or playing. Both fields are optional in the body — omitted fields
-  // preserve the current value, so the UI can toggle just play/pause without re-sending
-  // the station id. An empty / null station_id explicitly clears the station and forces
-  // playing=false (you can't be "playing nothing").
+  // HTTP arm kept for API compatibility (older viewers, web viewer fallback); the frame's
+  // own UI writes over the bus (see the dispatcher above). Same function, same gate.
   if (reqPath === "/api/set" && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-    if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
-    const v = parseJsonBody<{ station_id?: unknown; playing?: unknown }>(body);
-    const cur = getPlaystate(sfiId);
-
-    let stationId: string | null = cur.station_id;
-    if (Object.prototype.hasOwnProperty.call(v ?? {}, "station_id")) {
-      const raw = v?.station_id;
-      if (raw === null || raw === "") {
-        stationId = null;
-      } else {
-        const sid = sanitizeText(raw, 80);
-        if (!STATION_INDEX.has(sid)) return jsonReply(replyPort, 400, { error: "unknown station" });
-        stationId = sid;
-      }
-    }
-
-    let playing = cur.playing;
-    if (Object.prototype.hasOwnProperty.call(v ?? {}, "playing")) {
-      playing = v?.playing === true;
-    }
-    if (!stationId) playing = false;
-
-    const userName = sanitizeText(peer.user_name, 80) || "user";
-    const next: Playstate = {
-      station_id: stationId,
-      playing,
-      updated_at: Date.now(),
-      updated_by_name: userName,
-    };
-    setPlaystate(sfiId, next);
-    pushToInstance(sfiId, { type: "radio_state", sfi_id: sfiId, playstate: next });
-    return jsonReply(replyPort, 200, { ok: true, playstate: next });
+    const r = mutSet(sfiId, parseJsonBody<{ station_id?: unknown; playing?: unknown }>(body), peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   if (method === "GET") {

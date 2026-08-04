@@ -200,7 +200,7 @@
   <script type="module">
     import {
       frame, html, render, useState, useEffect, useRef, useLayoutEffect, useFramePush, Overlay, applyChannel,
-    } from "/lib/js/framelib.js";
+    } from "./lib/js/framelib.js";
 
     // ---- constants & helpers ----------------------------------------------------------
     const ASPECTS = { "16:9": [1280, 720], "4:3": [1200, 900], "1:1": [960, 960] };
@@ -219,6 +219,17 @@
       } catch (_) {}
       return p;
     }
+    // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
+    // dropped on Android (issue #750), the tether carries them everywhere. Fire-and-
+    // forget — resulting state arrives via the pushes below. Feature-detect: an older
+    // viewer's framelib has no busSend — fall back to the HTTP write it was using before.
+    const write = (path, body) => {
+      if (typeof frame.busSend === "function") {
+        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+        return Promise.resolve({});
+      }
+      return frame.api(path, body);
+    };
     // The deck follows the space channel color like every other frame. applyChannel
     // sets --ch/--ch-fg on <body>; slide fills also want a muted step, which the os
     // tokens provide per-channel (srgb color-mix fallback for custom hex colors).
@@ -546,7 +557,7 @@
       // Read-only viewers announce presence so the editor's "watching" count stays live.
       useEffect(() => {
         if (!me || me.is_sfi_editor) return;
-        const ping = () => frame.api("api/viewer_ping", { by: SESSION }).catch(() => {});
+        const ping = () => write("api/viewer_ping", { by: SESSION }).catch(() => {});
         ping();
         const t = setInterval(ping, 10000);
         return () => clearInterval(t);
@@ -596,7 +607,7 @@
       function scheduleSave() {
         clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => {
-          frame.api("api/save", { show: showRef.current, by: SESSION }).catch(() => {});
+          write("api/save", { show: showRef.current, by: SESSION }).catch(() => {});
         }, 300);
       }
       function commit(next, save = true) { showRef.current = next; setShow(next); if (save) scheduleSave(); }
@@ -791,7 +802,7 @@
           const n = clamp(p + dir, 0, Math.max(0, sh.slides.length - 1));
           if (sh.settings.syncPresent && isEd && n !== p) {
             sharedPresentRef.current = n;  // our own broadcast is echo-suppressed, so track it locally too
-            frame.api("api/present", { index: n, by: SESSION }).catch(() => {});
+            write("api/present", { index: n, by: SESSION }).catch(() => {});
           }
           return n;
         });

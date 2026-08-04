@@ -10,7 +10,7 @@
 <body>
   <main id="app" class="rt-loading"></main>
   <script type="module">
-import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, Editable, Modal, applyChannel } from "/lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, Editable, Modal, applyChannel } from "./lib/js/framelib.js";
 
 const peer = window.__peer || {};
 const isSfiMember = !!peer.is_sfi_member;
@@ -19,6 +19,18 @@ const userId = peer.user_id || "";
 const DEFAULT_PREFS = { title: "Roundtable", positive_label: "Positives", negative_label: "Negatives", public_to_space_viewers: false };
 
 const api = frame.api;
+
+// Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are dropped
+// on Android (issue #750). Fire-and-forget — resulting state arrives via the rt_* pushes,
+// which is how this frontend already renders every change (its own included).
+// Feature-detect: an older viewer's framelib has no busSend — fall back to the HTTP write.
+const write = (path, body) => {
+  if (typeof frame.busSend === "function") {
+    frame.busSend({ op: path.replace(/^\.\/api\//, ""), ...(body || {}) });
+    return Promise.resolve({});
+  }
+  return api(path, body);
+};
 
 function fmtTime(ts) {
   const d = new Date(ts);
@@ -332,10 +344,10 @@ function App() {
 
   const { prefs, messages, positives, negatives, canEditSettings, canParticipate } = state;
 
-  const sendMessage = (body) => api("./api/send", { body }).catch(fail("send"));
-  const deleteMessage = (id) => api("./api/delete-message", { id }).catch(fail("delete"));
+  const sendMessage = (body) => write("./api/send", { body }).catch(fail("send"));
+  const deleteMessage = (id) => write("./api/delete-message", { id }).catch(fail("delete"));
 
-  const addItem = (kind, text) => api("./api/item-add", { kind, body: text }).catch(fail("add"));
+  const addItem = (kind, text) => write("./api/item-add", { kind, body: text }).catch(fail("add"));
   const voteItem = (kind, id) => {
     // Optimistic update.
     setState((prev) => {
@@ -346,7 +358,7 @@ function App() {
         : x));
       return kind === "positive" ? { ...prev, positives: next } : { ...prev, negatives: next };
     });
-    api("./api/item-vote", { id }).catch((e) => {
+    write("./api/item-vote", { id }).catch((e) => {
       // Roll back on failure.
       setState((prev) => {
         if (!prev) return prev;
@@ -362,15 +374,14 @@ function App() {
   const deleteItem = async (kind, id) => {
     const ok = await frame.confirm("Are you sure you want to delete this item?", { danger: true, okLabel: "Delete" });
     if (!ok) return;
-    api("./api/item-delete", { id }).catch(fail("delete"));
+    write("./api/item-delete", { id }).catch(fail("delete"));
   };
 
   const saveSettings = async (next) => {
+    // No response over the bus — the rt_prefs push (which reaches the sender too)
+    // applies the saved prefs.
     try {
-      const data = await api("./api/settings", next);
-      if (data && data.prefs) {
-        setState((s) => s ? { ...s, prefs: { ...s.prefs, ...data.prefs } } : s);
-      }
+      await write("./api/settings", next);
       setShowSettings(false);
     } catch (e) {
       setToast(e.message || "save failed");

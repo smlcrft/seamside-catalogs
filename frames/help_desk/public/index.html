@@ -10,7 +10,7 @@
 <body>
   <main id="app" class="hd-root"></main>
   <script type="module">
-import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, applyChannel } from "/lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, applyChannel } from "./lib/js/framelib.js";
 
 const peer = window.__peer || {};
 if (peer.space_color) applyChannel(document.body, peer.space_color);
@@ -21,6 +21,18 @@ const me = {
   user_name: peer.user_name || "",
 };
 const api = frame.api;
+
+// Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST/PUT bodies are
+// dropped on Android (issue #750). Fire-and-forget — resulting state arrives via the hd_*
+// pushes, which is how this frontend already renders every change (its own included).
+// Feature-detect: an older viewer's framelib has no busSend — fall back to the HTTP write.
+const write = (path, body, method) => {
+  if (typeof frame.busSend === "function") {
+    frame.busSend({ op: path.replace(/^\.\/api\//, ""), ...(body || {}) });
+    return Promise.resolve({});
+  }
+  return api(path, body, method);
+};
 
 function formatRelative(ts) {
   const diff = Math.max(0, Date.now() - ts);
@@ -62,7 +74,7 @@ function AnonForm() {
     setErr("");
     setSubmitting(true);
     try {
-      await api("./api/submit", { email: email.trim(), fields: values });
+      await write("./api/submit", { email: email.trim(), fields: values });
       setSentTo(email.trim());
     } catch (e2) {
       setErr(e2.message || String(e2));
@@ -378,7 +390,7 @@ function AdminView() {
     const t = v.trim();
     if (t === deskTitle) return;
     setDeskTitle(t);
-    api("./api/admin/title", { title: t }, "PUT").catch((e) => toast(e.message || "rename failed"));
+    write("./api/admin/title", { title: t }, "PUT").catch((e) => toast(e.message || "rename failed"));
   };
 
   useFramePush((d) => {
@@ -411,7 +423,7 @@ function AdminView() {
 
   const setStatus = async (id, status) => {
     try {
-      await api(`./api/admin/messages/${id}/status`, { status }, "PUT");
+      await write(`./api/admin/messages/${id}/status`, { status }, "PUT");
     } catch (e) { toast(e.message || "update failed"); }
   };
   const deleteSubmission = async (id) => {
@@ -420,10 +432,11 @@ function AdminView() {
       await api(`./api/admin/messages/${id}`, null, "DELETE");
     } catch (e) { toast(e.message || "delete failed"); }
   };
+  // No response over the bus — the hd_note_added push (which reaches the sender too)
+  // delivers the refreshed notes list.
   const addNote = async (id, body) => {
     try {
-      const { notes } = await api(`./api/admin/messages/${id}/notes`, { body });
-      setNotesBySub((prev) => { const m = new Map(prev); m.set(id, notes || []); return m; });
+      await write(`./api/admin/messages/${id}/notes`, { body });
     } catch (e) { toast(e.message || "failed"); }
   };
   const fetchNotes = (subId) => {
@@ -433,14 +446,15 @@ function AdminView() {
     }).catch(() => {});
   };
 
+  // No response over the bus — the hd_fields_changed push (which reaches the sender
+  // too) triggers the field reload.
   const createField = async (payload) => {
     try {
-      await api("./api/admin/fields", payload);
-      await loadFields();
+      await write("./api/admin/fields", payload);
     } catch (e) { toast(e.message || "failed"); }
   };
   const setFieldRequired = async (fid, required) => {
-    try { await api(`./api/admin/fields/${fid}`, { required }, "PUT"); }
+    try { await write(`./api/admin/fields/${fid}`, { required }, "PUT"); }
     catch (e) { toast(e.message || "failed"); await loadFields(); }
   };
   const deleteField = async (fid) => {

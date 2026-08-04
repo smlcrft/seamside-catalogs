@@ -6,7 +6,7 @@
 // A REALTIME race: everyone casts off together after the countdown. Steer with
 // ←/→; the wind blows from the top of the course, so the upwind marks demand
 // real tacking. Rivals sail the same water live (position beacons → ghosts).
-import { html } from "/lib/js/framelib.js";
+import { html } from "../lib/js/framelib.js";
 import { useRaceRunner } from "../console-kit.js";
 import {
   MAX_MS, NO_GO, MARK_R, FINISH_R,

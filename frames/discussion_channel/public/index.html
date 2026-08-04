@@ -10,12 +10,24 @@
 <body>
   <main id="app" class="dc-loading">loading…</main>
   <script type="module">
-import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, Editable, Modal, applyChannel } from "/lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, Editable, Modal, applyChannel } from "./lib/js/framelib.js";
 
 const peer = window.__peer || {};
 const isAnon = peer.is_anon || !peer.user_id;
 const isOwner = !!peer.is_owner;
 const userId = peer.user_id || "";
+
+// Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are dropped
+// on Android (issue #750). Fire-and-forget — resulting state arrives via the dc_* pushes,
+// which is how this frontend already renders every change (its own included).
+// Feature-detect: an older viewer's framelib has no busSend — fall back to the HTTP write.
+const write = (path, body) => {
+  if (typeof frame.busSend === "function") {
+    frame.busSend({ op: path.replace(/^\.\/api\//, ""), ...(body || {}) });
+    return Promise.resolve({});
+  }
+  return frame.api(path, body);
+};
 
 const DEFAULT_REACTION_ICONS = ["thumbs-up", "heart", "fire", "smiley", "hand-waving",
   "sparkle", "lightning", "rocket", "confetti", "star"];
@@ -226,12 +238,12 @@ function App() {
   const icons = (state.reaction_icons && state.reaction_icons.length) ? state.reaction_icons : DEFAULT_REACTION_ICONS;
 
   const fail = (label) => (err) => setToast(err.message || (label + " failed"));
-  const sendMessage = (body) => frame.api("./api/send", { body }).catch(fail("send"));
-  const toggleReact = (mid, icon) => frame.api("./api/react", { message_id: mid, icon }).catch(fail("react"));
-  const deleteMessage = (id) => frame.api("./api/delete", { id }).catch(fail("delete"));
-  const saveSettings = (patch) => frame.api("./api/settings", patch)
-    .then((data) => { if (data && data.prefs) setState((s) => s ? { ...s, prefs: { ...s.prefs, ...data.prefs } } : s); })
-    .catch(fail("save"));
+  const sendMessage = (body) => write("./api/send", { body }).catch(fail("send"));
+  const toggleReact = (mid, icon) => write("./api/react", { message_id: mid, icon }).catch(fail("react"));
+  const deleteMessage = (id) => write("./api/delete", { id }).catch(fail("delete"));
+  // No response over the bus — the dc_prefs push (which reaches the sender too) applies
+  // the saved prefs.
+  const saveSettings = (patch) => write("./api/settings", patch).catch(fail("save"));
 
   // Style vars applied directly to #app so :root selectors keep working.
   useEffect(() => { applyChannel(document.getElementById("app"), peer.space_color); }, []);

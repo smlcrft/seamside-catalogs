@@ -20,7 +20,7 @@
 // Read-only viewers (anon FAT + Viewer-role members) replay the painting and receive live
 // updates, but no /api/* mutation fires.
 // ----------------------------------------------------------------------------------------
-import { frame, applyChannel } from "/lib/js/framelib.js";
+import { frame, applyChannel } from "./lib/js/framelib.js";
 
 (() => {
   const app = document.getElementById("app");
@@ -623,6 +623,15 @@ import { frame, applyChannel } from "/lib/js/framelib.js";
   // API helper
   // --------------------------------------------------------------------------------------
   async function api(method, path, body) {
+    // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
+    // dropped on Android (issue #750), the tether carries them everywhere. Fire-and-
+    // forget — resulting state arrives via the ws_* pushes below (the sender's own
+    // stroke reconciles by seed there). Feature-detect: an older viewer build has no
+    // busSend — fall back to the HTTP write it was using before.
+    if ((method === "POST" || method === "PUT") && typeof frame.busSend === "function") {
+      frame.busSend({ op: path.replace(/^\/api\//, ""), ...(body || {}) });
+      return {};
+    }
     const json = await frame.api("." + path, body === undefined ? undefined : body, method);
     return json || {};
   }

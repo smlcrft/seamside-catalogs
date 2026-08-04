@@ -21,7 +21,7 @@
 // an optional description, and an optional short label.
 // ----------------------------------------------------------------------------------------
 import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo,
+  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
   pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
   declareTables, ensureTables, table,
 } from "@frame-core";
@@ -206,6 +206,180 @@ function notify(sfiId: string) {
   pushToInstance(sfiId, { type: "kanban_changed" });
 }
 
+// ----- Writes ---------------------------------------------------------------------------
+// One shared mutation path for BOTH transports: the bus dispatcher below (frame.busSend →
+// onUiMessage, the primary write path) and the HTTP POST arm in onNetworkRequest (kept for
+// older viewers whose framelib has no busSend). `op` is the API path with "api/" stripped
+// (e.g. "card/<id>/move"); `v` is the parsed payload. Role gates live here so the two
+// entry points can never drift.
+type WriteResult = { status: number; body: unknown };
+
+async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
+  const settings = getSettings(sfiId);
+
+  // Re-register the shared decls for placements that graduated or are mid-graduation
+  // (decls don't survive worker restarts; bindings do).
+  if (settings.backend === "shared" || settings.pending_graduation) ensureSharedDecls();
+
+  // Finish a pending graduation the moment both shared bindings exist.
+  if (settings.pending_graduation && sharedBound(sfiId)) {
+    try { await runGraduation(sfiId, settings); } catch (e) { log(`kanban: graduation failed (will retry): ${e}`); }
+  }
+
+  // Graduated placement whose bindings are missing (fresh worker on a new host, or the
+  // owner closed the picker mid-graduation recovery): every write waits.
+  if (settings.backend === "shared" && !sharedBound(sfiId)) {
+    return { status: 503, body: { error: "table not bound" } };
+  }
+  if (settings.backend === "shared") wireSharedListeners(sfiId);
+
+  // Local tables resolve with zero ceremony; awaiting keeps a fresh placement's first
+  // request from racing the self-ensure. Quiet — see readyLocalTables.
+  if (settings.backend === "local" && !(await readyLocalTables(peer))) {
+    return { status: 503, body: { error: "table not ready" } };
+  }
+  const { columns, cards } = dataTables(sfiId, settings);
+
+  // Every op below mutates state and is editor-only. Non-members AND Viewer-role
+  // members are rejected with the same gate (never gate writes on is_sfi_member —
+  // Viewer-role members would slip through).
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+
+  const ok = async (): Promise<WriteResult> => {
+    notify(sfiId);
+    return { status: 200, body: { columns: await boardData(columns, cards) } };
+  };
+
+  // --- Data backend (owner-only): per-placement graduation local → shared -------------
+  if (op === "data/graduate") {
+    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
+    if (settings.backend === "shared") return { status: 400, body: { error: "already shared" } };
+    settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";
+    saveSettings(sfiId, settings);
+    ensureSharedDecls();
+    ensureTables(peer); // fires the owner's binding modals (columns, then cards)
+    notify(sfiId);
+    return { status: 200, body: { waiting: true } };
+  }
+  if (op === "data/cancel_graduate") {
+    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
+    delete settings.pending_graduation;
+    saveSettings(sfiId, settings);
+    notify(sfiId);
+    return { status: 200, body: { ok: true } };
+  }
+
+  // --- Columns --------------------------------------------------------------------------
+  if (op === "column") {
+    const title = sanitizeText(v?.title, 80) || "Untitled";
+    const channelRaw = typeof v?.channel === "string" ? v.channel : "";
+    const existing = (await columns.query({})).rows.length;
+    const channel = CHANNEL_RE.test(channelRaw) ? channelRaw : `c${(existing % 12) + 1}`;
+    await columns.upsert(null, { title, channel, sort_order: await nextSortOrder(columns) });
+    return ok();
+  }
+
+  if (op === "columns/reorder") {
+    const ids = Array.isArray(v?.ids) ? v.ids.filter((x): x is string => typeof x === "string" && !!x) : [];
+    const { rows } = await columns.query({});
+    const known = new Set(rows.map((r) => r._row_id));
+    for (let i = 0; i < ids.length; i++) {
+      if (known.has(ids[i])) await columns.upsert(ids[i], { sort_order: i });
+    }
+    return ok();
+  }
+
+  if (op.startsWith("column/")) {
+    const [id, action] = op.slice("column/".length).split("/");
+    if (!id || !(await columns.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (action === "delete") {
+      await cards.deleteWhere({ column_id: id });
+      await columns.delete(id);
+      return ok();
+    }
+    if (action) return { status: 404, body: { error: "not found" } };
+    if (v?.title !== undefined) {
+      const title = sanitizeText(v.title, 80);
+      if (title) await columns.upsert(id, { title });
+    }
+    if (typeof v?.channel === "string" && CHANNEL_RE.test(v.channel)) {
+      await columns.upsert(id, { channel: v.channel });
+    }
+    return ok();
+  }
+
+  // --- Cards ----------------------------------------------------------------------------
+  if (op === "card") {
+    const columnId = typeof v?.column_id === "string" ? v.column_id : "";
+    const title = sanitizeText(v?.title, 200);
+    if (!title) return { status: 400, body: { error: "title required" } };
+    if (!columnId || !(await columns.get(columnId))) return { status: 400, body: { error: "bad column" } };
+    // "top" (the header +) slots the card first; "bottom" (the end-of-list zone)
+    // appends. Orders are relative, so min-1 / max+1 need no renumbering.
+    const { rows } = await cards.query({ where: { column_id: columnId } });
+    const sortOrder = v?.position === "top"
+      ? rows.reduce((m, r) => Math.min(m, Number(r.sort_order)), 1) - 1
+      : rows.reduce((m, r) => Math.max(m, Number(r.sort_order)), -1) + 1;
+    await cards.upsert(null, {
+      column_id: columnId, title, description: "", label: "",
+      sort_order: sortOrder, created_ms: Date.now(),
+    });
+    return ok();
+  }
+
+  if (op.startsWith("card/")) {
+    const [id, action] = op.slice("card/".length).split("/");
+    if (!id || !(await cards.get(id))) return { status: 400, body: { error: "bad id" } };
+
+    if (action === "delete") {
+      await cards.delete(id);
+      return ok();
+    }
+
+    // Move: payload carries the target column and that column's full card order
+    // (including the moved card) after the drop.
+    if (action === "move") {
+      const columnId = typeof v?.column_id === "string" ? v.column_id : "";
+      if (!columnId || !(await columns.get(columnId))) return { status: 400, body: { error: "bad column" } };
+      const ids = Array.isArray(v?.ids) ? v.ids.filter((x): x is string => typeof x === "string" && !!x) : [];
+      await cards.upsert(id, { column_id: columnId });
+      const { rows } = await cards.query({});
+      const known = new Set(rows.map((r) => r._row_id));
+      for (let i = 0; i < ids.length; i++) {
+        if (known.has(ids[i])) await cards.upsert(ids[i], { sort_order: i });
+      }
+      return ok();
+    }
+
+    if (action) return { status: 404, body: { error: "not found" } };
+    if (v?.title !== undefined) {
+      const title = sanitizeText(v.title, 200);
+      if (title) await cards.upsert(id, { title });
+    }
+    if (v?.description !== undefined) {
+      await cards.upsert(id, { description: sanitizeText(v.description, 4000) });
+    }
+    if (v?.label !== undefined) {
+      await cards.upsert(id, { label: sanitizeText(v.label, 24) });
+    }
+    return ok();
+  }
+
+  return { status: 404, body: { error: "not found" } };
+}
+
+// ----- Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame) --------
+// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; the
+// role gates live inside handleWrite. Denials are logged, not answered — a legitimate
+// client never sends a write it isn't allowed to make.
+onUiMessage(async (sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  if (typeof d.op !== "string") return;
+  const r = await handleWrite(sfiId, d.op, d, peer);
+  if (r.status !== 200) log(`kanban: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 // ----- Networking -----------------------------------------------------------------------
 self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
@@ -227,6 +401,12 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
       user_name:     peer.user_name,
       space_color:   peer.space_color,
     });
+  }
+
+  // Writes — the HTTP arm of the shared write path (see handleWrite above).
+  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
+    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   const settings = getSettings(sfiId);
@@ -290,140 +470,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
         can_manage: peer.is_owner,
       },
     });
-  }
-
-  // Every endpoint below mutates state and is editor-only. Non-members AND Viewer-role
-  // members are rejected with the same gate (never gate writes on is_sfi_member —
-  // Viewer-role members would slip through).
-  if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-
-  const ok = async () => {
-    notify(sfiId);
-    return jsonReply(replyPort, 200, { columns: await boardData(columns, cards) });
-  };
-
-  // --- Data backend (owner-only): per-placement graduation local → shared -------------
-  if (reqPath === "/api/data/graduate" && method === "POST") {
-    if (!peer.is_owner) return jsonReply(replyPort, 403, { error: "owner only" });
-    if (settings.backend === "shared") return jsonReply(replyPort, 400, { error: "already shared" });
-    const v = parseJsonBody<{ mode?: unknown }>(body);
-    settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";
-    saveSettings(sfiId, settings);
-    ensureSharedDecls();
-    ensureTables(peer); // fires the owner's binding modals (columns, then cards)
-    notify(sfiId);
-    return jsonReply(replyPort, 200, { waiting: true });
-  }
-  if (reqPath === "/api/data/cancel_graduate" && method === "POST") {
-    if (!peer.is_owner) return jsonReply(replyPort, 403, { error: "owner only" });
-    delete settings.pending_graduation;
-    saveSettings(sfiId, settings);
-    notify(sfiId);
-    return jsonReply(replyPort, 200, { ok: true });
-  }
-
-  // --- Columns --------------------------------------------------------------------------
-  if (reqPath === "/api/column" && method === "POST") {
-    const v = parseJsonBody<{ title?: unknown; channel?: unknown }>(body);
-    const title = sanitizeText(v?.title, 80) || "Untitled";
-    const channelRaw = typeof v?.channel === "string" ? v.channel : "";
-    const existing = (await columns.query({})).rows.length;
-    const channel = CHANNEL_RE.test(channelRaw) ? channelRaw : `c${(existing % 12) + 1}`;
-    await columns.upsert(null, { title, channel, sort_order: await nextSortOrder(columns) });
-    return ok();
-  }
-
-  if (reqPath === "/api/columns/reorder" && method === "POST") {
-    const v = parseJsonBody<{ ids?: unknown }>(body);
-    const ids = Array.isArray(v?.ids) ? v.ids.filter((x): x is string => typeof x === "string" && !!x) : [];
-    const { rows } = await columns.query({});
-    const known = new Set(rows.map((r) => r._row_id));
-    for (let i = 0; i < ids.length; i++) {
-      if (known.has(ids[i])) await columns.upsert(ids[i], { sort_order: i });
-    }
-    return ok();
-  }
-
-  if (reqPath.startsWith("/api/column/") && method === "POST") {
-    const rest = reqPath.slice("/api/column/".length);
-    const [id, action] = rest.split("/");
-    if (!id || !(await columns.get(id))) return jsonReply(replyPort, 400, { error: "bad id" });
-    if (action === "delete") {
-      await cards.deleteWhere({ column_id: id });
-      await columns.delete(id);
-      return ok();
-    }
-    if (action) return jsonReply(replyPort, 404, { error: "not found" });
-    const v = parseJsonBody<{ title?: unknown; channel?: unknown }>(body);
-    if (v?.title !== undefined) {
-      const title = sanitizeText(v.title, 80);
-      if (title) await columns.upsert(id, { title });
-    }
-    if (typeof v?.channel === "string" && CHANNEL_RE.test(v.channel)) {
-      await columns.upsert(id, { channel: v.channel });
-    }
-    return ok();
-  }
-
-  // --- Cards ----------------------------------------------------------------------------
-  if (reqPath === "/api/card" && method === "POST") {
-    const v = parseJsonBody<{ column_id?: unknown; title?: unknown; position?: unknown }>(body);
-    const columnId = typeof v?.column_id === "string" ? v.column_id : "";
-    const title = sanitizeText(v?.title, 200);
-    if (!title) return jsonReply(replyPort, 400, { error: "title required" });
-    if (!columnId || !(await columns.get(columnId))) return jsonReply(replyPort, 400, { error: "bad column" });
-    // "top" (the header +) slots the card first; "bottom" (the end-of-list zone)
-    // appends. Orders are relative, so min-1 / max+1 need no renumbering.
-    const { rows } = await cards.query({ where: { column_id: columnId } });
-    const sortOrder = v?.position === "top"
-      ? rows.reduce((m, r) => Math.min(m, Number(r.sort_order)), 1) - 1
-      : rows.reduce((m, r) => Math.max(m, Number(r.sort_order)), -1) + 1;
-    await cards.upsert(null, {
-      column_id: columnId, title, description: "", label: "",
-      sort_order: sortOrder, created_ms: Date.now(),
-    });
-    return ok();
-  }
-
-  if (reqPath.startsWith("/api/card/") && method === "POST") {
-    const rest = reqPath.slice("/api/card/".length);
-    const [id, action] = rest.split("/");
-    if (!id || !(await cards.get(id))) return jsonReply(replyPort, 400, { error: "bad id" });
-
-    if (action === "delete") {
-      await cards.delete(id);
-      return ok();
-    }
-
-    // Move: body carries the target column and that column's full card order
-    // (including the moved card) after the drop.
-    if (action === "move") {
-      const v = parseJsonBody<{ column_id?: unknown; ids?: unknown }>(body);
-      const columnId = typeof v?.column_id === "string" ? v.column_id : "";
-      if (!columnId || !(await columns.get(columnId))) return jsonReply(replyPort, 400, { error: "bad column" });
-      const ids = Array.isArray(v?.ids) ? v.ids.filter((x): x is string => typeof x === "string" && !!x) : [];
-      await cards.upsert(id, { column_id: columnId });
-      const { rows } = await cards.query({});
-      const known = new Set(rows.map((r) => r._row_id));
-      for (let i = 0; i < ids.length; i++) {
-        if (known.has(ids[i])) await cards.upsert(ids[i], { sort_order: i });
-      }
-      return ok();
-    }
-
-    if (action) return jsonReply(replyPort, 404, { error: "not found" });
-    const v = parseJsonBody<{ title?: unknown; description?: unknown; label?: unknown }>(body);
-    if (v?.title !== undefined) {
-      const title = sanitizeText(v.title, 200);
-      if (title) await cards.upsert(id, { title });
-    }
-    if (v?.description !== undefined) {
-      await cards.upsert(id, { description: sanitizeText(v.description, 4000) });
-    }
-    if (v?.label !== undefined) {
-      await cards.upsert(id, { label: sanitizeText(v.label, 24) });
-    }
-    return ok();
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });

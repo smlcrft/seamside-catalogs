@@ -1,4 +1,4 @@
-import { frame } from "/lib/js/framelib.js";
+import { frame } from "./lib/js/framelib.js";
 
 (function () {
   const peer = window.__peer || {};
@@ -902,6 +902,11 @@ import { frame } from "/lib/js/framelib.js";
     // Pull the latest editor values into the draft just before saving so the user
     // doesn't have to defocus a field to commit it.
     captureEventsFromEditor();
+    if (typeof frame.busSend === "function") {
+      frame.busSend({ op: "save", location: draft.location, events: draft.events });
+      closeSettings();
+      return;
+    }
     try {
       await frame.api("api/save", { location: draft.location, events: draft.events });
       closeSettings();

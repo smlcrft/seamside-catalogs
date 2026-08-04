@@ -106,7 +106,7 @@
   </div>
 
   <script type="module">
-    import { frame } from "/lib/js/framelib.js";
+    import { frame } from "./lib/js/framelib.js";
 
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
@@ -246,6 +246,25 @@
         $best.textContent = best;
       } catch (_) {}
     }
+
+    // Score submits go over the tether (frame.busSend); feature-detect and fall back to
+    // the HTTP POST for older viewer builds. Fire-and-forget — the resulting high score
+    // arrives via the 'score' push below.
+    function submitScore(s) {
+      if (typeof frame.busSend === 'function') { frame.busSend({ op: 'submit', score: s }); return; }
+      frame.api('api/submit', { score: s }).catch(() => {});
+    }
+
+    // Every viewer — the submitter included — updates the best-score HUD from the push.
+    window.addEventListener('message', (e) => {
+      if (e.data?.type === 'score' && e.data.new_record) {
+        best = e.data.score?.high ?? best;
+        holder = e.data.score?.holder || holder;
+        $best.textContent = best;
+        const line = $result.querySelector('.holder');
+        if (line && holder) line.textContent = `best held by ${holder}`;
+      }
+    });
 
     function stackHeight() {
       let total = 0;
@@ -549,7 +568,7 @@
       ctx.closePath();
     }
 
-    async function endGame() {
+    function endGame() {
       alive = false;
       if (isRedStack) playTomatoLose(); else playSadTrombone();
 
@@ -559,14 +578,7 @@
       }
 
       const beat = score > best;
-      try {
-        const r = await frame.api('api/submit', { score });
-        if (r.new_record) {
-          best = r.score.high;
-          holder = r.score.holder || holder;
-          $best.textContent = best;
-        }
-      } catch (_) {}
+      submitScore(score);
       const headline = beat ? 'New best!' : (score > 0 ? 'Stack toppled.' : 'Whiffed.');
       const holderLine = holder ? `<div class="holder">best held by ${escapeHTML(holder)}</div>` : '';
       $result.innerHTML = `

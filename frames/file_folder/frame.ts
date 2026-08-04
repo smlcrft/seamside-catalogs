@@ -17,7 +17,7 @@
 import {
   log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance,
   loadJsonFile, saveJsonFile, frameDataDir, serveFileAtPath,
-  clampInt, contentType, extname, path,
+  clampInt, contentType, extname, path, onUiMessage,
 } from "@frame-core";
 
 // ----- Per-sfi sharing preferences (single local JSON file: { [sfi_id]: Prefs }) --------
@@ -110,6 +110,52 @@ function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
   };
 }
 
+// ----- Shared write logic ---------------------------------------------------------------
+// Both entry points land here: the HTTP POST arms (kept for older viewers whose framelib
+// lacks busSend) and the bus dispatcher (frame.busSend → onUiMessage). `op` is the API
+// path with the leading "api/" stripped. Role gates live here so the two paths can never
+// drift. The binary upload (/api/upload) stays HTTP-only.
+type WriteResult = { status: number; body: unknown };
+
+function handleWrite(sfiId: string, op: string, v: Record<string, unknown>, peer: ReturnType<typeof parsePeerInfo>): WriteResult {
+  // Owner-only: update this placement's sharing preferences.
+  if (op === "prefs") {
+    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
+    const next: Prefs = {
+      who_can_add: v.who_can_add === "editors" ? "editors" : "owner",
+      max_size_mb: clampInt(Number(v.max_size_mb) || DEFAULT_PREFS.max_size_mb, 1, 1024),
+      max_files:   clampInt(Number(v.max_files) || DEFAULT_PREFS.max_files, 1, 1000),
+    };
+    setPrefs(sfiId, next);
+    pushToInstance(sfiId, { type: "folder_changed" });
+    return { status: 200, body: stateFor(peer) };
+  }
+
+  // Delete — gated by who_can_add (same right as adding).
+  if (op.startsWith("delete/")) {
+    const prefs = getPrefs(sfiId);
+    if (!canAdd(peer, prefs)) return { status: 403, body: { error: "not allowed to delete files" } };
+    const id = op.slice("delete/".length);
+    if (!ID_RE.test(id)) return { status: 400, body: { error: "bad id" } };
+    try { Deno.removeSync(path.join(bucketDir(sfiId), id), { recursive: true }); } catch { /* already gone */ }
+    pushToInstance(sfiId, { type: "folder_changed" });
+    return { status: 200, body: stateFor(peer) };
+  }
+
+  return { status: 404, body: { error: "not found" } };
+}
+
+// Bus dispatcher — the frontend's JSON write path (frame.busSend → BusUiToFrame → here).
+// Fire-and-forget: denials are logged, not answered — a legitimate client never sends a
+// write it isn't allowed to make, and every mutation confirms itself via pushToInstance.
+onUiMessage((sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const { op, ...v } = data as Record<string, unknown>;
+  if (typeof op !== "string") return;
+  const r = handleWrite(sfiId, op, v, peer);
+  if (r.status !== 200) log(`file_folder: bus op ${op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 // ----- Networking -----------------------------------------------------------------------
 self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
@@ -124,18 +170,10 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, 200, stateFor(peer));
   }
 
-  // Owner-only: update this placement's sharing preferences.
+  // Owner-only: update this placement's sharing preferences (logic in handleWrite).
   if (reqPath === "/api/prefs" && method === "POST") {
-    if (!peer.is_owner) return jsonReply(replyPort, 403, { error: "owner only" });
-    const v = parseJsonBody<Partial<Prefs>>(body) || {};
-    const next: Prefs = {
-      who_can_add: v.who_can_add === "editors" ? "editors" : "owner",
-      max_size_mb: clampInt(Number(v.max_size_mb) || DEFAULT_PREFS.max_size_mb, 1, 1024),
-      max_files:   clampInt(Number(v.max_files) || DEFAULT_PREFS.max_files, 1, 1000),
-    };
-    setPrefs(peer.sfi_id, next);
-    pushToInstance(peer.sfi_id, { type: "folder_changed" });
-    return jsonReply(replyPort, 200, stateFor(peer));
+    const r = handleWrite(peer.sfi_id, "prefs", parseJsonBody<Record<string, unknown>>(body) || {}, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   // Upload — gated by who_can_add. Filename rides in ?name=, bytes are the raw body.
@@ -173,15 +211,10 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     }, [buf.buffer]);
   }
 
-  // Delete — gated by who_can_add (same right as adding).
+  // Delete — gated by who_can_add (logic in handleWrite).
   if (reqPath.startsWith("/api/delete/") && method === "POST") {
-    const prefs = getPrefs(peer.sfi_id);
-    if (!canAdd(peer, prefs)) return jsonReply(replyPort, 403, { error: "not allowed to delete files" });
-    const id = reqPath.slice("/api/delete/".length);
-    if (!ID_RE.test(id)) return jsonReply(replyPort, 400, { error: "bad id" });
-    try { Deno.removeSync(path.join(bucketDir(peer.sfi_id), id), { recursive: true }); } catch { /* already gone */ }
-    pushToInstance(peer.sfi_id, { type: "folder_changed" });
-    return jsonReply(replyPort, 200, stateFor(peer));
+    const r = handleWrite(peer.sfi_id, reqPath.slice("/api/".length), {}, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });

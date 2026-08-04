@@ -29,7 +29,7 @@
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo,
-  pushToInstance, sanitizeText, toIntOrNull, clampInt,
+  pushToInstance, onUiMessage, sanitizeText, toIntOrNull, clampInt,
   declareTables, ensureTables, table, frameSettings,
 } from "@frame-core";
 
@@ -171,6 +171,214 @@ async function reconcileMilestone(t: Tables, milestoneId: string): Promise<void>
   }
 }
 
+// ----- Writes ---------------------------------------------------------------------------
+// One shared write path for the HTTP arms and the bus dispatcher. `op` is the API path
+// with the leading `api/` stripped (e.g. "task/<id>", "tasks/reorder"). Role gates live
+// here, not in the transports. Every success returns the full snapshot (the HTTP reply
+// shape); the bus ignores it and viewers refresh from the roadmap_changed push.
+type MutResult = { status: number; body: unknown };
+
+function tablesFor(sfiId: string): Tables {
+  return {
+    settings: frameSettings(sfiId),
+    milestones: table("milestones", sfiId),
+    tasks: table("tasks", sfiId),
+  };
+}
+
+async function handleWrite(
+  sfiId: string, op: string, v: any, peer: ReturnType<typeof parsePeerInfo>,
+): Promise<MutResult> {
+  // Everything here mutates — editor-only. Never gate on is_sfi_member (Viewer-role
+  // members would slip through); gate on is_sfi_editor.
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  const ready = ensureTables(peer);
+  if (!ready.ready) return { status: 503, body: { error: "table not bound" } };
+  const t = tablesFor(sfiId);
+  await ensurePlacement(t);
+  const ok = async (): Promise<MutResult> => ({ status: 200, body: await snapshot(t) });
+
+  // ----- Project settings: name / overview / links --------------------------------------
+  if (op === "settings") {
+    if (v?.name !== undefined) {
+      await t.settings.set("name", sanitizeText(v.name, MAX_NAME));
+    }
+    if (v?.overview !== undefined) {
+      await t.settings.set("overview", sanitizeText(v.overview, MAX_OVERVIEW));
+    }
+    if (v?.links !== undefined) {
+      const raw = Array.isArray(v.links) ? v.links : [];
+      const links = raw.slice(0, MAX_LINKS).map((l: any) => ({
+        label: sanitizeText(l?.label, MAX_LABEL),
+        url: sanitizeText(l?.url, MAX_URL).trim(),
+      })).filter((l: { label: string; url: string }) => l.label && l.url && isSafeUrl(l.url));
+      await t.settings.set("links", links);
+    }
+    await t.settings.set("updated_ms", Date.now());
+    notify(sfiId);
+    return await ok();
+  }
+
+  // ----- Milestones ---------------------------------------------------------------------
+  if (op === "milestone/add") {
+    const title = sanitizeText(v?.title, MAX_TITLE) || "Untitled milestone";
+    const target = v?.target_ms == null ? null : toIntOrNull(v.target_ms);
+    // Real milestones sort ahead of the two buckets (which live at 1_000_000+).
+    const next = Number(await t.milestones.max("sort_order", { kind: "milestone" }) ?? -1) + 1;
+    await t.milestones.upsert(null, {
+      kind: "milestone", title, target_ms: target, completed: 0,
+      sort_order: next, created_ms: Date.now(),
+    });
+    notify(sfiId);
+    return await ok();
+  }
+
+  if (op.startsWith("milestone/delete/")) {
+    const id = op.slice("milestone/delete/".length);
+    if (!id) return { status: 400, body: { error: "bad id" } };
+    const ms = await milestoneRow(t, id);
+    if (!ms) return { status: 404, body: { error: "not found" } };
+    if (ms.kind !== "milestone") return { status: 400, body: { error: "buckets can't be deleted" } };
+    // Deleting a milestone deletes its tasks with it (the UI confirms with the count first).
+    await t.tasks.deleteWhere({ milestone_id: id });
+    await t.milestones.delete(id);
+    notify(sfiId);
+    return await ok();
+  }
+
+  if (op.startsWith("milestone/")) {
+    const id = op.slice("milestone/".length);
+    if (!id) return { status: 400, body: { error: "bad id" } };
+    const ms = await milestoneRow(t, id);
+    if (!ms) return { status: 404, body: { error: "not found" } };
+    const isBucket = ms.kind !== "milestone";
+
+    if (v?.title !== undefined && !isBucket) {
+      await t.milestones.upsert(id, { title: sanitizeText(v.title, MAX_TITLE) || "Untitled milestone" });
+    }
+    if (v?.target_ms !== undefined && !isBucket) {
+      const target = v.target_ms == null ? null : toIntOrNull(v.target_ms);
+      await t.milestones.upsert(id, { target_ms: target });
+    }
+    if (v?.completed !== undefined && !isBucket) {
+      const want = clampInt(toIntOrNull(v.completed) ?? 0, 0, 1);
+      if (want === 1) {
+        // Gate: every task must be complete first.
+        const open = await t.tasks.query({ where: { milestone_id: id, state: { lt: 2 } }, limit: 1 });
+        if (open.total > 0) {
+          return { status: 409, body: { error: "finish all tasks before completing this milestone", open: open.total } };
+        }
+        await t.milestones.upsert(id, { completed: 1, completed_ms: Date.now() });
+      } else {
+        await t.milestones.upsert(id, { completed: 0, completed_ms: 0 });
+      }
+    }
+    notify(sfiId);
+    return await ok();
+  }
+
+  // ----- Tasks --------------------------------------------------------------------------
+  if (op === "task/add") {
+    const milestoneId = typeof v?.milestone_id === "string" ? v.milestone_id : "";
+    if (!milestoneId || !(await milestoneRow(t, milestoneId))) {
+      return { status: 400, body: { error: "bad milestone" } };
+    }
+    // `texts` (a pasted list → one task per line) takes precedence over the single
+    // `text` (which may itself be multi-line, from a Shift+Enter task — kept as one row).
+    let items: string[];
+    if (Array.isArray(v?.texts)) {
+      items = v.texts.map((x: unknown) => sanitizeText(x, MAX_TASK)).filter((s: string) => s.length > 0);
+    } else {
+      const txt = sanitizeText(v?.text, MAX_TASK);
+      items = txt ? [txt] : [];
+    }
+    if (items.length === 0) return { status: 400, body: { error: "text required" } };
+    const now = Date.now();
+    let order = await nextTaskOrder(t, milestoneId);
+    for (const text of items) {
+      await t.tasks.upsert(null, { milestone_id: milestoneId, text, state: 0, sort_order: order++, created_ms: now });
+    }
+    await reconcileMilestone(t, milestoneId); // fresh (unstarted) tasks reopen a "done" milestone
+    notify(sfiId);
+    return await ok();
+  }
+
+  if (op.startsWith("task/delete/")) {
+    const id = op.slice("task/delete/".length);
+    if (!id) return { status: 400, body: { error: "bad id" } };
+    const task = await t.tasks.get(id);
+    if (!task) return { status: 404, body: { error: "not found" } };
+    await t.tasks.delete(id);
+    await reconcileMilestone(t, task.milestone_id as string); // deleting the last open task can complete a milestone's set
+    notify(sfiId);
+    return await ok();
+  }
+
+  // Reorder within one destination list (also used for cross-list drops): body carries the
+  // destination milestone_id and the full ordered list of task ids that now live in it.
+  if (op === "tasks/reorder") {
+    const dest = typeof v?.milestone_id === "string" ? v.milestone_id : "";
+    if (!dest || !(await milestoneRow(t, dest))) return { status: 400, body: { error: "bad milestone" } };
+    const ids = Array.isArray(v?.ids)
+      ? v.ids.filter((x: unknown): x is string => typeof x === "string" && !!x)
+      : [];
+    // Only touch ids that actually exist (never phantom-create via upsert).
+    const { rows } = await t.tasks.query({});
+    const known = new Set(rows.map((r) => r._row_id));
+    for (let i = 0; i < ids.length; i++) {
+      if (known.has(ids[i])) await t.tasks.upsert(ids[i], { milestone_id: dest, sort_order: i });
+    }
+    await reconcileMilestone(t, dest);
+    notify(sfiId);
+    return await ok();
+  }
+
+  if (op.startsWith("task/")) {
+    const id = op.slice("task/".length);
+    if (!id) return { status: 400, body: { error: "bad id" } };
+    const task = await t.tasks.get(id);
+    if (!task) return { status: 404, body: { error: "not found" } };
+
+    if (v?.state !== undefined) {
+      const state = clampInt(toIntOrNull(v.state) ?? 0, 0, 2);
+      if (state === 0) {
+        await t.tasks.upsert(id, { state: 0, actor_id: "", actor_name: "", completed_ms: 0 });
+      } else {
+        const actorName = sanitizeText(peer.user_name, 80) || "someone";
+        const completedMs = state === 2 ? Date.now() : 0;
+        await t.tasks.upsert(id, { state, actor_id: peer.user_id ?? "", actor_name: actorName, completed_ms: completedMs });
+      }
+    }
+    if (v?.text !== undefined) {
+      await t.tasks.upsert(id, { text: sanitizeText(v.text, MAX_TASK) });
+    }
+    // Move to another milestone/bucket (drag across lists appends to the destination end;
+    // /api/tasks/reorder then fixes the exact position).
+    if (v?.milestone_id !== undefined) {
+      const dest = typeof v.milestone_id === "string" ? v.milestone_id : "";
+      if (!dest || !(await milestoneRow(t, dest))) return { status: 400, body: { error: "bad milestone" } };
+      await t.tasks.upsert(id, { milestone_id: dest, sort_order: await nextTaskOrder(t, dest) });
+      await reconcileMilestone(t, dest);
+    }
+    await reconcileMilestone(t, task.milestone_id as string);
+    notify(sfiId);
+    return await ok();
+  }
+
+  return { status: 404, body: { error: "not found" } };
+}
+
+// Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame → here).
+// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo.
+// Denials are logged, not answered — viewers refresh from the roadmap_changed push.
+onUiMessage(async (sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const { op, ...v } = data as Record<string, unknown>;
+  if (typeof op !== "string" || !op) return;
+  const r = await handleWrite(sfiId, op, v, peer);
+  if (r.status !== 200) log(`roadmap: bus op ${op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 // ----- Networking -----------------------------------------------------------------------
 self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
@@ -199,11 +407,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   // synced tables needs no code change here.
   const ready = ensureTables(peer);
   if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
-  const t: Tables = {
-    settings: frameSettings(sfiId),
-    milestones: table("milestones", sfiId),
-    tasks: table("tasks", sfiId),
-  };
+  const t = tablesFor(sfiId);
 
   // Full read, open to every viewer who reaches the frame. Whether a non-member can reach
   // it at all is the platform's call (public sharing on the placement), never the frame's.
@@ -213,196 +417,12 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, 200, { meta, milestones: await listMilestones(t), tasks: await listTasks(t) });
   }
 
-  // Everything below mutates — editor-only. Never gate on is_sfi_member (Viewer-role
-  // members would slip through); gate on is_sfi_editor.
-  const editorOnly = async () => {
-    if (!peer.is_sfi_editor) { jsonReply(replyPort, 403, { error: "editors only" }); return false; }
-    await ensurePlacement(t);
-    return true;
-  };
-  const ok = async () => jsonReply(replyPort, 200, await snapshot(t));
-
-  // ----- Project settings: name / overview / links --------------------------------------
-  if (reqPath === "/api/settings" && method === "POST") {
-    if (!(await editorOnly())) return;
-    const v = parseJsonBody<{ name?: unknown; overview?: unknown; links?: unknown }>(body);
-    if (v?.name !== undefined) {
-      await t.settings.set("name", sanitizeText(v.name, MAX_NAME));
-    }
-    if (v?.overview !== undefined) {
-      await t.settings.set("overview", sanitizeText(v.overview, MAX_OVERVIEW));
-    }
-    if (v?.links !== undefined) {
-      const raw = Array.isArray(v.links) ? v.links : [];
-      const links = raw.slice(0, MAX_LINKS).map((l: any) => ({
-        label: sanitizeText(l?.label, MAX_LABEL),
-        url: sanitizeText(l?.url, MAX_URL).trim(),
-      })).filter((l) => l.label && l.url && isSafeUrl(l.url));
-      await t.settings.set("links", links);
-    }
-    await t.settings.set("updated_ms", Date.now());
-    notify(sfiId);
-    return await ok();
-  }
-
-  // ----- Milestones ---------------------------------------------------------------------
-  if (reqPath === "/api/milestone/add" && method === "POST") {
-    if (!(await editorOnly())) return;
-    const v = parseJsonBody<{ title?: unknown; target_ms?: unknown }>(body);
-    const title = sanitizeText(v?.title, MAX_TITLE) || "Untitled milestone";
-    const target = v?.target_ms == null ? null : toIntOrNull(v.target_ms);
-    // Real milestones sort ahead of the two buckets (which live at 1_000_000+).
-    const next = Number(await t.milestones.max("sort_order", { kind: "milestone" }) ?? -1) + 1;
-    await t.milestones.upsert(null, {
-      kind: "milestone", title, target_ms: target, completed: 0,
-      sort_order: next, created_ms: Date.now(),
-    });
-    notify(sfiId);
-    return await ok();
-  }
-
-  if (reqPath.startsWith("/api/milestone/") && !reqPath.startsWith("/api/milestone/delete/")
-      && reqPath !== "/api/milestone/add" && method === "POST") {
-    if (!(await editorOnly())) return;
-    const id = reqPath.slice("/api/milestone/".length);
-    if (!id) return jsonReply(replyPort, 400, { error: "bad id" });
-    const ms = await milestoneRow(t, id);
-    if (!ms) return jsonReply(replyPort, 404, { error: "not found" });
-    const v = parseJsonBody<{ title?: unknown; target_ms?: unknown; completed?: unknown }>(body);
-    const isBucket = ms.kind !== "milestone";
-
-    if (v?.title !== undefined && !isBucket) {
-      await t.milestones.upsert(id, { title: sanitizeText(v.title, MAX_TITLE) || "Untitled milestone" });
-    }
-    if (v?.target_ms !== undefined && !isBucket) {
-      const target = v.target_ms == null ? null : toIntOrNull(v.target_ms);
-      await t.milestones.upsert(id, { target_ms: target });
-    }
-    if (v?.completed !== undefined && !isBucket) {
-      const want = clampInt(toIntOrNull(v.completed) ?? 0, 0, 1);
-      if (want === 1) {
-        // Gate: every task must be complete first.
-        const open = await t.tasks.query({ where: { milestone_id: id, state: { lt: 2 } }, limit: 1 });
-        if (open.total > 0) {
-          return jsonReply(replyPort, 409, { error: "finish all tasks before completing this milestone", open: open.total });
-        }
-        await t.milestones.upsert(id, { completed: 1, completed_ms: Date.now() });
-      } else {
-        await t.milestones.upsert(id, { completed: 0, completed_ms: 0 });
-      }
-    }
-    notify(sfiId);
-    return await ok();
-  }
-
-  if (reqPath.startsWith("/api/milestone/delete/") && method === "POST") {
-    if (!(await editorOnly())) return;
-    const id = reqPath.slice("/api/milestone/delete/".length);
-    if (!id) return jsonReply(replyPort, 400, { error: "bad id" });
-    const ms = await milestoneRow(t, id);
-    if (!ms) return jsonReply(replyPort, 404, { error: "not found" });
-    if (ms.kind !== "milestone") return jsonReply(replyPort, 400, { error: "buckets can't be deleted" });
-    // Deleting a milestone deletes its tasks with it (the UI confirms with the count first).
-    await t.tasks.deleteWhere({ milestone_id: id });
-    await t.milestones.delete(id);
-    notify(sfiId);
-    return await ok();
-  }
-
-  // ----- Tasks --------------------------------------------------------------------------
-  if (reqPath === "/api/task/add" && method === "POST") {
-    if (!(await editorOnly())) return;
-    const v = parseJsonBody<{ milestone_id?: unknown; text?: unknown; texts?: unknown }>(body);
-    const milestoneId = typeof v?.milestone_id === "string" ? v.milestone_id : "";
-    if (!milestoneId || !(await milestoneRow(t, milestoneId))) {
-      return jsonReply(replyPort, 400, { error: "bad milestone" });
-    }
-    // `texts` (a pasted list → one task per line) takes precedence over the single
-    // `text` (which may itself be multi-line, from a Shift+Enter task — kept as one row).
-    let items: string[];
-    if (Array.isArray(v?.texts)) {
-      items = v.texts.map((x) => sanitizeText(x, MAX_TASK)).filter((s) => s.length > 0);
-    } else {
-      const txt = sanitizeText(v?.text, MAX_TASK);
-      items = txt ? [txt] : [];
-    }
-    if (items.length === 0) return jsonReply(replyPort, 400, { error: "text required" });
-    const now = Date.now();
-    let order = await nextTaskOrder(t, milestoneId);
-    for (const text of items) {
-      await t.tasks.upsert(null, { milestone_id: milestoneId, text, state: 0, sort_order: order++, created_ms: now });
-    }
-    await reconcileMilestone(t, milestoneId); // fresh (unstarted) tasks reopen a "done" milestone
-    notify(sfiId);
-    return await ok();
-  }
-
-  if (reqPath.startsWith("/api/task/") && !reqPath.startsWith("/api/task/delete/")
-      && reqPath !== "/api/task/add" && method === "POST") {
-    if (!(await editorOnly())) return;
-    const id = reqPath.slice("/api/task/".length);
-    if (!id) return jsonReply(replyPort, 400, { error: "bad id" });
-    const task = await t.tasks.get(id);
-    if (!task) return jsonReply(replyPort, 404, { error: "not found" });
-    const v = parseJsonBody<{ state?: unknown; text?: unknown; milestone_id?: unknown }>(body);
-
-    if (v?.state !== undefined) {
-      const state = clampInt(toIntOrNull(v.state) ?? 0, 0, 2);
-      if (state === 0) {
-        await t.tasks.upsert(id, { state: 0, actor_id: "", actor_name: "", completed_ms: 0 });
-      } else {
-        const actorName = sanitizeText(peer.user_name, 80) || "someone";
-        const completedMs = state === 2 ? Date.now() : 0;
-        await t.tasks.upsert(id, { state, actor_id: peer.user_id ?? "", actor_name: actorName, completed_ms: completedMs });
-      }
-    }
-    if (v?.text !== undefined) {
-      await t.tasks.upsert(id, { text: sanitizeText(v.text, MAX_TASK) });
-    }
-    // Move to another milestone/bucket (drag across lists appends to the destination end;
-    // /api/tasks/reorder then fixes the exact position).
-    if (v?.milestone_id !== undefined) {
-      const dest = typeof v.milestone_id === "string" ? v.milestone_id : "";
-      if (!dest || !(await milestoneRow(t, dest))) return jsonReply(replyPort, 400, { error: "bad milestone" });
-      await t.tasks.upsert(id, { milestone_id: dest, sort_order: await nextTaskOrder(t, dest) });
-      await reconcileMilestone(t, dest);
-    }
-    await reconcileMilestone(t, task.milestone_id as string);
-    notify(sfiId);
-    return await ok();
-  }
-
-  if (reqPath.startsWith("/api/task/delete/") && method === "POST") {
-    if (!(await editorOnly())) return;
-    const id = reqPath.slice("/api/task/delete/".length);
-    if (!id) return jsonReply(replyPort, 400, { error: "bad id" });
-    const task = await t.tasks.get(id);
-    if (!task) return jsonReply(replyPort, 404, { error: "not found" });
-    await t.tasks.delete(id);
-    await reconcileMilestone(t, task.milestone_id as string); // deleting the last open task can complete a milestone's set
-    notify(sfiId);
-    return await ok();
-  }
-
-  // Reorder within one destination list (also used for cross-list drops): body carries the
-  // destination milestone_id and the full ordered list of task ids that now live in it.
-  if (reqPath === "/api/tasks/reorder" && method === "POST") {
-    if (!(await editorOnly())) return;
-    const v = parseJsonBody<{ milestone_id?: unknown; ids?: unknown }>(body);
-    const dest = typeof v?.milestone_id === "string" ? v.milestone_id : "";
-    if (!dest || !(await milestoneRow(t, dest))) return jsonReply(replyPort, 400, { error: "bad milestone" });
-    const ids = Array.isArray(v?.ids)
-      ? v.ids.filter((x): x is string => typeof x === "string" && !!x)
-      : [];
-    // Only touch ids that actually exist (never phantom-create via upsert).
-    const { rows } = await t.tasks.query({});
-    const known = new Set(rows.map((r) => r._row_id));
-    for (let i = 0; i < ids.length; i++) {
-      if (known.has(ids[i])) await t.tasks.upsert(ids[i], { milestone_id: dest, sort_order: i });
-    }
-    await reconcileMilestone(t, dest);
-    notify(sfiId);
-    return await ok();
+  // Everything below mutates — handled by the shared write path (also fed by the bus
+  // dispatcher above). HTTP arms kept for API compatibility (older viewers, scripted
+  // clients); the frame's own UI writes over the bus. Same logic, same gates, either way.
+  if (reqPath.startsWith("/api/") && method === "POST") {
+    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<any>(body), peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });

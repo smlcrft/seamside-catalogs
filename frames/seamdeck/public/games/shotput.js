@@ -1,7 +1,7 @@
 // shotput.js — the Shot Put cartridge: game definition + play screen.
 // Pure game rules live in shotput-sim.js (shared with the worker + tests);
 // this file is everything the player sees. Fork this pair to make your own game.
-import { html, useState, useRef } from "/lib/js/framelib.js";
+import { html, useState, useRef } from "../lib/js/framelib.js";
 import { useInput, useTurnRunner, animator, wait } from "../console-kit.js";
 import { MAX_DISTANCE, ATTEMPTS, targetFor, simulate, score } from "./shotput-sim.js";
 

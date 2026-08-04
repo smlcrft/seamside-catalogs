@@ -10,9 +10,20 @@
 <body class="ch2">
 <div id="root"></div>
 <script type="module">
-import { frame, html, render, useState, useEffect, useFramePush, WAITING } from "/lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useFramePush, WAITING } from "./lib/js/framelib.js";
 
-const api = frame.apiSafe;
+// Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are dropped
+// on Android (issue #750), the tether carries them everywhere. Fire-and-forget — resulting
+// state arrives via the assets_changed / members_changed / settings_changed pushes below.
+// Reads stay HTTP GETs. Feature-detect: an older viewer framelib has no busSend — fall
+// back to the HTTP write it was using before.
+const api = (path, body, method) => {
+  if (body !== undefined && typeof frame.busSend === "function") {
+    frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+    return Promise.resolve({});
+  }
+  return frame.apiSafe(path, body, method);
+};
 
 const fmtDate = (ms) => {
   const n = Number(ms);

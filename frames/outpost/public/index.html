@@ -228,7 +228,7 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useCallback, useFramePush, applyChannel } from "/lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useRef, useCallback, useFramePush, applyChannel } from "./lib/js/framelib.js";
 
     const PAGE = 15;
 
@@ -262,6 +262,19 @@
       } catch (_) {}
       return p;
     }
+
+    // Writes ride the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are dropped
+    // on Android (issue #750). Fire-and-forget — resulting state arrives via the
+    // outpost_changed push, which is how every viewer (sender included) already renders
+    // changes. Feature-detect: an older host's framelib has no busSend — fall back to the
+    // HTTP write it was using before. Reads stay frame.api GETs; media upload stays HTTP.
+    const write = (path, body) => {
+      if (typeof frame.busSend === "function") {
+        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+        return Promise.resolve({});
+      }
+      return frame.api(path, body);
+    };
 
     // Turn bare URLs in post text into clickable links routed through the host's
     // open-in-browser confirm flow (frames can't navigate the top window themselves).
@@ -311,13 +324,20 @@
         try {
           const bodyReq = { text, kind };
           if (pollOn && pollOpts.length >= 2) bodyReq.poll_options = pollOpts;
-          const res = await frame.api("api/post", bodyReq).catch((e) => ({ error: e.message }));
-          if (!res || res.error || !res.post_id) { await frame.alert(res?.error || "Could not post."); return; }
-          for (const f of files) {
-            const buf = await f.arrayBuffer();
-            const q = "api/post/" + res.post_id + "/media?name=" + encodeURIComponent(f.name) + "&mime=" + encodeURIComponent(f.type || "application/octet-stream");
-            const r = await frame.fetch(withSfi(q), { method: "POST", body: buf });
-            if (!r.ok) { const m = await r.json().catch(() => ({})); await frame.alert(m.error || "An attachment failed to upload."); }
+          if (files.length === 0) {
+            // No attachments — bus write; the outpost_changed push refreshes the feed.
+            await write("api/post", bodyReq).catch(() => null);
+          } else {
+            // Attachments need the new post's id for the (binary, HTTP-only) uploads,
+            // so this flow stays on the HTTP arm.
+            const res = await frame.api("api/post", bodyReq).catch((e) => ({ error: e.message }));
+            if (!res || res.error || !res.post_id) { await frame.alert(res?.error || "Could not post."); return; }
+            for (const f of files) {
+              const buf = await f.arrayBuffer();
+              const q = "api/post/" + res.post_id + "/media?name=" + encodeURIComponent(f.name) + "&mime=" + encodeURIComponent(f.type || "application/octet-stream");
+              const r = await frame.fetch(withSfi(q), { method: "POST", body: buf });
+              if (!r.ok) { const m = await r.json().catch(() => ({})); await frame.alert(m.error || "An attachment failed to upload."); }
+            }
           }
           setText(""); setKind("thought"); setFiles([]); setPollOn(false); setOpts(["", ""]);
           onPosted();
@@ -388,13 +408,14 @@
       async function del() {
         if (!armed) { setArmed(true); if (armRef.current) clearTimeout(armRef.current); armRef.current = setTimeout(() => setArmed(false), 2500); return; }
         setArmed(false); if (armRef.current) clearTimeout(armRef.current);
-        const r = await frame.api("api/delete/" + post.id, {}, "POST").catch(() => null);
-        if (r && r.ok) onRemove(post.id);
+        const r = await write("api/delete/" + post.id, {}).catch(() => null);
+        if (r && r.ok) onRemove(post.id);   // HTTP fallback only — the bus path removes via the push
       }
       async function vote(i) {
         if (!canVote) return;
-        // Returns just this post — patch it in place so a reader deep in the feed keeps scroll.
-        const r = await frame.api("api/vote", { post_id: post.id, option: i }).catch(() => null);
+        // Bus path: the push re-fetches the on-screen range in place, so scroll holds.
+        // HTTP fallback returns just this post — patch it in place.
+        const r = await write("api/vote", { post_id: post.id, option: i }).catch(() => null);
         if (r && r.post) onPatch(r.post);
       }
       async function download(m) {
@@ -571,8 +592,8 @@
       }
 
       async function savePrefs(next) {
-        setMeta((cur) => (cur ? { ...cur, prefs: next } : cur));   // optimistic
-        const r = await frame.api("api/prefs", next).catch(() => null);
+        setMeta((cur) => (cur ? { ...cur, prefs: next } : cur));   // optimistic; the push confirms
+        const r = await write("api/prefs", next).catch(() => null);
         if (r && r.prefs) setMeta((cur) => (cur ? { ...cur, prefs: r.prefs } : cur));
       }
 

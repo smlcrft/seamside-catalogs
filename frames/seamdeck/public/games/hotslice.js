@@ -7,7 +7,7 @@
 // Alternate O/I to pedal (two thumbs, real cadence); UP (road) / DOWN (kerb)
 // to switch lanes; run over pizzas, not cones. Rivals appear live ahead of/
 // behind you.
-import { html } from "/lib/js/framelib.js";
+import { html } from "../lib/js/framelib.js";
 import { useRaceRunner } from "../console-kit.js";
 import { DURATION, VMAX, courseFor, integrate, resolve } from "./hotslice-sim.js";
 

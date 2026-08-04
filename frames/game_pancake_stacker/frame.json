@@ -1,5 +1,5 @@
 {
-    "app_version_min": "0.1.7",
+    "app_version_min": "0.2.5",
     "attribution_log": [
         {
             "first_mod_epoch": 1780704417,
@@ -28,7 +28,7 @@
     "licensed_under_cc0": true,
     "min_height_px": 0.0,
     "min_width_px": 0.0,
-    "modified_at": "2026-08-04T12:15:00Z",
+    "modified_at": "2026-08-04T21:00:00Z",
     "name": "Pancake Stacker",
     "needs_reviewed": false,
     "outputs": [],

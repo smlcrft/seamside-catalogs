@@ -336,7 +336,7 @@
     import {
       frame, html, render, useState, useEffect, useLayoutEffect, useRef, useMemo,
       useFramePush, Modal, applyChannel,
-    } from "/lib/js/framelib.js";
+    } from "./lib/js/framelib.js";
 
     const DAY = 86400000;
     const NEXT = { 0: 1, 1: 2, 2: 0 };
@@ -535,7 +535,18 @@
       const done = real.filter((m) => m.completed).sort(byTarget);
 
       // ---- mutations --------------------------------------------------------------------
-      const call = (path, body, method) => frame.api(path, body ?? {}, method).then(setAll);
+      // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
+      // dropped on Android (issue #750), the tether carries them everywhere. Fire-and-
+      // forget — the resulting state arrives via the roadmap_changed push (useFramePush
+      // above refreshes the sender too). Feature-detect: an older viewer build has no
+      // busSend — fall back to the HTTP write it was using before.
+      const call = (path, body, method) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body ?? {}) });
+          return Promise.resolve();
+        }
+        return frame.api(path, body ?? {}, method).then(setAll);
+      };
       async function saveMeta(patch) { await call("api/settings", patch); }
       async function addTask(mid) {
         const text = (taskDraft[mid] || "").trim();   // keeps internal newlines (Shift+Enter task)

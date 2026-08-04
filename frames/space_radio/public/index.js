@@ -9,7 +9,7 @@
 // via framelib (frame.localStorageSetItem/GetItem) as a single JSON entry. It never
 // travels through the backend and is not synced across viewers.
 // ----------------------------------------------------------------------------------------
-import { frame, applyChannel } from "/lib/js/framelib.js";
+import { frame, applyChannel } from "./lib/js/framelib.js";
 
 (() => {
   const app = document.getElementById("app");
@@ -23,7 +23,16 @@ import { frame, applyChannel } from "/lib/js/framelib.js";
   // Thin wrapper over frame.api that extracts the backend's `{error: "…"}` body
   // (when present) onto the thrown Error's `.message` so existing showHint()
   // callers see the readable error instead of "frame.api POST … → 400".
+  // Writes (bodied calls) go over the tether (frame.busSend → BusUiToFrame): HTTP POST
+  // bodies are dropped on Android (issue #750), the tether carries them everywhere.
+  // Fire-and-forget — the resulting playstate arrives via the radio_state push, which is
+  // how this UI already renders every change. Feature-detect: an older viewer's framelib
+  // has no busSend — fall back to the HTTP write it was using before.
   async function api(path, body, method) {
+    if (body !== undefined && typeof frame.busSend === "function") {
+      frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+      return {};
+    }
     try { return (await frame.api(path, body, method)) || {}; }
     catch (err) {
       let msg = err && err.message;

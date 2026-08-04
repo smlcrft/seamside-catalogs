@@ -179,7 +179,7 @@
     import {
       frame, html, render, useState, useEffect, useRef, useCallback,
       useFramePush, applyChannel, WAITING,
-    } from "/lib/js/framelib.js";
+    } from "./lib/js/framelib.js";
     import { photoAtTime, msUntilNextChange } from "./slideshow-clock.js";
 
     // Must match the caps enforced in frame.ts.
@@ -198,6 +198,18 @@
         if (sfi && !/[?&]sfi=/.test(p)) return p + (p.includes("?") ? "&" : "?") + "sfi=" + encodeURIComponent(sfi);
       } catch (_) { /* no search params */ }
       return p;
+    }
+
+    // JSON writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
+    // dropped on Android, and the push (display_changed / photos_changed) — which reaches
+    // the sender too — is the confirmation the UI renders from. Feature-detect: an older
+    // viewer's framelib has no busSend, so fall back to the HTTP write it was using before.
+    function write(path, body) {
+      if (typeof frame.busSend === "function") {
+        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+        return Promise.resolve({});
+      }
+      return frame.api(path, body || {}, "POST");
     }
 
     // ----- Image preparation (client-side downscale) ------------------------------------
@@ -326,15 +338,15 @@
       // ---- Actions ----------------------------------------------------------------------
       // `pin` distinguishes "show me THIS photo" from "put me in full-frame" — only the former
       // takes a non-editor out of a running slideshow.
-      const go = useCallback(async (mode, photoId, pin = true) => {
+      const go = useCallback((mode, photoId, pin = true) => {
         if (!canEdit) {
           setOverride({ mode, photoId: photoId || "", pinned: mode === "single" && pin });
           return;
         }
         const body = { mode };
         if (photoId) body.photo_id = photoId;
-        const s = await frame.api("api/display", body).catch(() => null);
-        if (s) setSt(s); else refresh();
+        // No response to consume: the display_changed push refreshes everyone, us included.
+        write("api/display", body).catch(() => refresh());
       }, [canEdit, refresh]);
 
       const step = useCallback((delta) => {
@@ -344,18 +356,16 @@
         go("single", photos[(((i < 0 ? 0 : i) + delta) % n + n) % n].id);
       }, [photos, shown, go]);
 
-      const saveSettings = useCallback(async (patch) => {
+      const saveSettings = useCallback((patch) => {
         // The client holds the running show's computed position, so hand it back whenever the
         // show's shape changes — that's what lets the backend store a real photo when it stops.
         const body = { ...patch, current_photo_id: shown?.id || "" };
-        const s = await frame.api("api/settings", body).catch(() => null);
-        if (s) { setOverride(null); setSt(s); }
+        write("api/settings", body).catch(() => {});
       }, [shown]);
 
       const removePhoto = useCallback(async (id) => {
         if (!(await frame.confirm("Delete this photo from the frame?", { danger: true, okLabel: "Delete" }))) return;
-        const s = await frame.api("api/delete/" + id, {}, "POST").catch(() => null);
-        if (s) { setOverride(null); setSt(s); } else refresh();
+        write("api/delete/" + id, {}).catch(() => refresh());
       }, [refresh]);
 
       const upload = useCallback(async (list) => {

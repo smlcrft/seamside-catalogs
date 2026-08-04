@@ -11,7 +11,7 @@
       "name": "Calendar",
       "description": "A simple shared calendar, unique per placement. Space editors add events on a given day or set them to repeat weekly (for example every Mon/Wed/Fri at 3pm) until an end date or forever, each with an optional time, length, color, link, and note; everyone else sees a clean read-only view, including anyone the space owner shares the frame publicly with. Switch between a month grid and a week view with events laid out by time of day. Timed events are authored in your own time zone and automatically shifted to each viewer's local time, so everyone sees the right moment wherever they are. Recurring events can be deleted just for one day, from a day onward, or entirely, and an event's link opens in the native browser (or a new tab on the web). The view also adapts to its size \u2014 the full month/week views when there's room, and a compact upcoming-events agenda once the tile gets small, so it stays usable down to about 200\u00d7200. The whole calendar lives in a single JSON file in a per-placement folder. No database or sync tables.",
       "icon": "",
-      "modified_at": "2026-08-04T00:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 560,
@@ -25,8 +25,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/calendar.tar.gz",
-      "package_sha256": "ab9d2346c4fbca9fde014ea7c9ceef2ad7a870c0f6bccf96e26dda6a0c1db1cc",
-      "app_version_min": "0.1.7",
+      "package_sha256": "54a22973a42d8195f2ff1689bb6026817164c370b658800dcbea89cfcad378bf",
+      "app_version_min": "0.2.5",
       "tags": [
         "everyday",
         "planning"
@@ -38,7 +38,7 @@
       "name": "Checklist",
       "description": "A simple, collaborative to-do list. Each placement is its own list \u2014 any member of the space can add tasks, cycle each task through three states (unstarted, in-progress, complete), drag to reorder, and delete. Non-members get a live read-only view. Items, ordering, and states are stored in an encrypted LocalTable scoped to the placement, and every change is pushed live to all viewers.",
       "icon": "",
-      "modified_at": "2026-08-04T08:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 420,
@@ -52,8 +52,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/checklist.tar.gz",
-      "package_sha256": "84123957a61507039c7676a53e9d355d0e14a4cfb724885952330ba69616ccc9",
-      "app_version_min": "0.1.12",
+      "package_sha256": "4fa5820595a9b5ac21d743cb2c31b9f037377a07d4079600670205d8fbc79207",
+      "app_version_min": "0.2.5",
       "tags": [
         "everyday",
         "tasks"
@@ -65,7 +65,7 @@
       "name": "Community Home",
       "description": "A minimal website builder for a community home page. Admins configure the title, color, sections, and links; anonymous visitors see the published public page.",
       "icon": "",
-      "modified_at": "2026-08-04T07:30:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -79,8 +79,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_home.tar.gz",
-      "package_sha256": "960dbf57b42fb68872b7af753181dc5ba27d56ad6263f39d57891fa4908e0797",
-      "app_version_min": "0.1.12",
+      "package_sha256": "9bc8e63889e3753bdc57ef64d1edd43213d44d57960dfddb1f2eb80e621090a6",
+      "app_version_min": "0.2.5",
       "tags": [
         "community",
         "website"
@@ -92,7 +92,7 @@
       "name": "Community Library",
       "description": "Track items shared by a community \u2014 books, tools, gear \u2014 and who has them checked out. Items and members live in shared SyncTables (the members table is compatible with Member Manager so the same roster can be reused). Per-placement preferences (org name, borrow durations, owner-only edit) are stored in a local JSON file.",
       "icon": "",
-      "modified_at": "2026-08-04T02:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -106,8 +106,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_library.tar.gz",
-      "package_sha256": "78a59ab9f494b7782f85d58fb11bda6483f042df403ae58636c3e6c1d8898df6",
-      "app_version_min": "0.1.7",
+      "package_sha256": "78f406b78a12d1b3a650100f641958f348fc82b3a9dde9fc94b597192ac99963",
+      "app_version_min": "0.2.5",
       "tags": [
         "community",
         "lending",
@@ -120,7 +120,7 @@
       "name": "Discussion Channel",
       "description": "A per-placement realtime chat channel. Members chat, react with Phosphor Light icons, and delete their own messages; owners can rename the channel, pick a theme, and choose whether Viewer-role members can participate. Non-members, including anyone you share the frame with publicly, read the channel live without posting.",
       "icon": "",
-      "modified_at": "2026-08-04T06:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -134,8 +134,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/discussion_channel.tar.gz",
-      "package_sha256": "c6aa1cf67c26a780508e94696f62f8288442111426a2aa1662917e3c425be188",
-      "app_version_min": "0.1.12",
+      "package_sha256": "3e49ec446d6f6cea1808577a85a60c38a027806c247c44706d6c387ffa8eebcb",
+      "app_version_min": "0.2.5",
       "tags": [
         "community",
         "chat"
@@ -147,7 +147,7 @@
       "name": "File Folder",
       "description": "A simple shared file bucket, unique per placement. Members (or just the owner \u2014 the owner chooses) can add files by clicking 'Add file' or dragging them in from the desktop. The owner sets who may add files, a max file size, and a max number of files. Anyone who can open the frame can list and download its files, so sharing the frame publicly shares the folder. Files live in the frame's own data folder in a per-placement subfolder; only the owner's sharing preferences are stored, in a single JSON file. No database or sync tables.",
       "icon": "",
-      "modified_at": "2026-08-04T03:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 420,
@@ -161,8 +161,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/file_folder.tar.gz",
-      "package_sha256": "7dda9497deded4af702e2525ebb7421b85fd7886456fa70abf09ba797542d8d5",
-      "app_version_min": "0.1.7",
+      "package_sha256": "34c15099739f3db87b7ec4799d45111d6ca7ec88988332af1c09146a46376893",
+      "app_version_min": "0.2.5",
       "tags": [
         "everyday",
         "files"
@@ -188,8 +188,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_ascii_runner.tar.gz",
-      "package_sha256": "05047581733042086a3c599dd37a5250ffa59093d61711fab000b18c30f69857",
-      "app_version_min": "0.1.7",
+      "package_sha256": "0477bb43d29b9c93d37269599acbd17b9d55fe6825def89c81b34a1fcc1fd47f",
+      "app_version_min": "0.2.5",
       "tags": [
         "play",
         "games",
@@ -202,7 +202,7 @@
       "name": "Dice Roller",
       "description": "Simple dice roller. Roll via the UI or HTTP API; result is broadcast to all viewers of a frame instance.",
       "icon": "",
-      "modified_at": "2026-08-04T10:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -216,8 +216,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_dice_roller.tar.gz",
-      "package_sha256": "60f7946dc6b419a768473061d509ff61f0b0f878e541970f2034a31b2774d5a4",
-      "app_version_min": "0.1.7",
+      "package_sha256": "b5f586c16883420b420f44af8c93857f510ac43bea2d6e19820a9812c7fb6691",
+      "app_version_min": "0.2.5",
       "tags": [
         "play",
         "games",
@@ -230,7 +230,7 @@
       "name": "Pancake Stacker",
       "description": "Simple solo arcade game. A pancake swings back and forth at the top of the griddle \u2014 tap, click, or hit space to drop it onto the stack. Each pancake trims to the overlap with the one below, so the tower narrows as you climb. Miss entirely and the stack topples. High score per placement.",
       "icon": "",
-      "modified_at": "2026-08-04T12:15:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 400.0,
@@ -244,8 +244,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_pancake_stacker.tar.gz",
-      "package_sha256": "0eb2b30f8613de99817a2bc8d6bb9bf2d085f05c821b8fd3ff382ab3f7b70417",
-      "app_version_min": "0.1.7",
+      "package_sha256": "a81821622325856e390398a6b717b715b9ee4885ee7f93750195f95e4868b3a0",
+      "app_version_min": "0.2.5",
       "tags": [
         "play",
         "games",
@@ -258,7 +258,7 @@
       "name": "Garden Gnome",
       "description": "An at-a-glance helper for home gardeners. Set a location, pick your soil, tick the plants you grow, and Garden Gnome fetches local weather (Open-Meteo, keyless) every 15 minutes \u2014 past 5 days plus the next 24 hours \u2014 and shows three color-coded dots on a +/- spectrum next to each plant for water, temperature, and sunlight so you know when a plant is being naturally pampered or stressed. Space editors set the garden up; everyone else, including anyone you share the frame with publicly, gets the same read-only board with the location withheld.",
       "icon": "",
-      "modified_at": "2026-08-04T02:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 560,
@@ -275,8 +275,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/garden_gnome.tar.gz",
-      "package_sha256": "96fe9db27ef6ada67988953da9ec50abda48f3551fff1cb46440a9c2a4772e93",
-      "app_version_min": "0.1.7",
+      "package_sha256": "15059729f8f270d605816a86307c37fd008a4381825e1ddf7204861e58fa6f60",
+      "app_version_min": "0.2.5",
       "tags": [
         "household",
         "garden",
@@ -289,7 +289,7 @@
       "name": "Help Desk",
       "description": "Anonymous visitors submit a message with email (plus admin-configured fields); known users in the space see a realtime inbox of incoming correspondence.",
       "icon": "",
-      "modified_at": "2026-08-04T07:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -303,8 +303,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/help_desk.tar.gz",
-      "package_sha256": "3a9d9697324939d698f28af0aabfc70a14f565c9b883a142142c9e1f19df6c96",
-      "app_version_min": "0.1.12",
+      "package_sha256": "0552ff877f41c1d4da32872c69c27266abfbee86300684a671584b85b28b26a2",
+      "app_version_min": "0.2.5",
       "tags": [
         "smallbiz",
         "community",
@@ -317,7 +317,7 @@
       "name": "Kanban Board",
       "description": "A drag-and-drop task board, unique per placement. Space editors organize work as cards in channel-colored columns: add, rename, recolor, and reorder columns, drag cards between them, and keep details and a short label on each card. Everyone else, including anyone the frame is shared with publicly, sees a live read-only view of the board. Cards and columns live in encrypted LocalTables scoped to the placement, and every change is pushed live to all viewers.",
       "icon": "",
-      "modified_at": "2026-08-04T00:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 760,
@@ -331,8 +331,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/kanban.tar.gz",
-      "package_sha256": "5d6a06ee096db9cb69612fe2b4f593b0f2591e5e670f438add9c4b857a87887e",
-      "app_version_min": "0.2.4",
+      "package_sha256": "17d3375428861ff0106873692934cd2528ba2cf5a677de10c54659607330e091",
+      "app_version_min": "0.2.5",
       "tags": [
         "everyday",
         "tasks",
@@ -345,7 +345,7 @@
       "name": "Market Weather",
       "description": "A turnout forecaster for outdoor commerce \u2014 farmers markets, festivals, food trucks, street vendors, walkable storefronts. Set a location and Market Weather pulls 72 hours of weather from Open-Meteo (keyless), compares it against the last 30 days' local norms, and folds in temperature comfort, rain, UV, daylight, wind, weekend bonus, and time-of-day into a single composite turnout curve. The graph overlays each contributing factor as a faint band (daytime in pale yellow, rain in blue rising from the bottom, extreme heat/cold in red, weekend bonus in green) so you can see at a glance WHY the bold turnout line moves the way it does \u2014 and plan how much to stock, bake, or brew for the days ahead.",
       "icon": "",
-      "modified_at": "2026-08-04T03:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 720,
@@ -362,8 +362,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/market_weather.tar.gz",
-      "package_sha256": "ee114625c89f0c8b154e7a9449fdd0ee04b8540df8395ab369747dae0ee94f47",
-      "app_version_min": "0.1.7",
+      "package_sha256": "0e4910bad8d3c09b297eb221f6ba2b6e7970859338c1b0c92802eac697101c51",
+      "app_version_min": "0.2.5",
       "tags": [
         "smallbiz",
         "weather"
@@ -375,7 +375,7 @@
       "name": "Member Manager",
       "description": "View and manage a roster of people and their roles within an organization, including an optional phone number for each member. Member entries are stored in a shared SyncTable so every space member sees the same list. Email is a one-tap mailto link; a phone number offers a call/text chooser. Per-placement preferences (org name, available roles, edit policy) are stored in a local JSON file.",
       "icon": "",
-      "modified_at": "2026-08-04T00:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -389,8 +389,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/member_manager.tar.gz",
-      "package_sha256": "407edcbcbf59c79884c67ccaa6434523cd3af77d30f14818e9d6ec1b13e7e5a9",
-      "app_version_min": "0.1.8",
+      "package_sha256": "eaa8eb203558617b5438581e8b958bea639db2ee07c4e84ed7f0dcb9180eda10",
+      "app_version_min": "0.2.5",
       "tags": [
         "community",
         "members"
@@ -402,7 +402,7 @@
       "name": "Member Reachout",
       "description": "Send updates and notifications to the people in your roster. Reads the same shared Members SyncTable as the Member Manager frame (bind it to the same table when prompted), so names, roles, emails and optional phone numbers stay in one place. Compose a message, pick who hears it (a role, several roles, or everyone), then send it as one bcc email or hand-text everyone with a phone number \u2014 one tap at a time. Every send is logged locally (date, audience, method) so you can browse the backlog and re-send later. Non-members, including anyone you share the frame with publicly, see the message history for whichever roles you choose to expose.",
       "icon": "",
-      "modified_at": "2026-08-04T00:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -416,8 +416,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/member_reachout.tar.gz",
-      "package_sha256": "f2754b09dba98afc0026cfd1cec5f04fde1d8f7a7bd19cc98f5ddc827b3ff64a",
-      "app_version_min": "0.1.8",
+      "package_sha256": "f8eb427900bd913559131b7bddd79bfb2623c5998da800394a71af05194b294f",
+      "app_version_min": "0.2.5",
       "tags": [
         "community",
         "members"
@@ -429,7 +429,7 @@
       "name": "Outpost",
       "description": "A lightweight public posting board for sharing with the world. Space members (editors) publish short posts \u2014 a passing thought, an open question, a status update, an announcement, a quick poll, or an image / audio / video clip \u2014 and anyone with the frame's share link can read them. Each post shows its author and the time it was shared, and URLs in the text become clickable (opened safely in the reader's browser). Posts live entirely in the frame's own data folder: one subfolder per placement holds a encrypted LocalTable (posts, media rows, and poll votes \u2014 indexed so a large, active feed stays fast) plus a per-post subfolder for any attached media bytes. Local file only, no sync tables.",
       "icon": "",
-      "modified_at": "2026-08-04T11:30:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 480,
@@ -443,8 +443,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/outpost.tar.gz",
-      "package_sha256": "da92146f86156129050233b35fafead75b5a4eb800821cd98ebcbc4b0b5632a9",
-      "app_version_min": "0.1.12",
+      "package_sha256": "040fe2fe1e1904386eb8283498d82b386cbe8abba64c32fc80f6260024c5a5b4",
+      "app_version_min": "0.2.5",
       "tags": [
         "community",
         "social"
@@ -456,7 +456,7 @@
       "name": "Picture Frame",
       "description": "A digital picture frame for a space. Space editors drop photos in \u2014 by clicking Add or dragging them from the desktop \u2014 and everyone sees them as a grid of thumbnails; tap one and it fills the frame, tap again to go back. Turn on slideshow mode and the frame cycles through the photos at an interval you choose. There is one shared display: whatever an editor puts up is what every viewer sees, and the frame remembers exactly what it was showing, so a restarted frame or a rebooted machine comes back to the same photo. Viewer-role members and anonymous link visitors can browse the photos on their own screen without changing what the frame displays for anyone else. Photos are downscaled on the way in and stored with their bytes on the host beside a per-placement encrypted LocalTable; nothing leaves the device.",
       "icon": "",
-      "modified_at": "2026-08-04T00:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 640,
@@ -470,8 +470,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/picture_frame.tar.gz",
-      "package_sha256": "27a206b673fb85162c69174c2f361d33d684ddbab7c39260517267cd2c295f0c",
-      "app_version_min": "0.1.12",
+      "package_sha256": "353032c73678ad0b8e5850eba49d43f2c40872d69759eabc4340375d2c1bdc33",
+      "app_version_min": "0.2.5",
       "tags": [
         "household",
         "photos",
@@ -484,7 +484,7 @@
       "name": "Roadmap",
       "description": "A simple, robust project roadmapping tool \u2014 one roadmap per placement. Set a project name, overview, and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in-progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Collapsed milestone headers still show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days-remaining and overdue color-coding. A milestone can only be marked done once all its tasks are complete. Everything is stored in a lightweight per-placement encrypted LocalTable database on the host and pushed live to every viewer; non-members get a read-only view.",
       "icon": "",
-      "modified_at": "2026-08-04T00:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 720,
@@ -498,8 +498,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roadmap.tar.gz",
-      "package_sha256": "15838afa5b2d92b85df685d65aecbfddc6d53da08109ee6240bbbd498d1bd73a",
-      "app_version_min": "0.1.12",
+      "package_sha256": "85a175c963850c23117dff3d6abbfb18f89ad2d884606179051e06cc72284167",
+      "app_version_min": "0.2.5",
       "tags": [
         "smallbiz",
         "planning"
@@ -511,7 +511,7 @@
       "name": "Roundtable",
       "description": "A per-placement discussion + two prioritized idea boards for a space. Members chat in a single channel, add items to a Positives list (features/tasks) or a Negatives list (issues/bugs), and +1 the ones that matter. Items are ranked by votes, then recency. Only the owner can rename the frame and set high-level preferences. Non-members, including anyone you share the frame with publicly, follow along in a live read-only view.",
       "icon": "",
-      "modified_at": "2026-08-04T06:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -525,8 +525,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roundtable.tar.gz",
-      "package_sha256": "55a444d996800ac4e8331772a40f3756a209251f193544fd98475401de16cc37",
-      "app_version_min": "0.1.12",
+      "package_sha256": "517b9294f62d99ccb7d814230c521e819e2d0184e18456cc6557943366dc50ce",
+      "app_version_min": "0.2.5",
       "tags": [
         "community",
         "chat"
@@ -538,7 +538,7 @@
       "name": "Seamdeck",
       "description": "A tiny game console for your space. The frame is the whole device: a handheld on narrow screens, a TV + controller on wide ones. Members open sessions of little Phosphor-icon games (shot put, regatta, hot slice), join each other's lobbies, take turns or race in realtime, and chase the shared high-score board. Controls: D-pad via arrows/WASD, O = primary, I = secondary/back. It's also a template \u2014 each game is a self-contained two-file cartridge, and the console gives every cartridge lobbies, turn rotation, realtime racing, spectators, results, and high scores for free, so forking it into your own console is mostly writing games.",
       "icon": "",
-      "modified_at": "2026-07-06T00:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 480,
@@ -552,8 +552,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/seamdeck.tar.gz",
-      "package_sha256": "d48c48a84dad0a9f3881971cc58bc758c2f52a2d3f1de29d18b4bf1feaaa5209",
-      "app_version_min": "0.1.8",
+      "package_sha256": "4b0417029187904590d2a04f5654056ace203d08ce5d44aab463a559218338f2",
+      "app_version_min": "0.2.5",
       "tags": [
         "play",
         "games",
@@ -566,7 +566,7 @@
       "name": "Slideshow",
       "description": "A simple presentation maker and presenter, unique per placement. Space editors build a deck of slides \u2014 stylized text (headings, body, bullet lists), uploaded images, and shapes \u2014 laid out freely on a fixed slide canvas; everything is positioned and sized proportionally so the deck looks identical from a 300\u00d7300 tile up to a scaled-up fullscreen presentation. Viewers can browse and present the deck but cannot edit it. The deck follows the space's channel color; a few show-wide settings (background, slide aspect, and an optional \"keep viewers in sync\" mode that locks every viewer's presentation to the editor's current slide) sit alongside the slides. The whole deck lives in a single JSON file in a per-placement folder, with uploaded images (auto-resized to keep file sizes reasonable) stored beside it. No database or sync tables.",
       "icon": "",
-      "modified_at": "2026-08-04T00:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 640,
@@ -580,8 +580,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/slideshow.tar.gz",
-      "package_sha256": "989abb624937d34ac8f00acead37f71d2f8d3d2967b52cfa46a29eb475994d8f",
-      "app_version_min": "0.1.7",
+      "package_sha256": "40441331f8ad686b1598aaa3a423caf33ae1d5680ee8912f783d30503515d5df",
+      "app_version_min": "0.2.5",
       "tags": [
         "everyday",
         "presentations"
@@ -593,7 +593,7 @@
       "name": "Space Radio",
       "description": "A synced web radio player for everyone in a space. Space editors pick a station from a large list of public web stations \u2014 rock, pop, ambient, jazz, French, Italian, Australian, NPR, chiptune, and more \u2014 and everyone else, including anyone you share the frame with publicly, listens along to the same audio simultaneously. Play/pause and station selection are shared; each viewer's volume and mute are local and remembered between sessions.",
       "icon": "",
-      "modified_at": "2026-08-04T08:30:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -631,8 +631,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/space_radio.tar.gz",
-      "package_sha256": "bf7703a1ccacc724cd2f97997817d297068d5e5da73d45259ac9676073ee717d",
-      "app_version_min": "0.1.8",
+      "package_sha256": "01231f3472da08dc377445b927433701d77c7dc7bd783229cb8b5565df8b9423",
+      "app_version_min": "0.2.5",
       "tags": [
         "media",
         "music"
@@ -644,7 +644,7 @@
       "name": "Watercolor Studio",
       "description": "A quiet, beautiful place to paint with watercolors. Each placement is its own sheet of textured paper. Pigments are real watercolor pans \u2014 pick one, or add bits of several into the mixing well and they blend subtractively the way paint actually does (blue plus yellow makes green, complements make mud). A range of brushes (broad wash, round, flat, dry-brush, fine detail) lay translucent washes that pool, bleed, and darken at their edges; layered strokes glaze over one another. A clean-water Lift brush pulls pigment back out. Optional thin guide outlines (a pear, a teacup, a koi, a mountain lake\u2026) sit faintly beneath the paint so new painters can trace as they learn. Editors in the space paint together in real time; anonymous viewers watch read-only. The whole painting is stored as deterministic vector strokes in a single JSON file per placement \u2014 no database, no network.",
       "icon": "",
-      "modified_at": "2026-08-04T11:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 760,
@@ -658,7 +658,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/watercolor_studio.tar.gz",
-      "package_sha256": "81e6efcba68829aa4eb21d26a62e9fd42b4404063eaaa8aa6687600b62fa5ec5",
+      "package_sha256": "5a98b84be348105718a517c914648d594634cb8b590457dae98b9f8ef90400ab",
+      "app_version_min": "0.2.5",
       "tags": [
         "studio",
         "art"
@@ -670,7 +671,7 @@
       "name": "Weather Info",
       "description": "Example weather info/forecast using keyless API (open meteo)",
       "icon": "",
-      "modified_at": "2026-08-04T09:00:00Z",
+      "modified_at": "2026-08-04T21:00:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -687,8 +688,8 @@
         "web_scripts": []
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/weather_api.tar.gz",
-      "package_sha256": "f7fded2b40fa364c172ea2f703df18057ff5996eb6748b676dbfc6ea0a71c068",
-      "app_version_min": "0.1.7",
+      "package_sha256": "3ad6ce3065ce28af83cfb9bba8d4ec4c0a662da8494afca8e11ca86d6b9f22e8",
+      "app_version_min": "0.2.5",
       "tags": [
         "weather"
       ]

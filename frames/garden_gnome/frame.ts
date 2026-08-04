@@ -24,7 +24,7 @@
 // ----------------------------------------------------------------------------------------
 import {
   log, parsePeerInfo, serveFileAtPath, serveHtmlShell,
-  jsonReply, parseJsonBody, sanitizeText, pushToInstance,
+  jsonReply, parseJsonBody, sanitizeText, pushToInstance, onUiMessage,
   loadJsonFile, saveJsonFile,
 } from "@frame-core";
 
@@ -496,6 +496,43 @@ function statusFor(plant: PlantKey, w: WeatherData, soilFactor: number): PlantSt
   };
 }
 
+// ----- Save mutation (shared by the HTTP arm and the bus dispatcher) --------------------
+type MutPeer = ReturnType<typeof parsePeerInfo>;
+type MutResult = { status: number; body: Record<string, unknown> };
+
+// Editor-only. Never gate on is_sfi_member — a Viewer-role member would slip through and
+// be able to rewrite the garden.
+function mutSave(sfi_id: string, v: { location?: unknown; soil?: unknown; plants?: unknown } | null, peer: MutPeer): MutResult {
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  if (!v) return { status: 400, body: { error: "invalid JSON" } };
+  const location = sanitizeText(v.location, 120);
+  const soilRaw  = sanitizeText(v.soil, 20);
+  const soil: SoilKey = SOIL_KEY_SET.has(soilRaw) ? (soilRaw as SoilKey) : "loamy";
+  const plants: PlantKey[] = [];
+  if (Array.isArray(v.plants)) {
+    const seen = new Set<string>();
+    for (const item of v.plants) {
+      const key = sanitizeText(item, 30);
+      if (PLANT_KEY_SET.has(key) && !seen.has(key)) {
+        seen.add(key);
+        plants.push(key as PlantKey);
+      }
+    }
+  }
+  const next: Prefs = { location, soil, plants };
+  setPrefs(sfi_id, next);
+  pushToInstance(sfi_id, { type: "settings_changed" });
+  return { status: 200, body: { prefs: next } };
+}
+
+onUiMessage((sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  if (d.op !== "save") return;
+  const r = mutSave(sfiId, d, peer);
+  if (r.status !== 200) log(`garden gnome: bus op save → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 // ----- HTTP handler ---------------------------------------------------------------------
 self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cookies) => {
   const peer = parsePeerInfo(query, cookies);
@@ -537,30 +574,10 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cook
     });
   }
 
-  // Editor-only. Never gate on is_sfi_member — a Viewer-role member would slip through and
-  // be able to rewrite the garden.
   if (reqPath === "/api/save" && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
     const v = parseJsonBody<{ location?: unknown; soil?: unknown; plants?: unknown }>(body);
-    if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
-    const location = sanitizeText(v.location, 120);
-    const soilRaw  = sanitizeText(v.soil, 20);
-    const soil: SoilKey = SOIL_KEY_SET.has(soilRaw) ? (soilRaw as SoilKey) : "loamy";
-    const plants: PlantKey[] = [];
-    if (Array.isArray(v.plants)) {
-      const seen = new Set<string>();
-      for (const item of v.plants) {
-        const key = sanitizeText(item, 30);
-        if (PLANT_KEY_SET.has(key) && !seen.has(key)) {
-          seen.add(key);
-          plants.push(key as PlantKey);
-        }
-      }
-    }
-    const next: Prefs = { location, soil, plants };
-    setPrefs(peer.sfi_id, next);
-    pushToInstance(peer.sfi_id, { type: "settings_changed" });
-    return jsonReply(replyPort, 200, { prefs: next });
+    const r = mutSave(peer.sfi_id, v, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   if (method === "GET") {

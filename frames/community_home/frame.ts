@@ -12,7 +12,7 @@
 // live viewer of the placement via pushToInstance(sfi_id, …).
 // ----------------------------------------------------------------------------------------
 import {
-  log, serveFileAtPath, serveHtmlShell, pushToInstance, parsePeerInfo,
+  log, serveFileAtPath, serveHtmlShell, pushToInstance, parsePeerInfo, onUiMessage,
   parseJsonBody, declareTables, ensureTables, table, frameSettings,
 } from "@frame-core";
 
@@ -121,6 +121,151 @@ async function broadcast(sfiId: string, settings: Settings, blocks: Tbl): Promis
 }
 
 // ----------------------------------------------------------------------------------------
+// SHARED WRITE LOGIC — every admin mutation, whether it arrives over HTTP or the tether
+// (frame.busSend → onUiMessage), runs through here. `op` is the API path minus the leading
+// "api/" ("admin/page", "admin/blocks", "admin/blocks/<id>", "admin/blocks/<id>/delete",
+// "admin/blocks/reorder"). The editor gate lives here so the two entry points never drift.
+// ----------------------------------------------------------------------------------------
+type WriteResult = { status: number; body: Record<string, unknown> };
+
+async function handleWrite(
+  sfiId: string,
+  op: string,
+  data: Record<string, unknown> | null,
+  peer: ReturnType<typeof parsePeerInfo>,
+): Promise<WriteResult> {
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "forbidden" } };
+  const settings = frameSettings(sfiId);
+  const blocks = table("blocks", sfiId);
+  await ensurePage(settings, blocks);
+
+  // Update top-level page settings (title / tagline).
+  if (op === "admin/page") {
+    if (!data) return { status: 400, body: { error: "invalid body" } };
+    if (typeof data.title === "string") {
+      await settings.set("title", clampStr(data.title, MAX_TITLE));
+    }
+    if (typeof data.tagline === "string") {
+      await settings.set("tagline", clampStr(data.tagline, MAX_TAGLINE));
+    }
+    await settings.set("updated_at", Date.now());
+    await broadcast(sfiId, settings, blocks);
+    return { status: 200, body: { ok: true } };
+  }
+
+  // Create a new block. Payload: { kind: "section" | "link" | "pub_frame", ...fields }.
+  // Always appended to the end — UI positions the add buttons below the last block.
+  if (op === "admin/blocks") {
+    const kind = data && typeof data.kind === "string" ? data.kind : "";
+    if (!data || !VALID_KINDS.has(kind)) return { status: 400, body: { error: "invalid kind" } };
+
+    const order = Number(await blocks.max("sort_order") ?? -1) + 1;
+
+    if (kind === "section") {
+      const heading = clampStr(data.heading, MAX_HEADING);
+      const bodyText = clampStr(data.body, MAX_BODY);
+      const format = typeof data.format === "string" && VALID_FORMATS.has(data.format) ? data.format : "text";
+      await blocks.upsert(null, { kind: "section", heading, body: bodyText, format, sort_order: order });
+    } else if (kind === "link") {
+      const label = clampStr(data.label, MAX_LABEL);
+      const url = clampStr(data.url, MAX_URL).trim();
+      if (!label) return { status: 400, body: { error: "label required" } };
+      if (!url || !isSafeUrl(url)) return { status: 400, body: { error: "valid http(s) url required" } };
+      await blocks.upsert(null, { kind: "link", label, url, sort_order: order });
+    } else if (kind === "pub_frame") {
+      const url = clampStr(data.url, MAX_URL).trim();
+      if (!url || !isSafeUrl(url)) return { status: 400, body: { error: "valid http(s) url required" } };
+      // heading is reused as an optional title displayed above the iframe.
+      const heading = clampStr(data.heading, MAX_HEADING);
+      const width = clampDim(data.width, 320);
+      const height = clampDim(data.height, 320);
+      await blocks.upsert(null, { kind: "pub_frame", heading, url, width, height, sort_order: order });
+    }
+
+    await touchPage(settings);
+    await broadcast(sfiId, settings, blocks);
+    return { status: 200, body: { ok: true } };
+  }
+
+  // Reorder blocks: payload = { order: [id, id, id] }
+  if (op === "admin/blocks/reorder") {
+    const order = data?.order;
+    if (!Array.isArray(order)) return { status: 400, body: { error: "order[] required" } };
+    const ids = order.filter((x: unknown): x is string => typeof x === "string" && !!x);
+    // Only touch ids that actually exist (never phantom-create via upsert).
+    const { rows } = await blocks.query({});
+    const known = new Set(rows.map((r) => r._row_id));
+    for (let i = 0; i < ids.length; i++) {
+      if (known.has(ids[i])) await blocks.upsert(ids[i], { sort_order: i });
+    }
+    await broadcast(sfiId, settings, blocks);
+    return { status: 200, body: { ok: true } };
+  }
+
+  // Update / delete a single block. Only fields present in the patch are touched; kind is
+  // immutable. Block ids are opaque row-id strings; a path segment must not contain '/'.
+  const blockMatch = op.match(/^admin\/blocks\/([^/]+)(\/delete)?$/);
+  if (blockMatch && blockMatch[1] !== "reorder") {
+    const id = blockMatch[1];
+    if (!(await blocks.get(id))) return { status: 404, body: { error: "not found" } };
+
+    if (blockMatch[2]) {
+      await blocks.delete(id);
+      await touchPage(settings);
+      await broadcast(sfiId, settings, blocks);
+      return { status: 200, body: { ok: true } };
+    }
+
+    if (!data) return { status: 400, body: { error: "invalid body" } };
+    if (typeof data.heading === "string") {
+      await blocks.upsert(id, { heading: clampStr(data.heading, MAX_HEADING) });
+    }
+    if (typeof data.body === "string") {
+      await blocks.upsert(id, { body: clampStr(data.body, MAX_BODY) });
+    }
+    if (typeof data.format === "string") {
+      if (!VALID_FORMATS.has(data.format)) return { status: 400, body: { error: "invalid format" } };
+      await blocks.upsert(id, { format: data.format });
+    }
+    if (typeof data.label === "string") {
+      await blocks.upsert(id, { label: clampStr(data.label, MAX_LABEL) });
+    }
+    if (typeof data.url === "string") {
+      const url = clampStr(data.url, MAX_URL).trim();
+      if (url && !isSafeUrl(url)) return { status: 400, body: { error: "invalid url" } };
+      await blocks.upsert(id, { url });
+    }
+    // pub_frame dimensions — only meaningful for that kind, but harmless to store otherwise.
+    if (data.width !== undefined) {
+      await blocks.upsert(id, { width: clampDim(data.width, 320) });
+    }
+    if (data.height !== undefined) {
+      await blocks.upsert(id, { height: clampDim(data.height, 320) });
+    }
+    await touchPage(settings);
+    await broadcast(sfiId, settings, blocks);
+    return { status: 200, body: { ok: true } };
+  }
+
+  return { status: 404, body: { error: "unknown admin route" } };
+}
+
+// ----------------------------------------------------------------------------------------
+// BUS DISPATCHER — the frontend's write path (frame.busSend → BusUiToFrame). `peer` is the
+// sender's platform-resolved identity, same shape as parsePeerInfo; the editor gate lives
+// inside handleWrite. Denials are logged, not answered — a legitimate client never sends a
+// write it isn't allowed to make.
+// ----------------------------------------------------------------------------------------
+onUiMessage(async (sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  if (typeof d.op !== "string" || !d.op) return;
+  if (!ensureTables(peer).ready) return log(`community home: bus op ${d.op} dropped (table not bound)`);
+  const r = await handleWrite(sfiId, d.op, d, peer);
+  if (r.status !== 200) log(`community home: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
+// ----------------------------------------------------------------------------------------
 // NETWORKING
 // ----------------------------------------------------------------------------------------
 self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, body, cookies) {
@@ -163,124 +308,22 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     }
 
     // ----- admin routes — space editors only (Viewer-role members read like anyone else).
+    // Each route maps to a bus op (path minus "/api/", DELETE → op + "/delete") and runs
+    // through the same handleWrite the bus dispatcher uses.
     if (reqPath.startsWith("/api/admin/")) {
       if (!peer.is_sfi_editor) return send({ error: "forbidden" }, 403);
-      await ensurePage(settings, blocks);
-
-      // Update top-level page settings (title / tagline).
-      if (reqPath === "/api/admin/page" && method === "PUT") {
-        const data = parseJsonBody(body);
-        if (!data) return send({ error: "invalid body" }, 400);
-        if (typeof data.title === "string") {
-          await settings.set("title", clampStr(data.title, MAX_TITLE));
-        }
-        if (typeof data.tagline === "string") {
-          await settings.set("tagline", clampStr(data.tagline, MAX_TAGLINE));
-        }
-        await settings.set("updated_at", Date.now());
-        await broadcast(sfiId, settings, blocks);
-        return send({ ok: true });
-      }
-
-      // Create a new block. Body: { kind: "section" | "link" | "pub_frame", ...fields }.
-      // Always appended to the end — UI positions the add buttons below the last block.
-      if (reqPath === "/api/admin/blocks" && method === "POST") {
-        const data = parseJsonBody(body);
-        const kind = typeof data?.kind === "string" ? data.kind : "";
-        if (!VALID_KINDS.has(kind)) return send({ error: "invalid kind" }, 400);
-
-        const order = Number(await blocks.max("sort_order") ?? -1) + 1;
-
-        if (kind === "section") {
-          const heading = clampStr(data.heading, MAX_HEADING);
-          const bodyText = clampStr(data.body, MAX_BODY);
-          const format = typeof data.format === "string" && VALID_FORMATS.has(data.format) ? data.format : "text";
-          await blocks.upsert(null, { kind: "section", heading, body: bodyText, format, sort_order: order });
-        } else if (kind === "link") {
-          const label = clampStr(data.label, MAX_LABEL);
-          const url = clampStr(data.url, MAX_URL).trim();
-          if (!label) return send({ error: "label required" }, 400);
-          if (!url || !isSafeUrl(url)) return send({ error: "valid http(s) url required" }, 400);
-          await blocks.upsert(null, { kind: "link", label, url, sort_order: order });
-        } else if (kind === "pub_frame") {
-          const url = clampStr(data.url, MAX_URL).trim();
-          if (!url || !isSafeUrl(url)) return send({ error: "valid http(s) url required" }, 400);
-          // heading is reused as an optional title displayed above the iframe.
-          const heading = clampStr(data.heading, MAX_HEADING);
-          const width = clampDim(data.width, 320);
-          const height = clampDim(data.height, 320);
-          await blocks.upsert(null, { kind: "pub_frame", heading, url, width, height, sort_order: order });
-        }
-
-        await touchPage(settings);
-        await broadcast(sfiId, settings, blocks);
-        return send({ ok: true });
-      }
-
-      // Update any block. Only fields present in the patch are touched; kind is immutable.
-      // Block ids are opaque row-id strings; a path segment must not contain '/'.
-      const blockMatch = reqPath.match(/^\/api\/admin\/blocks\/([^/]+)$/);
-      if (blockMatch && blockMatch[1] !== "reorder" && method === "PUT") {
-        const id = blockMatch[1];
-        if (!(await blocks.get(id))) return send({ error: "not found" }, 404);
-        const data = parseJsonBody(body);
-        if (!data) return send({ error: "invalid body" }, 400);
-
-        if (typeof data.heading === "string") {
-          await blocks.upsert(id, { heading: clampStr(data.heading, MAX_HEADING) });
-        }
-        if (typeof data.body === "string") {
-          await blocks.upsert(id, { body: clampStr(data.body, MAX_BODY) });
-        }
-        if (typeof data.format === "string") {
-          if (!VALID_FORMATS.has(data.format)) return send({ error: "invalid format" }, 400);
-          await blocks.upsert(id, { format: data.format });
-        }
-        if (typeof data.label === "string") {
-          await blocks.upsert(id, { label: clampStr(data.label, MAX_LABEL) });
-        }
-        if (typeof data.url === "string") {
-          const url = clampStr(data.url, MAX_URL).trim();
-          if (url && !isSafeUrl(url)) return send({ error: "invalid url" }, 400);
-          await blocks.upsert(id, { url });
-        }
-        // pub_frame dimensions — only meaningful for that kind, but harmless to store otherwise.
-        if (data.width !== undefined) {
-          await blocks.upsert(id, { width: clampDim(data.width, 320) });
-        }
-        if (data.height !== undefined) {
-          await blocks.upsert(id, { height: clampDim(data.height, 320) });
-        }
-        await touchPage(settings);
-        await broadcast(sfiId, settings, blocks);
-        return send({ ok: true });
-      }
-
-      if (blockMatch && blockMatch[1] !== "reorder" && method === "DELETE") {
-        const id = blockMatch[1];
-        if (!(await blocks.get(id))) return send({ error: "not found" }, 404);
-        await blocks.delete(id);
-        await touchPage(settings);
-        await broadcast(sfiId, settings, blocks);
-        return send({ ok: true });
-      }
-
-      // Reorder blocks: body = { order: [id, id, id] }
-      if (reqPath === "/api/admin/blocks/reorder" && method === "PUT") {
-        const data = parseJsonBody(body);
-        if (!Array.isArray(data?.order)) return send({ error: "order[] required" }, 400);
-        const ids = data.order.filter((x: unknown): x is string => typeof x === "string" && !!x);
-        // Only touch ids that actually exist (never phantom-create via upsert).
-        const { rows } = await blocks.query({});
-        const known = new Set(rows.map((r) => r._row_id));
-        for (let i = 0; i < ids.length; i++) {
-          if (known.has(ids[i])) await blocks.upsert(ids[i], { sort_order: i });
-        }
-        await broadcast(sfiId, settings, blocks);
-        return send({ ok: true });
-      }
-
-      return send({ error: "unknown admin route" }, 404);
+      const rest = reqPath.slice("/api/".length);
+      const blockMatch = rest.match(/^admin\/blocks\/([^/]+)$/);
+      const op =
+        rest === "admin/page" && method === "PUT" ? rest
+        : rest === "admin/blocks" && method === "POST" ? rest
+        : rest === "admin/blocks/reorder" && method === "PUT" ? rest
+        : blockMatch && blockMatch[1] !== "reorder" && method === "PUT" ? rest
+        : blockMatch && blockMatch[1] !== "reorder" && method === "DELETE" ? rest + "/delete"
+        : null;
+      if (!op) return send({ error: "unknown admin route" }, 404);
+      const r = await handleWrite(sfiId, op, parseJsonBody(body), peer);
+      return send(r.body, r.status);
     }
   }
 

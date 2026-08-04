@@ -10,7 +10,7 @@
 <body>
 <main id="app" class="ch-root"></main>
 <script type="module">
-import { frame, html, render, useState, useEffect, useRef, useFramePush, Editable, applyChannel } from "/lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useRef, useFramePush, Editable, applyChannel } from "./lib/js/framelib.js";
 
 const peer = window.__peer || {};
 if (peer.space_color) applyChannel(document.body, peer.space_color);
@@ -139,15 +139,26 @@ function PublicBlock({ block: b }) {
 function AdminView({ page, onPreview, onError }) {
   const blocks = page.blocks || [];
   const handle = (p) => p.catch(e => onError(e.message || "failed"));
-  const savePage   = (patch)     => handle(frame.api("api/admin/page", patch, "PUT"));
-  const saveBlock  = (id, patch) => handle(frame.api("api/admin/blocks/" + id, patch, "PUT"));
-  const deleteBlk  = (id)        => handle(frame.api("api/admin/blocks/" + id, null, "DELETE"));
+  // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST/PUT bodies are
+  // dropped on Android (issue #750), the tether carries them everywhere. Fire-and-forget —
+  // the page re-renders from the ch_page_updated push. Feature-detect: an older viewer
+  // framelib has no busSend — fall back to the HTTP write it was using before.
+  const write = (op, payload, fallback) => {
+    if (typeof frame.busSend === "function") {
+      frame.busSend({ op, ...(payload || {}) });
+      return Promise.resolve({});
+    }
+    return fallback();
+  };
+  const savePage   = (patch)     => handle(write("admin/page", patch, () => frame.api("api/admin/page", patch, "PUT")));
+  const saveBlock  = (id, patch) => handle(write("admin/blocks/" + id, patch, () => frame.api("api/admin/blocks/" + id, patch, "PUT")));
+  const deleteBlk  = (id)        => handle(write("admin/blocks/" + id + "/delete", null, () => frame.api("api/admin/blocks/" + id, null, "DELETE")));
   const addBlock   = (kind) => {
     const payload = { kind };
     if (kind === "section") { payload.heading = "New section"; payload.body = ""; }
     else if (kind === "link") { payload.label = "New link"; payload.url = "https://example.com"; }
     else if (kind === "pub_frame") { payload.url = "https://example.com"; }
-    handle(frame.api("api/admin/blocks", payload));
+    handle(write("admin/blocks", payload, () => frame.api("api/admin/blocks", payload)));
   };
 
   return html`

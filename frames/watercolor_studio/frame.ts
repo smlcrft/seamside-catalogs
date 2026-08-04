@@ -21,7 +21,7 @@
 // Realtime: every successful mutation broadcasts a push to all viewers via pushToInstance.
 // ----------------------------------------------------------------------------------------
 import {
-  log, parsePeerInfo, serveFileAtPath, serveHtmlShell, pushToInstance,
+  log, parsePeerInfo, serveFileAtPath, serveHtmlShell, pushToInstance, onUiMessage,
   jsonReply, parseJsonBody, sanitizeText,
   frameDataDir, loadJsonFile, saveJsonFile, mkdirSync, path,
 } from "@frame-core";
@@ -193,6 +193,103 @@ function buildStroke(input: any, peer: { user_id: string; user_name: string }): 
 }
 
 // ----------------------------------------------------------------------------------------
+// Mutations — shared by the HTTP arms and the bus dispatcher. Role gates live here.
+// ----------------------------------------------------------------------------------------
+type MutPeer = ReturnType<typeof parsePeerInfo>;
+type MutResult = { status: number; body: unknown };
+
+function mutAddStroke(sfiId: string, v: any, peer: MutPeer): MutResult {
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "read-only" } };
+  if (!v) return { status: 400, body: { error: "invalid JSON" } };
+  const painting = loadPainting(sfiId);
+  if (painting.strokes.length >= MAX_STROKES) {
+    return { status: 409, body: { error: "sheet full" } };
+  }
+  const stroke = buildStroke(v, peer);
+  if (!stroke) return { status: 400, body: { error: "invalid stroke" } };
+  painting.strokes.push(stroke);
+  markDirty(sfiId);
+  pushToInstance(sfiId, { type: "ws_add", sfi_id: sfiId, stroke });
+  return { status: 200, body: { ok: true, stroke } };
+}
+
+function mutDeleteStrokes(sfiId: string, v: { ids?: unknown } | null, peer: MutPeer): MutResult {
+  // Editors may remove their own strokes (undo); the owner may remove any.
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "read-only" } };
+  if (!v || !Array.isArray(v.ids)) return { status: 400, body: { error: "ids required" } };
+  const idSet = new Set(v.ids.map(String));
+  if (idSet.size === 0) return { status: 200, body: { ok: true, deleted: [] } };
+  const painting = loadPainting(sfiId);
+  const deleted: string[] = [];
+  painting.strokes = painting.strokes.filter((s) => {
+    if (idSet.has(s.id) && (peer.is_owner || s.created_by_user_id === (peer.user_id || ""))) {
+      deleted.push(s.id);
+      return false;
+    }
+    return true;
+  });
+  if (deleted.length > 0) {
+    // Destructive — persist immediately so a removal can't be lost to the write throttle.
+    markDirty(sfiId);
+    flush(sfiId);
+    pushToInstance(sfiId, { type: "ws_delete", sfi_id: sfiId, ids: deleted });
+  }
+  return { status: 200, body: { ok: true, deleted } };
+}
+
+function mutClear(sfiId: string, peer: MutPeer): MutResult {
+  if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
+  const painting = loadPainting(sfiId);
+  painting.strokes = [];
+  // Destructive — persist immediately so the clear can't be lost to the write throttle
+  // (otherwise a torn-down worker reloads the old strokes and new work piles on top).
+  markDirty(sfiId);
+  flush(sfiId);
+  pushToInstance(sfiId, { type: "ws_clear", sfi_id: sfiId });
+  return { status: 200, body: { ok: true } };
+}
+
+function mutSettings(
+  sfiId: string,
+  v: { title?: unknown; paper?: unknown; guide?: unknown; aspect?: unknown } | null,
+  peer: MutPeer,
+): MutResult {
+  if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
+  if (!v) return { status: 400, body: { error: "invalid JSON" } };
+  const cur = getPrefs(sfiId);
+  const title = sanitizeText(v.title, 80) || cur.title;
+  const paperRaw = sanitizeText(v.paper, 16);
+  const guideRaw = sanitizeText(v.guide, 16);
+  const aspectRaw = sanitizeText(v.aspect, 16);
+  const next: Prefs = {
+    title,
+    paper: VALID_PAPERS.has(paperRaw) ? paperRaw : cur.paper,
+    guide: VALID_GUIDES.has(guideRaw) ? guideRaw : cur.guide,
+    aspect: VALID_ASPECTS.has(aspectRaw) ? aspectRaw : cur.aspect,
+  };
+  setPrefs(sfiId, next);
+  pushToInstance(sfiId, { type: "ws_prefs", sfi_id: sfiId, prefs: next });
+  return { status: 200, body: { ok: true, prefs: next } };
+}
+
+// ----------------------------------------------------------------------------------------
+// BUS DISPATCHER — the frontend's write path (frame.busSend → BusUiToFrame → here).
+// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; the
+// role gates live inside the mutation functions. Denials are logged, not answered.
+// ----------------------------------------------------------------------------------------
+onUiMessage((sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  const r =
+    d.op === "stroke/add"      ? mutAddStroke(sfiId, d, peer)
+    : d.op === "stroke/delete" ? mutDeleteStrokes(sfiId, d as { ids?: unknown }, peer)
+    : d.op === "clear"         ? mutClear(sfiId, peer)
+    : d.op === "settings"      ? mutSettings(sfiId, d as { title?: unknown }, peer)
+    : null;
+  if (r && r.status !== 200) log(`watercolor: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
+// ----------------------------------------------------------------------------------------
 // HANDLER
 // ----------------------------------------------------------------------------------------
 self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cookies) => {
@@ -236,75 +333,26 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cook
     return jsonReply(replyPort, 403, { error: "read-only" });
   }
 
+  // HTTP arms kept for API compatibility (older viewers, scripted clients); the frame's
+  // own UI writes over the bus (see the dispatcher above). Same functions, same gates.
   if (reqPath === "/api/stroke/add" && method === "POST") {
-    const v = parseJsonBody<any>(body);
-    if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
-    const painting = loadPainting(sfiId);
-    if (painting.strokes.length >= MAX_STROKES) {
-      return jsonReply(replyPort, 409, { error: "sheet full" });
-    }
-    const stroke = buildStroke(v, peer);
-    if (!stroke) return jsonReply(replyPort, 400, { error: "invalid stroke" });
-    painting.strokes.push(stroke);
-    markDirty(sfiId);
-    pushToInstance(sfiId, { type: "ws_add", sfi_id: sfiId, stroke });
-    return jsonReply(replyPort, 200, { ok: true, stroke });
+    const r = mutAddStroke(sfiId, parseJsonBody<any>(body), peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   if (reqPath === "/api/stroke/delete" && method === "POST") {
-    // Editors may remove their own strokes (undo); the owner may remove any.
-    const v = parseJsonBody<{ ids?: unknown }>(body);
-    if (!v || !Array.isArray(v.ids)) return jsonReply(replyPort, 400, { error: "ids required" });
-    const idSet = new Set(v.ids.map(String));
-    if (idSet.size === 0) return jsonReply(replyPort, 200, { ok: true, deleted: [] });
-    const painting = loadPainting(sfiId);
-    const deleted: string[] = [];
-    painting.strokes = painting.strokes.filter((s) => {
-      if (idSet.has(s.id) && (isOwner || s.created_by_user_id === (peer.user_id || ""))) {
-        deleted.push(s.id);
-        return false;
-      }
-      return true;
-    });
-    if (deleted.length > 0) {
-      // Destructive — persist immediately so a removal can't be lost to the write throttle.
-      markDirty(sfiId);
-      flush(sfiId);
-      pushToInstance(sfiId, { type: "ws_delete", sfi_id: sfiId, ids: deleted });
-    }
-    return jsonReply(replyPort, 200, { ok: true, deleted });
+    const r = mutDeleteStrokes(sfiId, parseJsonBody<{ ids?: unknown }>(body), peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   if (reqPath === "/api/clear" && method === "POST") {
-    if (!isOwner) return jsonReply(replyPort, 403, { error: "owner only" });
-    const painting = loadPainting(sfiId);
-    painting.strokes = [];
-    // Destructive — persist immediately so the clear can't be lost to the write throttle
-    // (otherwise a torn-down worker reloads the old strokes and new work piles on top).
-    markDirty(sfiId);
-    flush(sfiId);
-    pushToInstance(sfiId, { type: "ws_clear", sfi_id: sfiId });
-    return jsonReply(replyPort, 200, { ok: true });
+    const r = mutClear(sfiId, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   if (reqPath === "/api/settings" && method === "POST") {
-    if (!isOwner) return jsonReply(replyPort, 403, { error: "owner only" });
-    const v = parseJsonBody<{ title?: unknown; paper?: unknown; guide?: unknown; aspect?: unknown }>(body);
-    if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
-    const cur = getPrefs(sfiId);
-    const title = sanitizeText(v.title, 80) || cur.title;
-    const paperRaw = sanitizeText(v.paper, 16);
-    const guideRaw = sanitizeText(v.guide, 16);
-    const aspectRaw = sanitizeText(v.aspect, 16);
-    const next: Prefs = {
-      title,
-      paper: VALID_PAPERS.has(paperRaw) ? paperRaw : cur.paper,
-      guide: VALID_GUIDES.has(guideRaw) ? guideRaw : cur.guide,
-      aspect: VALID_ASPECTS.has(aspectRaw) ? aspectRaw : cur.aspect,
-    };
-    setPrefs(sfiId, next);
-    pushToInstance(sfiId, { type: "ws_prefs", sfi_id: sfiId, prefs: next });
-    return jsonReply(replyPort, 200, { ok: true, prefs: next });
+    const r = mutSettings(sfiId, parseJsonBody<{ title?: unknown; paper?: unknown; guide?: unknown; aspect?: unknown }>(body), peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   if (method === "GET") {

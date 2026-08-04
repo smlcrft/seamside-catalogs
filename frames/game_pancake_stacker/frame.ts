@@ -4,8 +4,8 @@
 // high score is shared across whoever opens this placement, but no live cross-peer sync.
 // ----------------------------------------------------------------------------------------
 import {
-  serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo,
-  loadJsonFile, saveJsonFile, sanitizeText,
+  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo,
+  loadJsonFile, saveJsonFile, sanitizeText, pushToInstance, onUiMessage,
 } from "@frame-core";
 
 type HighScore = { high: number; updated_at: number; holder: string };
@@ -16,6 +16,39 @@ const allScores: Scores = loadJsonFile(import.meta.url, "scores.json", {} as Sco
 function getScore(sfi_id: string): HighScore {
   return allScores[sfi_id] ?? { high: 0, updated_at: 0, holder: "" };
 }
+
+// Record a finished game's score. Shared by the bus dispatcher and the HTTP fallback;
+// submitting is a write, so it gates on the sender's editor role. The result is pushed
+// to every live viewer — the submitter included, which is how their HUD updates.
+function mutSubmit(sfi: string, score: unknown, peer: ReturnType<typeof parsePeerInfo>): { status: number; body: unknown } {
+  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editor only" } };
+  const raw = Number(score ?? 0);
+  const candidate = Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 0;
+  const current = getScore(sfi);
+  let updated = current;
+  const new_record = candidate > current.high;
+  if (new_record) {
+    updated = {
+      high: candidate,
+      updated_at: Date.now(),
+      holder: sanitizeText(peer.user_name || "anon", 64),
+    };
+    allScores[sfi] = updated;
+    saveJsonFile(import.meta.url, "scores.json", allScores);
+  }
+  pushToInstance(sfi, { type: "score", score: updated, new_record });
+  return { status: 200, body: { score: updated, new_record } };
+}
+
+// Bus writes (frame.busSend → BusUiToFrame); denials are logged, not answered.
+onUiMessage((sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  if (d.op === "submit") {
+    const r = mutSubmit(sfiId, d.score, peer);
+    if (r.status !== 200) log(`pancake stacker: bus op submit → ${r.status}`);
+  }
+});
 
 self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
@@ -34,21 +67,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
 
   if (reqPath === "/api/submit" && method === "POST") {
     const data = parseJsonBody<{ score?: unknown }>(body);
-    const raw = Number(data?.score ?? 0);
-    const candidate = Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 0;
-    const current = getScore(sfi);
-    let updated = current;
-    const new_record = candidate > current.high;
-    if (new_record) {
-      updated = {
-        high: candidate,
-        updated_at: Date.now(),
-        holder: sanitizeText(peer.user_name || "anon", 64),
-      };
-      allScores[sfi] = updated;
-      saveJsonFile(import.meta.url, "scores.json", allScores);
-    }
-    return jsonReply(replyPort, 200, { score: updated, new_record });
+    const r = mutSubmit(sfi, data?.score, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });

@@ -335,6 +335,16 @@
         setWaiting(!!r.waiting_for_binding);
         apply(r);
       }
+      // Writes go over the tether (frame.busSend) — fire-and-forget; the board refreshes
+      // from the kanban_changed push, sender included. Feature-detect: an older viewer's
+      // framelib has no busSend, so fall back to the HTTP write it was using before.
+      const write = (path, body) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+          return Promise.resolve({});
+        }
+        return frame.api(path, body);
+      };
       useEffect(() => {
         frame.api("api/whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
@@ -360,42 +370,42 @@
         const title = draft.trim();
         setDraft("");
         if (!title) { setDraftCol(null); return; }
-        apply(await frame.api("api/card", { column_id: colId, title, position: pos }).catch(() => null));
+        apply(await write("api/card", { column_id: colId, title, position: pos }).catch(() => null));
       }
       async function saveColTitle(col, title) {
         const v = title.trim();
         if (!v || v === col.title) return;
-        apply(await frame.api("api/column/" + col.id, { title: v }).catch(() => null));
+        apply(await write("api/column/" + col.id, { title: v }).catch(() => null));
       }
       async function setColChannel(col, channel) {
         setPop(null); setPopArmed(false);
         setCols(cols.map((c) => c.id === col.id ? { ...c, channel } : c));
-        apply(await frame.api("api/column/" + col.id, { channel }).catch(() => null));
+        apply(await write("api/column/" + col.id, { channel }).catch(() => null));
       }
       async function deleteCol(col) {
         if (!popArmed) { setPopArmed(true); return; }
         setPop(null); setPopArmed(false);
         setCols(cols.filter((c) => c.id !== col.id));
-        apply(await frame.api("api/column/" + col.id + "/delete", {}).catch(() => null));
+        apply(await write("api/column/" + col.id + "/delete", {}).catch(() => null));
       }
       async function addColumn() {
         const title = newCol.trim();
         if (!title) return;
         setNewCol("");
-        apply(await frame.api("api/column", { title }).catch(() => null));
+        apply(await write("api/column", { title }).catch(() => null));
       }
       async function saveCard(card, patch) {
         setCols(cols.map((c) => ({
           ...c, cards: c.cards.map((k) => k.id === card.id ? { ...k, ...patch } : k),
         })));
         setEdit((e) => e && e.card.id === card.id ? { ...e, card: { ...e.card, ...patch } } : e);
-        apply(await frame.api("api/card/" + card.id, patch).catch(() => null));
+        apply(await write("api/card/" + card.id, patch).catch(() => null));
       }
       async function deleteCard(card) {
         if (!edArmed) { setEdArmed(true); return; }
         setEdArmed(false); setEdit(null);
         setCols(cols.map((c) => ({ ...c, cards: c.cards.filter((k) => k.id !== card.id) })));
-        apply(await frame.api("api/card/" + card.id + "/delete", {}).catch(() => null));
+        apply(await write("api/card/" + card.id + "/delete", {}).catch(() => null));
       }
 
       // ---- data backend (per-placement graduation) ---------------------------------------
@@ -407,7 +417,7 @@
           const stop = await frame.confirm("Stop the move to shared tables?", {
             title: "Board data", okLabel: "Stop", cancelLabel: "Keep going",
           });
-          if (stop) { await frame.api("api/data/cancel_graduate", {}).catch(() => null); refresh(); }
+          if (stop) { await write("api/data/cancel_graduate", {}).catch(() => null); refresh(); }
           return;
         }
         const mode = frame.choose
@@ -419,7 +429,7 @@
               ],
             })
           : ((await frame.confirm("Convert this board's data to shared tables?", { title: "Board data", okLabel: "Convert" })) ? "convert" : null);
-        if (mode) { await frame.api("api/data/graduate", { mode }).catch(() => null); refresh(); }
+        if (mode) { await write("api/data/graduate", { mode }).catch(() => null); refresh(); }
       }
 
       // ---- drag: cards -----------------------------------------------------------------
@@ -450,7 +460,7 @@
           if (c.id === col.id) return { ...c, cards: ids.map((x) => byId.get(x)) };
           return { ...c, cards: c.cards.filter((k) => k.id !== id) };
         }));
-        frame.api("api/card/" + id + "/move", { column_id: col.id, ids }).then(apply).catch(() => {});
+        write("api/card/" + id + "/move", { column_id: col.id, ids }).then(apply).catch(() => {});
       }
 
       // ---- drag: columns ---------------------------------------------------------------
@@ -473,7 +483,7 @@
         ids.splice(to < 0 ? ids.length : to, 0, id);
         const byId = new Map(cols.map((c) => [c.id, c]));
         setCols(ids.map((x) => byId.get(x)));
-        frame.api("api/columns/reorder", { ids }).then(apply).catch(() => {});
+        write("api/columns/reorder", { ids }).then(apply).catch(() => {});
       }
 
       const mode = isEditor ? (me.is_owner ? "editor · owner" : "editor")

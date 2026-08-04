@@ -8,7 +8,7 @@ import {
     useCallback,
     useFramePush,
     applyChannel,
-} from "/lib/js/framelib.js";
+} from "./lib/js/framelib.js";
 import { GAMES, gameById } from "./games/registry.js";
 // The console core knows NO game rules. Games live in ./games/* as
 // self-contained cartridge modules (see games/README.md); the shared input
@@ -98,8 +98,21 @@ async function ensureClientId() {
 }
 
 // Every mutating call carries the caller's client_id.
+// Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies
+// are dropped on Android (issue #750), the tether carries them everywhere.
+// Fire-and-forget — resulting state arrives via the state_changed push, which
+// is how every screen already renders. Feature-detect: an older viewer build
+// has no busSend — fall back to the HTTP write it was using before.
 async function act(path, body = {}) {
     const cid = await ensureClientId();
+    if (typeof frame.busSend === "function") {
+        frame.busSend({
+            op: path.replace(/^api\//, ""),
+            ...body,
+            client_id: cid,
+        });
+        return {};
+    }
     try {
         return await frame.api(path, { ...body, client_id: cid });
     } catch (e) {
@@ -456,12 +469,21 @@ function LibraryScreen({ state, setView, refetch }) {
 
     const newLobby = useCallback(
         async (game) => {
+            // Bus writes have no response, so mint the session_id here and
+            // navigate straight to it; the worker seats us under the same id
+            // (HTTP fallback echoes it back). If the create is refused, the
+            // session never appears and Device bounces home after its grace.
+            const sid =
+                (crypto.randomUUID && crypto.randomUUID()) ||
+                Date.now().toString(36) +
+                    Math.random().toString(36).slice(2);
             try {
                 const r = await act("api/create_session", {
                     game_id: game.id,
+                    session_id: sid,
                     display_name: state.me.user_name || "",
                 });
-                if (r && r.session_id) enter(r.session_id);
+                enter((r && r.session_id) || sid);
             } catch (e) {}
             refetch();
         },

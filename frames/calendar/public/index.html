@@ -240,9 +240,21 @@
     import {
       frame, html, render, useState, useEffect, useRef, useMemo, useLayoutEffect,
       useFramePush, Modal, Overlay, applyChannel,
-    } from "/lib/js/framelib.js";
+    } from "./lib/js/framelib.js";
 
     const SESSION = Math.random().toString(36).slice(2);
+
+    // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
+    // dropped on Android (issue #750). Fire-and-forget — the resulting calendar arrives
+    // via the cal_changed push, sender included. Feature-detect: an older viewer's
+    // framelib has no busSend — fall back to the HTTP write it was using before.
+    const write = (path, body) => {
+      if (typeof frame.busSend === "function") {
+        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+        return Promise.resolve({});
+      }
+      return frame.api(path, body);
+    };
     const DOW_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
     const DOW_1 = ["S","M","T","W","T","F","S"];
     const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -773,7 +785,9 @@
         return () => clearInterval(t);
       }, []);
 
-      useFramePush({ cal_changed: (d) => { if (!d || d.by !== SESSION) refresh(); } });
+      // Every viewer — the sender included — re-renders from the push; bus writes have
+      // no response, so the sender's own push is what confirms the write landed.
+      useFramePush({ cal_changed: refresh });
 
       const events = (data && data.events) || [];
       const effective = mode === "compact" ? "agenda" : viewMode;
@@ -792,10 +806,10 @@
         const prev = data;
         if (ev.id) setData({ ...data, events: events.map((e) => e.id === ev.id ? { ...e, ...ev } : e) });
         setEditing(null);
-        frame.api("api/event", { event: ev, by: SESSION }).then(refresh)
+        write("api/event", { event: ev, by: SESSION })
           .catch(async (err) => { setData(prev); await frame.alert((err && err.body && err.body.error) || "Could not save the event."); });
       }
-      function deleteEvent(id) { setEditing(null); frame.api("api/event_delete", { id, by: SESSION }).then(refresh).catch(() => {}); }
+      function deleteEvent(id) { setEditing(null); write("api/event_delete", { id, by: SESSION }).catch(() => {}); }
       // Delete options for a recurring event: "one" (just this day), "forward" (this day on), "all".
       // A one-time event ignores `mode` and is removed outright.
       function performDelete(mode) {

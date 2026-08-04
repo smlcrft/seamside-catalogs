@@ -29,7 +29,7 @@
 //   settings_scope: settings-per-sfi      — tables (and the prefs row) are per peer.sfi_id.
 // ----------------------------------------------------------------------------------------
 import {
-  log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance,
+  log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance, onUiMessage,
   frameDataDir, serveFileAtPath, sanitizeText, clampInt, toIntOrNull, path,
   declareTables, ensureTables, table, frameSettings,
 } from "@frame-core";
@@ -263,6 +263,116 @@ async function projectOne(t: Tables, id: string, peer: Peer, vkey: string) {
   return row ? (await projectPosts(t, [rowToPost(row)], peer, vkey))[0] : null;
 }
 
+function tablesFor(sfiId: string): Tables {
+  return {
+    settings: frameSettings(sfiId),
+    posts: table("posts", sfiId),
+    media: table("media", sfiId),
+    votes: table("votes", sfiId),
+  };
+}
+
+// ----- Writes ---------------------------------------------------------------------------
+// One shared implementation per JSON write, used by both the HTTP arms and the bus
+// dispatcher below so validation and role gates can never drift. `op` is the API path
+// with the leading "api/" stripped. Returns the HTTP-shaped { status, body } — the bus
+// path discards it (fire-and-forget; state reaches every viewer, sender included, via
+// the outpost_changed pushes). Media upload is binary and stays HTTP-only.
+type MutResult = { status: number; body: unknown };
+
+async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>, peer: Peer): Promise<MutResult> {
+  const ready = ensureTables(peer);
+  if (!ready.ready) return { status: 503, body: { error: "table not bound" } };
+  const t = tablesFor(sfiId);
+
+  // Create a post (metadata only; media is uploaded afterward over HTTP). Editors only.
+  if (op === "post") {
+    const prefs = await getPrefs(t);
+    if (!canPost(peer, prefs)) return { status: 403, body: { error: "editors only" } };
+    const text = sanitizeText(v.text, MAX_TEXT);
+    const kind: Kind = KINDS.includes(v.kind as Kind) ? (v.kind as Kind) : "thought";
+
+    let pollJson: string | null = null;
+    if (Array.isArray(v.poll_options)) {
+      const options = v.poll_options
+        .map((o: unknown) => sanitizeText(o, MAX_OPTION_LEN))
+        .filter((o: string) => o.length > 0)
+        .slice(0, MAX_POLL_OPTIONS);
+      if (options.length >= MIN_POLL_OPTIONS) pollJson = JSON.stringify(options);
+    }
+    if (!text && !pollJson) return { status: 400, body: { error: "a post needs text, a poll, or media" } };
+
+    const { row_id } = await t.posts.upsert(null, {
+      author: peer.user_name || "Someone", author_user_id: peer.user_id || "",
+      created_ms: Date.now(), kind, text, poll_options: pollJson,
+    });
+    pushToInstance(sfiId, { type: "outpost_changed" });
+    return { status: 200, body: { post_id: row_id, post: await projectOne(t, row_id, peer, voterId(peer)) } };
+  }
+
+  // Vote in a poll. Restricted to real Seamside users (non-anonymous); anonymous web viewers
+  // are rejected here and don't see the control. One vote per user_id; re-voting replaces the
+  // previous choice. Returns just the updated post so the reader's scroll position is untouched.
+  if (op === "vote") {
+    if (!canVote(peer)) return { status: 403, body: { error: "sign in to Seamside to vote" } };
+    const vkey = voterId(peer);
+    const post = typeof v.post_id === "string" && v.post_id ? await t.posts.get(v.post_id) : null;
+    if (!post || !post.poll_options) return { status: 404, body: { error: "poll not found" } };
+    let options: string[] = [];
+    try { options = JSON.parse(post.poll_options as string); } catch { /* corrupt */ }
+    const opt = clampInt(Number(v.option), 0, options.length - 1);
+    if (Number(v.option) !== opt) return { status: 400, body: { error: "bad option" } };
+    // One vote per (post, voter): a stable id makes re-voting an in-place replace
+    // (and blocks the concurrent-vote race that a query-then-upsert(null) would fork).
+    await t.votes.upsert(`${post._row_id}:${vkey}`, {
+      post_id: post._row_id, voter: vkey, choice: opt,
+    });
+    pushToInstance(sfiId, { type: "outpost_changed" });
+    return { status: 200, body: { post: await projectOne(t, post._row_id, peer, vkey) } };
+  }
+
+  // Delete a post (owner, or the editor who wrote it). Removes its media rows + files too.
+  if (op.startsWith("delete/")) {
+    const postId = op.slice("delete/".length);
+    if (!ID_RE.test(postId)) return { status: 400, body: { error: "bad id" } };
+    const post = await t.posts.get(postId);
+    if (!post) return { status: 404, body: { error: "not found" } };
+    if (!canDeletePost(peer, post.author_user_id as string)) return { status: 403, body: { error: "not allowed" } };
+    await t.votes.deleteWhere({ post_id: postId });
+    await t.media.deleteWhere({ post_id: postId });
+    await t.posts.delete(postId);
+    try { Deno.removeSync(postDir(sfiId, postId), { recursive: true }); } catch { /* no media */ }
+    pushToInstance(sfiId, { type: "outpost_changed" });
+    return { status: 200, body: { ok: true } };
+  }
+
+  // Owner-only: update this outpost's heading, tagline, and who-can-post setting.
+  if (op === "prefs") {
+    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
+    await setPrefs(t, {
+      title: sanitizeText(v.title, MAX_TITLE) || DEFAULT_PREFS.title,
+      tagline: sanitizeText(v.tagline, MAX_TAGLINE),
+      who_can_post: v.who_can_post === "owner" ? "owner" : "editors",
+    });
+    pushToInstance(sfiId, { type: "outpost_changed" });
+    return { status: 200, body: { prefs: await getPrefs(t) } };
+  }
+
+  return { status: 404, body: { error: "not found" } };
+}
+
+// BUS DISPATCHER — the frontend's write path (frame.busSend → BusUiToFrame → here).
+// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; the
+// role gates live inside handleWrite. Denials are logged, not answered — a legitimate
+// client never sends a write it isn't allowed to make.
+onUiMessage(async (sfiId, data, peer) => {
+  if (!sfiId || typeof data !== "object" || data === null) return;
+  const d = data as Record<string, unknown>;
+  if (typeof d.op !== "string") return;
+  const r = await handleWrite(sfiId, d.op, d, peer);
+  if (r.status !== 200) log(`outpost: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
+});
+
 // ----- Networking -----------------------------------------------------------------------
 self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
@@ -276,12 +386,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   // synced tables needs no code change here.
   const ready = ensureTables(peer);
   if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
-  const t: Tables = {
-    settings: frameSettings(peer.sfi_id),
-    posts: table("posts", peer.sfi_id),
-    media: table("media", peer.sfi_id),
-    votes: table("votes", peer.sfi_id),
-  };
+  const t = tablesFor(peer.sfi_id);
 
   // Identity + prefs + the FIRST page of the feed, in one round trip. ?limit= lets a
   // live-refresh re-request the range already on screen.
@@ -308,30 +413,12 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, 200, await pagePayload(t, peer, voterId(peer), before, limit));
   }
 
-  // Create a post (metadata only; media is uploaded afterward). Editors only.
+  // HTTP arms kept for API compatibility (older viewers, the with-media composer flow);
+  // the frame's own UI writes over the bus (see the dispatcher above). Same handleWrite,
+  // same gates, either way.
   if (reqPath === "/api/post" && method === "POST") {
-    const prefs = await getPrefs(t);
-    if (!canPost(peer, prefs)) return jsonReply(replyPort, 403, { error: "editors only" });
-    const v = parseJsonBody<{ text?: string; kind?: string; poll_options?: unknown[] }>(body) || {};
-    const text = sanitizeText(v.text, MAX_TEXT);
-    const kind: Kind = KINDS.includes(v.kind as Kind) ? (v.kind as Kind) : "thought";
-
-    let pollJson: string | null = null;
-    if (Array.isArray(v.poll_options)) {
-      const options = v.poll_options
-        .map((o: unknown) => sanitizeText(o, MAX_OPTION_LEN))
-        .filter((o: string) => o.length > 0)
-        .slice(0, MAX_POLL_OPTIONS);
-      if (options.length >= MIN_POLL_OPTIONS) pollJson = JSON.stringify(options);
-    }
-    if (!text && !pollJson) return jsonReply(replyPort, 400, { error: "a post needs text, a poll, or media" });
-
-    const { row_id } = await t.posts.upsert(null, {
-      author: peer.user_name || "Someone", author_user_id: peer.user_id || "",
-      created_ms: Date.now(), kind, text, poll_options: pollJson,
-    });
-    pushToInstance(peer.sfi_id, { type: "outpost_changed" });
-    return jsonReply(replyPort, 200, { post_id: row_id, post: await projectOne(t, row_id, peer, voterId(peer)) });
+    const r = await handleWrite(peer.sfi_id, "post", parseJsonBody<Record<string, unknown>>(body) || {}, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   // Attach media to a post you just created. Bytes ride in the raw body, name in ?name=.
@@ -384,54 +471,19 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     }, [buf.buffer]);
   }
 
-  // Vote in a poll. Restricted to real Seamside users (non-anonymous); anonymous web viewers
-  // are rejected here and don't see the control. One vote per user_id; re-voting replaces the
-  // previous choice. Returns just the updated post so the reader's scroll position is untouched.
   if (reqPath === "/api/vote" && method === "POST") {
-    if (!canVote(peer)) return jsonReply(replyPort, 403, { error: "sign in to Seamside to vote" });
-    const v = parseJsonBody<{ post_id?: string; option?: number }>(body) || {};
-    const vkey = voterId(peer);
-    const post = typeof v.post_id === "string" && v.post_id ? await t.posts.get(v.post_id) : null;
-    if (!post || !post.poll_options) return jsonReply(replyPort, 404, { error: "poll not found" });
-    let options: string[] = [];
-    try { options = JSON.parse(post.poll_options as string); } catch { /* corrupt */ }
-    const opt = clampInt(Number(v.option), 0, options.length - 1);
-    if (Number(v.option) !== opt) return jsonReply(replyPort, 400, { error: "bad option" });
-    // One vote per (post, voter): a stable id makes re-voting an in-place replace
-    // (and blocks the concurrent-vote race that a query-then-upsert(null) would fork).
-    await t.votes.upsert(`${post._row_id}:${vkey}`, {
-      post_id: post._row_id, voter: vkey, choice: opt,
-    });
-    pushToInstance(peer.sfi_id, { type: "outpost_changed" });
-    return jsonReply(replyPort, 200, { post: await projectOne(t, post._row_id, peer, vkey) });
+    const r = await handleWrite(peer.sfi_id, "vote", parseJsonBody<Record<string, unknown>>(body) || {}, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
-  // Delete a post (owner, or the editor who wrote it). Removes its media rows + files too.
   if (reqPath.startsWith("/api/delete/") && method === "POST") {
-    const postId = reqPath.slice("/api/delete/".length);
-    if (!ID_RE.test(postId)) return jsonReply(replyPort, 400, { error: "bad id" });
-    const post = await t.posts.get(postId);
-    if (!post) return jsonReply(replyPort, 404, { error: "not found" });
-    if (!canDeletePost(peer, post.author_user_id as string)) return jsonReply(replyPort, 403, { error: "not allowed" });
-    await t.votes.deleteWhere({ post_id: postId });
-    await t.media.deleteWhere({ post_id: postId });
-    await t.posts.delete(postId);
-    try { Deno.removeSync(postDir(peer.sfi_id, postId), { recursive: true }); } catch { /* no media */ }
-    pushToInstance(peer.sfi_id, { type: "outpost_changed" });
-    return jsonReply(replyPort, 200, { ok: true });
+    const r = await handleWrite(peer.sfi_id, "delete/" + reqPath.slice("/api/delete/".length), {}, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
-  // Owner-only: update this outpost's heading, tagline, and who-can-post setting.
   if (reqPath === "/api/prefs" && method === "POST") {
-    if (!peer.is_owner) return jsonReply(replyPort, 403, { error: "owner only" });
-    const v = parseJsonBody<Partial<Prefs>>(body) || {};
-    await setPrefs(t, {
-      title: sanitizeText(v.title, MAX_TITLE) || DEFAULT_PREFS.title,
-      tagline: sanitizeText(v.tagline, MAX_TAGLINE),
-      who_can_post: v.who_can_post === "owner" ? "owner" : "editors",
-    });
-    pushToInstance(peer.sfi_id, { type: "outpost_changed" });
-    return jsonReply(replyPort, 200, { prefs: await getPrefs(t) });
+    const r = await handleWrite(peer.sfi_id, "prefs", parseJsonBody<Record<string, unknown>>(body) || {}, peer);
+    return jsonReply(replyPort, r.status, r.body);
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });
