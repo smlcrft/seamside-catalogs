@@ -11,7 +11,7 @@
       "name": "anthropic",
       "description": "Anthropic Claude API \u2014 chat completions and text generation",
       "icon": "",
-      "modified_at": "2026-07-07T00:00:00Z",
+      "modified_at": "2026-08-04T00:00:00Z",
       "frame_preview": null,
       "capability_preview": {
         "kind": "service",
@@ -20,7 +20,7 @@
         ]
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/capabilities/anthropic.json",
-      "package_sha256": "bec98e3671826817adbd364995392c8a134dd8403f4d4f23c58fab8a917fe101",
+      "package_sha256": "d056d9e9f4489519c8986f34d7549b9da10917fefa18bcb780de7d07740eae4a",
       "app_version_min": "0.2.0"
     },
     {
@@ -47,7 +47,7 @@
       "name": "openai",
       "description": "OpenAI API \u2014 GPT chat completions and text generation",
       "icon": "",
-      "modified_at": "2026-07-07T00:00:00Z",
+      "modified_at": "2026-08-04T00:00:00Z",
       "frame_preview": null,
       "capability_preview": {
         "kind": "service",
@@ -56,7 +56,7 @@
         ]
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/capabilities/openai.json",
-      "package_sha256": "f9952e4eadbf1ea150a2d7c5f1dc88a003243e587de5c9ea90748541c9171fca",
+      "package_sha256": "6eef16e2cd28f48bb621e89f463786edc1ad0f355d1bbf2e5678b5c11f66b85b",
       "app_version_min": "0.2.0"
     },
     {
