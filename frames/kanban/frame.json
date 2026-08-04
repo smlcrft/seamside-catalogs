@@ -1,0 +1,17 @@
+{
+    "name": "Kanban Board",
+    "description": "A drag-and-drop task board, unique per placement. Space editors organize work as cards in channel-colored columns: add, rename, recolor, and reorder columns, drag cards between them, and keep details and a short label on each card. Everyone else, including anyone the frame is shared with publicly, sees a live read-only view of the board. Cards and columns live in encrypted LocalTables scoped to the placement, and every change is pushed live to all viewers.",
+    "frame_type": "Tandem",
+    "tags": ["everyday", "tasks", "planning"],
+    "permissions": {
+        "net": []
+    },
+    "default_width_px": 760,
+    "default_height_px": 520,
+    "created_at": "2026-08-04T00:00:00Z",
+    "modified_at": "2026-08-04T00:00:00Z",
+    "app_version_min": "0.2.4",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

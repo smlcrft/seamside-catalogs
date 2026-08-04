@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kanban Board</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); }   /* follows the space channel at runtime; columns re-scope --ch locally */
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      height: 100%; display: flex; flex-direction: column; gap: var(--os-sp-md);
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-xl));
+    }
+
+    .header { display: flex; align-items: center; gap: var(--os-sp-sm); }
+    .header i {
+      font-size: 20px; color: var(--ch);
+      display: inline-flex; width: 24px; height: 24px;
+      align-items: center; justify-content: center; line-height: 1;
+    }
+    .header h1 { margin: 0; font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); line-height: 24px; }
+    .header .mode {
+      margin-left: auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; text-transform: lowercase; white-space: nowrap;
+    }
+
+    /* storage chip — where this placement's data lives; the owner's entry point to
+       graduation. Sits at the right edge of the header rail, before the mode text. */
+    .storage {
+      margin-left: auto; flex: 0 0 auto;
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--os-bg-inset); border: 0; border-radius: var(--os-radius-full);
+      padding: 2px var(--os-sp-sm); font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-family: inherit; text-transform: lowercase; white-space: nowrap;
+      transition: color 150ms, background 150ms;
+    }
+    .storage i { font-size: 12px; line-height: 1; color: inherit; width: auto; height: auto; }   /* neutral — outranks the .header i channel tint */
+    button.storage { cursor: pointer; }
+    button.storage:hover { color: var(--os-text); background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color-subtle); }
+    button.storage:active { background: var(--os-bg-inset); }
+    button.storage:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .storage.pending i { animation: storage-breathe 2s ease-in-out infinite; }
+    @keyframes storage-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    @media (prefers-reduced-motion: reduce) { .storage.pending i { animation: none; } }
+    .storage + .mode { margin-left: var(--os-sp-sm); }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      flex: 0 0 auto;
+    }
+
+    /* ---- board ------------------------------------------------------------------- */
+    .board {
+      flex: 1; min-height: 0;
+      display: flex; align-items: flex-start; gap: var(--os-sp-md);
+      overflow-x: auto; padding-bottom: var(--os-sp-xs);
+    }
+
+    .col {
+      flex: 0 0 auto; width: 264px; max-height: 100%;
+      display: flex; flex-direction: column;
+      background: var(--os-bg-subtle); border-radius: var(--os-radius-lg);
+      padding: var(--os-sp-sm);
+      transition: margin-left 120ms ease;
+    }
+    /* drop indicator: columns make room — a gap opens where the column will land */
+    .col.col-drop-target { margin-left: 36px; }
+    .board.drop-end-col .new-col { margin-left: 36px; }
+    .col.dragging-col { opacity: 0.4; }
+
+    .col-head {
+      display: flex; align-items: center; gap: var(--os-sp-sm);
+      padding: 2px 2px var(--os-sp-sm) 2px; position: relative;
+    }
+    .col-grip {
+      flex: 0 0 auto; cursor: grab; color: var(--os-text-subtle);
+      opacity: 0; transition: opacity 150ms; font-size: 14px; line-height: 0;
+      display: flex; align-items: center; touch-action: none;
+      margin-right: calc(-1 * var(--os-sp-xs));
+    }
+    .col-head:hover .col-grip { opacity: 1; }
+    .col-grip:active { cursor: grabbing; }
+    .read-only .col-grip { display: none; }
+
+    .col-dot {
+      flex: 0 0 auto; width: 20px; height: 20px; padding: 0;
+      background: none; border: 0; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), filter 150ms;
+    }
+    .col-dot::before {
+      content: ""; width: 10px; height: 10px; border-radius: var(--os-radius-full);
+      background: var(--ch);
+    }
+    .col-dot:hover:not(:disabled) { filter: brightness(1.08); }
+    .col-dot:active:not(:disabled) { transform: scale(0.88); }
+    .col-dot:disabled { cursor: default; opacity: 1; }   /* the dot is column identity, not an affordance — never wash it for viewers */
+    .col-dot:focus-visible { outline: none; box-shadow: var(--os-focus-ring); border-radius: var(--os-radius-sm); }
+
+    .col-title { flex: 1 1 auto; min-width: 0; }
+    .col-title input, .col-title .static {
+      width: 100%; font: inherit; font-size: var(--os-fs-sm); font-weight: var(--os-weight-semibold);
+      color: var(--os-text); background: transparent;
+      border: 0; border-radius: var(--os-radius-sm); padding: 2px 4px; outline: none;
+    }
+    .col-title input:focus { background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color); }
+    .col-title .static { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .col-count {
+      flex: 0 0 auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1;
+    }
+    .col-add {
+      flex: 0 0 auto; width: 24px; height: 24px; padding: 0; margin: -2px 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-muted); font-size: 16px; line-height: 0;
+      transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms, background 150ms;
+    }
+    .col-add:hover { color: var(--os-text); background: var(--os-bg-surface); }
+    .col-add:active { transform: scale(0.92); }
+    .col-add:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    /* channel swatch popover */
+    .pop {
+      position: absolute; top: 26px; left: 0; z-index: 10;
+      background: var(--os-bg-elevated); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-md); box-shadow: var(--os-shadow-md);
+      padding: var(--os-sp-sm); display: flex; flex-direction: column; gap: var(--os-sp-sm);
+    }
+    .pop-swatches { display: grid; grid-template-columns: repeat(6, 18px); gap: 6px; }
+    .pop-swatches button {
+      width: 18px; height: 18px; padding: 0; border: 0; cursor: pointer;
+      border-radius: var(--os-radius-sm); background: var(--sw);
+      transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), filter 150ms;
+    }
+    .pop-swatches button:hover { filter: brightness(1.08); }
+    .pop-swatches button:active { transform: scale(0.88); }
+    .pop-swatches button.sel { box-shadow: 0 0 0 1px var(--os-bg-elevated), 0 0 0 2.5px var(--sw); }
+    .pop-del {
+      font: inherit; font-size: var(--os-fs-2xs); cursor: pointer;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-subtle); border-radius: var(--os-radius-sm);
+      padding: 3px var(--os-sp-sm); transition: color 150ms, border-color 150ms;
+    }
+    .pop-del:hover { color: var(--os-cError); border-color: var(--os-cError); }
+    .pop-del.armed { color: var(--os-cError); border-color: var(--os-cError); background: var(--os-cError-muted); }
+
+    /* ---- cards ------------------------------------------------------------------- */
+    .cards {
+      display: flex; flex-direction: column; gap: var(--os-sp-sm);
+      overflow-y: auto; min-height: 44px; padding: 2px;
+      transition: padding-bottom 120ms ease;
+    }
+    .card {
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-md); padding: var(--os-sp-sm) var(--os-sp-md);
+      display: flex; flex-direction: column; gap: var(--os-sp-xs);
+      transition: border-color 150ms, box-shadow 150ms, margin-top 120ms ease;
+    }
+    main:not(.read-only) .card { cursor: pointer; }
+    .card:hover { border-color: var(--os-text-subtle); box-shadow: var(--os-shadow-sm); }
+    .card.dragging { opacity: 0.4; }
+    /* drop indicator: cards make room — a gap opens where the card will land */
+    .card.drop-target { margin-top: 34px; }
+    .cards.drop-end { padding-bottom: 34px; }
+    .card-title { font-weight: var(--os-weight-medium); word-break: break-word; }
+    .card-desc {
+      font-size: var(--os-fs-sm); color: var(--os-text-secondary); word-break: break-word;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .card-label {
+      align-self: flex-start; display: inline-flex; align-items: center;
+      background: var(--os-bg-inset); border-radius: var(--os-radius-full);
+      padding: 1px var(--os-sp-sm); font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+    }
+
+    /* hover-reveal add zone at the foot of each column — appends a card. Collapsed to
+       zero footprint at rest (negative margin cancels the list gap); expands only while
+       the pointer is over its column, so resting columns hug their cards. */
+    .card-addzone {
+      flex: 0 0 auto; height: 0; margin-top: calc(-1 * var(--os-sp-sm));
+      padding: 0; border: 0; cursor: pointer; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      background: none; border-radius: var(--os-radius-md);
+      color: var(--os-text-muted); font-size: 16px; line-height: 0;
+      opacity: 0;
+      transition: height 120ms ease, margin-top 120ms ease, opacity 150ms, background 150ms;
+    }
+    .col:hover .card-addzone, .card-addzone:focus-visible {
+      height: 24px; margin-top: calc(-1 * var(--os-sp-xs)); opacity: 0.6;
+    }
+    .card-addzone:hover { opacity: 1; background: var(--os-bg-surface); }
+    .card-addzone:active { background: var(--os-bg-inset); }
+    .card-addzone:focus-visible { outline: none; box-shadow: var(--os-focus-ring); opacity: 1; }
+
+    /* draft card input (appears at the top from the header +, or at the bottom from the add zone) */
+    .card-draft {
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color);
+      border-radius: var(--os-radius-md); padding: var(--os-sp-sm) var(--os-sp-md);
+    }
+    .card-draft input {
+      width: 100%; font: inherit; color: var(--os-text); background: transparent;
+      border: 0; outline: none; padding: 0;
+    }
+    .card-draft input::placeholder { color: var(--os-text-muted); }
+
+    /* ---- new column ghost --------------------------------------------------------- */
+    .new-col {
+      flex: 0 0 auto; width: 264px;
+      display: flex; align-items: center; gap: var(--os-sp-sm);
+      border: 1px solid var(--os-border-color-subtle); border-radius: var(--os-radius-lg);
+      padding: var(--os-sp-sm) var(--os-sp-md);
+      transition: border-color 150ms, margin-left 120ms ease;
+    }
+    .new-col:focus-within { border-color: var(--os-text-subtle); }
+    .new-col i { color: var(--os-text-subtle); font-size: 16px; line-height: 0; }
+    .new-col input {
+      flex: 1; min-width: 0; font: inherit; font-size: var(--os-fs-sm); color: var(--os-text);
+      background: transparent; border: 0; outline: none; padding: 2px 0;
+    }
+    .new-col input::placeholder { color: var(--os-text-muted); }
+
+    .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-lg); flex: 1; }
+
+    /* waiting-for-binding notice (graduated placement, bindings not resolved yet) */
+    .notice {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: var(--os-sp-sm); text-align: center; padding: var(--os-sp-xl);
+    }
+    .notice i { font-size: 28px; color: var(--os-text-subtle); }
+    .notice h2 { margin: 0; font-size: var(--os-fs-md); font-weight: var(--os-weight-semibold); }
+    .notice p { margin: 0; font-size: var(--os-fs-sm); color: var(--os-text-secondary); max-width: 380px; }
+
+    .data-ghost {
+      font: inherit; font-size: var(--os-fs-sm); cursor: pointer;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-secondary); border-radius: var(--os-radius-sm);
+      padding: calc(var(--os-sp-xs) + 1px) var(--os-sp-md);
+      transition: color 150ms, border-color 150ms;
+    }
+    .data-ghost:hover { color: var(--os-text); border-color: var(--os-text-subtle); }
+
+    /* ---- card editor modal --------------------------------------------------------- */
+    .ed { display: flex; flex-direction: column; gap: var(--os-sp-md); min-width: min(380px, 78vw); }
+    .ed label {
+      display: block; font-size: 11px; font-weight: var(--os-weight-semibold);
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
+      margin-bottom: var(--os-sp-sm);
+    }
+    .ed input, .ed textarea {
+      width: 100%; font: inherit; color: var(--os-text);
+      background: var(--os-bg-inset); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-sm); padding: var(--os-sp-sm) var(--os-sp-md); outline: none;
+      transition: border-color 150ms, background 150ms;
+    }
+    .ed input:focus, .ed textarea:focus { border-color: var(--os-text-muted); background: var(--os-bg-surface); }
+    .ed textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
+    .ed .static-body { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+    .ed-del {
+      font: inherit; font-size: var(--os-fs-sm); cursor: pointer; margin-right: auto;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-subtle); border-radius: var(--os-radius-sm);
+      padding: calc(var(--os-sp-xs) + 1px) var(--os-sp-md); transition: color 150ms, border-color 150ms;
+    }
+    .ed-del:hover { color: var(--os-cError); border-color: var(--os-cError); }
+    .ed-del.armed { color: var(--os-cError); border-color: var(--os-cError); background: var(--os-cError-muted); }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel, Modal } from "./lib/js/framelib.js";
+
+    const CHANNELS = Array.from({ length: 12 }, (_, i) => "c" + (i + 1));
+
+    // Find the card the cursor is hovering above inside one column, for drop positioning.
+    function dragAfter(listEl, y) {
+      const rows = [...listEl.querySelectorAll(".card:not(.dragging)")];
+      let closest = null, closestOffset = Number.NEGATIVE_INFINITY;
+      for (const row of rows) {
+        const box = row.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closestOffset) { closestOffset = offset; closest = row; }
+      }
+      return closest;
+    }
+    // Same idea horizontally, for column reordering.
+    function dragAfterCol(boardEl, x) {
+      const cols = [...boardEl.querySelectorAll(".col:not(.dragging-col)")];
+      let closest = null, closestOffset = Number.NEGATIVE_INFINITY;
+      for (const col of cols) {
+        const box = col.getBoundingClientRect();
+        const offset = x - box.left - box.width / 2;
+        if (offset < 0 && offset > closestOffset) { closestOffset = offset; closest = col; }
+      }
+      return closest;
+    }
+    function clearMarks(root) {
+      root.querySelectorAll(".drop-target").forEach((n) => n.classList.remove("drop-target"));
+      root.querySelectorAll(".col-drop-target").forEach((n) => n.classList.remove("col-drop-target"));
+      root.querySelectorAll(".drop-end").forEach((n) => n.classList.remove("drop-end"));
+      root.classList.remove("drop-end-col");
+    }
+
+    function App() {
+      const [me, setMe]         = useState(null);
+      const [cols, setCols]     = useState([]);
+      const [draftCol, setDraftCol] = useState(null);   // { id, pos: "top"|"bottom" } — column with an open new-card input
+      const [draft, setDraft]   = useState("");
+      const [newCol, setNewCol] = useState("");
+      const [pop, setPop]       = useState(null);       // column id with an open swatch popover
+      const [popArmed, setPopArmed] = useState(false);
+      const [edit, setEdit]     = useState(null);       // { colId, card } being edited/viewed
+      const [edArmed, setEdArmed] = useState(false);
+      const [storage, setStorage] = useState(null);     // { backend, pending, can_manage }
+      const [waiting, setWaiting] = useState(false);    // graduated placement, binding missing
+      const boardRef = useRef(null);
+      const dragCard = useRef(null);
+      const dragCol  = useRef(null);
+
+      const apply = (r) => { if (r && r.columns) setCols(r.columns); };
+      async function refresh() {
+        const r = await frame.api("api/board").catch(() => null);
+        if (!r) return;
+        if (r.storage) setStorage(r.storage);
+        setWaiting(!!r.waiting_for_binding);
+        apply(r);
+      }
+      useEffect(() => {
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({ kanban_changed: refresh });
+
+      // Close the swatch popover on any outside click.
+      useEffect(() => {
+        if (!pop) return;
+        const close = (e) => { if (!e.target.closest(".pop") && !e.target.closest(".col-dot")) { setPop(null); setPopArmed(false); } };
+        document.addEventListener("pointerdown", close);
+        return () => document.removeEventListener("pointerdown", close);
+      }, [pop]);
+
+      if (!me) return html`<div></div>`;
+      const isEditor = !!me.is_sfi_editor;
+
+      // ---- mutations -------------------------------------------------------------------
+      async function addCard(colId, pos) {
+        const title = draft.trim();
+        setDraft("");
+        if (!title) { setDraftCol(null); return; }
+        apply(await frame.api("api/card", { column_id: colId, title, position: pos }).catch(() => null));
+      }
+      async function saveColTitle(col, title) {
+        const v = title.trim();
+        if (!v || v === col.title) return;
+        apply(await frame.api("api/column/" + col.id, { title: v }).catch(() => null));
+      }
+      async function setColChannel(col, channel) {
+        setPop(null); setPopArmed(false);
+        setCols(cols.map((c) => c.id === col.id ? { ...c, channel } : c));
+        apply(await frame.api("api/column/" + col.id, { channel }).catch(() => null));
+      }
+      async function deleteCol(col) {
+        if (!popArmed) { setPopArmed(true); return; }
+        setPop(null); setPopArmed(false);
+        setCols(cols.filter((c) => c.id !== col.id));
+        apply(await frame.api("api/column/" + col.id + "/delete", {}).catch(() => null));
+      }
+      async function addColumn() {
+        const title = newCol.trim();
+        if (!title) return;
+        setNewCol("");
+        apply(await frame.api("api/column", { title }).catch(() => null));
+      }
+      async function saveCard(card, patch) {
+        setCols(cols.map((c) => ({
+          ...c, cards: c.cards.map((k) => k.id === card.id ? { ...k, ...patch } : k),
+        })));
+        setEdit((e) => e && e.card.id === card.id ? { ...e, card: { ...e.card, ...patch } } : e);
+        apply(await frame.api("api/card/" + card.id, patch).catch(() => null));
+      }
+      async function deleteCard(card) {
+        if (!edArmed) { setEdArmed(true); return; }
+        setEdArmed(false); setEdit(null);
+        setCols(cols.map((c) => ({ ...c, cards: c.cards.filter((k) => k.id !== card.id) })));
+        apply(await frame.api("api/card/" + card.id + "/delete", {}).catch(() => null));
+      }
+
+      // ---- data backend (per-placement graduation) ---------------------------------------
+      // Deliberately minimal: one system chooser, then the platform's table picker
+      // carries the rest. Single call site so #755 (frame-chrome data controls) can
+      // replace this wholesale. See docs/table-graduation.md.
+      async function onStorageClick() {
+        if (storage.pending) {
+          const stop = await frame.confirm("Stop the move to shared tables?", {
+            title: "Board data", okLabel: "Stop", cancelLabel: "Keep going",
+          });
+          if (stop) { await frame.api("api/data/cancel_graduate", {}).catch(() => null); refresh(); }
+          return;
+        }
+        const mode = frame.choose
+          ? await frame.choose("", {
+              title: "Board data",
+              options: [
+                { id: "convert", label: "Convert to shared tables", icon: "ph-table" },
+                { id: "adopt", label: "Use existing shared tables", icon: "ph-plugs-connected" },
+              ],
+            })
+          : ((await frame.confirm("Convert this board's data to shared tables?", { title: "Board data", okLabel: "Convert" })) ? "convert" : null);
+        if (mode) { await frame.api("api/data/graduate", { mode }).catch(() => null); refresh(); }
+      }
+
+      // ---- drag: cards -----------------------------------------------------------------
+      function onCardsDragOver(e) {
+        if (!dragCard.current) return;
+        e.preventDefault(); e.stopPropagation();
+        const list = e.currentTarget;
+        clearMarks(boardRef.current);
+        const after = dragAfter(list, e.clientY);
+        if (after) after.classList.add("drop-target");
+        else list.classList.add("drop-end");
+      }
+      function onCardsDrop(e, col) {
+        if (!dragCard.current) return;
+        e.preventDefault(); e.stopPropagation();
+        const after = dragAfter(e.currentTarget, e.clientY);
+        clearMarks(boardRef.current);
+        const id = dragCard.current; dragCard.current = null;
+        let moved = null;
+        for (const c of cols) for (const k of c.cards) if (k.id === id) moved = k;
+        if (!moved) return;
+        const ids = col.cards.map((k) => k.id).filter((x) => x !== id);
+        const to = after ? ids.indexOf(after.dataset.id) : ids.length;
+        ids.splice(to < 0 ? ids.length : to, 0, id);
+        const byId = new Map(col.cards.map((k) => [k.id, k]));
+        byId.set(id, moved);
+        setCols(cols.map((c) => {
+          if (c.id === col.id) return { ...c, cards: ids.map((x) => byId.get(x)) };
+          return { ...c, cards: c.cards.filter((k) => k.id !== id) };
+        }));
+        frame.api("api/card/" + id + "/move", { column_id: col.id, ids }).then(apply).catch(() => {});
+      }
+
+      // ---- drag: columns ---------------------------------------------------------------
+      function onBoardDragOver(e) {
+        if (!dragCol.current) return;
+        e.preventDefault();
+        clearMarks(boardRef.current);
+        const after = dragAfterCol(boardRef.current, e.clientX);
+        if (after) after.classList.add("col-drop-target");
+        else boardRef.current.classList.add("drop-end-col");
+      }
+      function onBoardDrop(e) {
+        if (!dragCol.current) return;
+        e.preventDefault();
+        const after = dragAfterCol(boardRef.current, e.clientX);
+        clearMarks(boardRef.current);
+        const id = dragCol.current; dragCol.current = null;
+        const ids = cols.map((c) => c.id).filter((x) => x !== id);
+        const to = after ? ids.indexOf(after.dataset.id) : ids.length;
+        ids.splice(to < 0 ? ids.length : to, 0, id);
+        const byId = new Map(cols.map((c) => [c.id, c]));
+        setCols(ids.map((x) => byId.get(x)));
+        frame.api("api/columns/reorder", { ids }).then(apply).catch(() => {});
+      }
+
+      const mode = isEditor ? (me.is_owner ? "editor · owner" : "editor")
+                 : me.is_sfi_member ? "viewer · read-only"
+                 : (me.is_anon ? "anonymous · read-only" : "non-member · read-only");
+      const totalCards = cols.reduce((n, c) => n + c.cards.length, 0);
+
+      return html`
+        <main class=${isEditor ? "" : "read-only"}>
+          <div class="header">
+            <i class="ph-light ph-kanban"></i>
+            <h1>Kanban Board</h1>
+            ${storage ? (storage.can_manage && storage.backend !== "shared" ? html`
+              <button class=${"storage" + (storage.pending ? " pending" : "")}
+                title=${storage.pending ? "Moving to shared tables" : "Move this board's data to shared tables"}
+                onClick=${onStorageClick}>
+                <i class="ph-light ph-hard-drive"></i>
+                ${storage.pending ? "syncing" : "local"}
+              </button>` : html`
+              <span class="storage"
+                title=${storage.backend === "shared"
+                  ? "Backed by shared tables"
+                  : "Data lives on the host device"}>
+                <i class=${"ph-light " + (storage.backend === "shared" ? "ph-table" : "ph-hard-drive")}></i>
+                ${storage.backend === "shared" ? "synced" : "local"}
+              </span>`) : null}
+            <span class="mode">${mode}</span>
+          </div>
+
+          ${!isEditor ? html`
+            <div class="banner">
+              <i class="ph-light ph-eye"></i>
+              ${me.is_sfi_member
+                ? html`You have viewer-only access. Ask the owner to raise your role to edit this board.`
+                : html`You're viewing this board publicly. Join this space to move and edit cards.`}
+            </div>` : null}
+
+          ${waiting ? html`
+            <div class="notice">
+              <i class="ph-light ph-table"></i>
+              <h2>Almost there</h2>
+              <p>${me.is_owner
+                ? html`Pick the columns table, then the cards table to finish.`
+                : html`The owner is finishing this board's move to shared tables.`}</p>
+              ${me.is_owner ? html`<button class="data-ghost" onClick=${refresh}>Open the picker again</button>` : null}
+            </div>`
+          : cols.length === 0 && !isEditor
+            ? html`<div class="empty">Nothing here yet.</div>`
+            : html`
+              <div class="board" ref=${boardRef}
+                onDragOver=${isEditor ? onBoardDragOver : null}
+                onDrop=${isEditor ? onBoardDrop : null}>
+                ${cols.map((col) => html`
+                  <div class="col" key=${col.id} data-id=${col.id} style=${"--ch: var(--os-" + col.channel + ")"}>
+                    <div class="col-head">
+                      ${isEditor ? html`
+                        <span class="col-grip" draggable="true"
+                          onDragStart=${(e) => {
+                            dragCol.current = col.id;
+                            const colEl = e.currentTarget.closest(".col");
+                            // Drag the whole column, not the grip glyph: snapshot the column
+                            // as the drag image BEFORE dimming it (the browser snapshots after
+                            // this handler returns, so the dim is deferred a tick).
+                            const r = colEl.getBoundingClientRect();
+                            e.dataTransfer.setDragImage(colEl, e.clientX - r.left, e.clientY - r.top);
+                            e.dataTransfer.effectAllowed = "move";
+                            setTimeout(() => colEl.classList.add("dragging-col"), 0);
+                          }}
+                          onDragEnd=${(e) => {
+                            dragCol.current = null;
+                            e.currentTarget.closest(".col").classList.remove("dragging-col");
+                            if (boardRef.current) clearMarks(boardRef.current);
+                          }}>
+                          <i class="ph-light ph-dots-six-vertical"></i>
+                        </span>` : null}
+
+                      <button class="col-dot" disabled=${!isEditor} title="Column color"
+                        onClick=${() => { setPop(pop === col.id ? null : col.id); setPopArmed(false); }}></button>
+
+                      <div class="col-title">
+                        ${isEditor
+                          ? html`<input value=${col.title} maxlength="80"
+                              onBlur=${(e) => saveColTitle(col, e.target.value)}
+                              onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />`
+                          : html`<div class="static">${col.title}</div>`}
+                      </div>
+
+                      <span class="col-count">${col.cards.length}</span>
+
+                      ${isEditor ? html`
+                        <button class="col-add" title="Add a card at the top"
+                          onClick=${() => { setDraftCol({ id: col.id, pos: "top" }); setDraft(""); }}>
+                          <i class="ph-light ph-plus"></i>
+                        </button>` : null}
+
+                      ${pop === col.id ? html`
+                        <div class="pop">
+                          <div class="pop-swatches">
+                            ${CHANNELS.map((ch) => html`
+                              <button key=${ch} title=${ch}
+                                class=${ch === col.channel ? "sel" : ""}
+                                style=${"--sw: var(--os-" + ch + ")"}
+                                onClick=${() => setColChannel(col, ch)}></button>
+                            `)}
+                          </div>
+                          <button class=${"pop-del" + (popArmed ? " armed" : "")}
+                            onClick=${() => deleteCol(col)}>
+                            ${popArmed ? "Click again to delete" : "Delete column"}
+                          </button>
+                        </div>` : null}
+                    </div>
+
+                    <div class="cards"
+                      onDragOver=${isEditor ? onCardsDragOver : null}
+                      onDrop=${isEditor ? (e) => onCardsDrop(e, col) : null}>
+                      ${draftCol && draftCol.id === col.id && draftCol.pos === "top" ? html`
+                        <div class="card-draft">
+                          <input placeholder="Card title…" value=${draft} maxlength="200"
+                            ref=${(el) => el && el.focus()}
+                            onInput=${(e) => setDraft(e.target.value)}
+                            onKeyDown=${(e) => {
+                              if (e.key === "Enter") addCard(col.id, "top");
+                              if (e.key === "Escape") { setDraft(""); setDraftCol(null); }
+                            }}
+                            onBlur=${() => addCard(col.id, "top")} />
+                        </div>` : null}
+                      ${col.cards.map((card) => html`
+                        <div class="card" key=${card.id} data-id=${card.id}
+                          draggable=${isEditor ? "true" : "false"}
+                          onClick=${() => { setEdit({ colId: col.id, card }); setEdArmed(false); }}
+                          onDragStart=${isEditor ? (e) => {
+                            dragCard.current = card.id;
+                            e.currentTarget.classList.add("dragging");
+                            e.dataTransfer.effectAllowed = "move";
+                          } : null}
+                          onDragEnd=${isEditor ? (e) => {
+                            dragCard.current = null;
+                            e.currentTarget.classList.remove("dragging");
+                            if (boardRef.current) clearMarks(boardRef.current);
+                          } : null}>
+                          <div class="card-title">${card.title}</div>
+                          ${card.description ? html`<div class="card-desc">${card.description}</div>` : null}
+                          ${card.label ? html`<span class="card-label">${card.label}</span>` : null}
+                        </div>
+                      `)}
+                      ${draftCol && draftCol.id === col.id && draftCol.pos === "bottom" ? html`
+                        <div class="card-draft">
+                          <input placeholder="Card title…" value=${draft} maxlength="200"
+                            ref=${(el) => el && el.focus()}
+                            onInput=${(e) => setDraft(e.target.value)}
+                            onKeyDown=${(e) => {
+                              if (e.key === "Enter") addCard(col.id, "bottom");
+                              if (e.key === "Escape") { setDraft(""); setDraftCol(null); }
+                            }}
+                            onBlur=${() => addCard(col.id, "bottom")} />
+                        </div>` : null}
+                      ${isEditor && !(draftCol && draftCol.id === col.id && draftCol.pos === "bottom") ? html`
+                        <button class="card-addzone" title="Add a card at the bottom"
+                          onClick=${() => { setDraftCol({ id: col.id, pos: "bottom" }); setDraft(""); }}>
+                          <i class="ph-light ph-plus"></i>
+                        </button>` : null}
+                    </div>
+                  </div>
+                `)}
+
+                ${isEditor ? html`
+                  <div class="new-col">
+                    <i class="ph-light ph-plus"></i>
+                    <input placeholder="Add a column…" value=${newCol} maxlength="80"
+                      onInput=${(e) => setNewCol(e.target.value)}
+                      onKeyDown=${(e) => { if (e.key === "Enter") addColumn(); }}
+                      onBlur=${addColumn} />
+                  </div>` : null}
+              </div>`}
+
+          ${edit ? html`
+            <${Modal} title=${isEditor ? "Edit card" : "Card"} onClose=${() => { setEdit(null); setEdArmed(false); }}
+              actions=${isEditor ? html`
+                <button class=${"ed-del" + (edArmed ? " armed" : "")}
+                  onClick=${() => deleteCard(edit.card)}>
+                  ${edArmed ? "Click again to delete" : "Delete card"}
+                </button>
+                <button onClick=${() => { setEdit(null); setEdArmed(false); }}>Done</button>
+              ` : null}>
+              <div class="ed">
+                ${isEditor ? html`
+                  <div>
+                    <label>Title</label>
+                    <input value=${edit.card.title} maxlength="200"
+                      onBlur=${(e) => { const v = e.target.value.trim(); if (v && v !== edit.card.title) saveCard(edit.card, { title: v }); }}
+                      onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                  </div>
+                  <div>
+                    <label>Label</label>
+                    <input value=${edit.card.label} maxlength="24" placeholder="Optional — e.g. design, urgent"
+                      onBlur=${(e) => { const v = e.target.value.trim(); if (v !== edit.card.label) saveCard(edit.card, { label: v }); }}
+                      onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                  </div>
+                  <div>
+                    <label>Description</label>
+                    <textarea maxlength="4000" placeholder="Optional details…"
+                      onBlur=${(e) => { const v = e.target.value; if (v !== edit.card.description) saveCard(edit.card, { description: v }); }}>${edit.card.description}</textarea>
+                  </div>
+                ` : html`
+                  <div>
+                    <label>Title</label>
+                    <div class="static-body">${edit.card.title}</div>
+                  </div>
+                  ${edit.card.label ? html`<div><label>Label</label><span class="card-label">${edit.card.label}</span></div>` : null}
+                  ${edit.card.description ? html`<div><label>Description</label><div class="static-body">${edit.card.description}</div></div>` : null}
+                `}
+              </div>
+            </${Modal}>` : null}
+        </main>
+      `;
+    }
+
+    render(html`<${App}/>`, document.body);
+  </script>
+</body>
+</html>
