@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Picture Frame</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c7); }          /* overridden per-space by applyChannel on mount */
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base); overflow: hidden;
+    }
+
+    .wrap { position: relative; height: 100%; display: flex; flex-direction: column; }
+
+    /* ---- Grid view ------------------------------------------------------------------- */
+    .bar {
+      flex: 0 0 auto; display: flex; align-items: center; gap: var(--os-sp-sm);
+      padding: var(--os-sp-sm) var(--os-sp-md);
+      border-bottom: 1px solid var(--os-border-color-subtle);
+    }
+    .bar > i.brand { font-size: 17px; color: var(--ch); line-height: 1; }
+    .bar h1 {
+      margin: 0; font-size: var(--os-fs-md); font-weight: var(--os-weight-semibold);
+      letter-spacing: -0.01em; white-space: nowrap;
+    }
+    .bar .count {
+      flex: 1; font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1;
+      color: var(--os-text-muted); white-space: nowrap; overflow: hidden;
+    }
+    .btn {
+      flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--os-sp-xs);
+      font: inherit; font-size: var(--os-fs-sm); cursor: pointer;
+      background: var(--os-bg-surface); color: var(--os-text-secondary);
+      border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
+      padding: 5px 10px; transition: border-color 150ms, color 150ms, background 150ms;
+    }
+    .btn:hover:not(:disabled) { border-color: var(--ch); color: var(--ch); }
+    .btn:active:not(:disabled) { transform: translateY(0.5px); }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+    .btn i { font-size: 14px; line-height: 1; }
+    .btn.on { background: var(--ch); border-color: var(--ch); color: var(--ch-fg, #fff); }
+
+    .grid {
+      flex: 1 1 auto; overflow-y: auto; overflow-x: hidden;
+      padding: var(--os-sp-md); display: grid; align-content: start;
+      grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+      gap: var(--os-sp-sm);
+    }
+    .cell {
+      position: relative; aspect-ratio: 1; padding: 0; border: 0; cursor: pointer;
+      border-radius: var(--os-radius-md); overflow: hidden; background: var(--os-bg-inset);
+      transition: box-shadow 160ms;
+    }
+    .cell:hover { box-shadow: 0 0 0 2px var(--ch); }
+    .cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .cell.is-current::after {
+      content: ""; position: absolute; inset: 0; border-radius: inherit;
+      box-shadow: inset 0 0 0 3px var(--ch);
+    }
+    .cell .del {
+      position: absolute; top: 4px; right: 4px; opacity: 0; z-index: 2;
+      display: flex; align-items: center; justify-content: center;
+      width: 24px; height: 24px; padding: 0; line-height: 1; font-size: 14px; cursor: pointer;
+      border: 0; border-radius: var(--os-radius-full); color: #fff;
+      background: rgba(20, 18, 16, 0.62); backdrop-filter: blur(3px);
+      transition: opacity 150ms, background 150ms;
+    }
+    .cell:hover .del, .cell .del:focus-visible { opacity: 1; }
+    .cell .del:hover { background: var(--os-cError); }
+    .cell .broken {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: var(--os-text-subtle); font-size: 20px;
+    }
+
+    /* ---- Single (full-frame) view ------------------------------------------------------ */
+    .single {
+      position: absolute; inset: 0; z-index: 5; background: #121110;
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+    }
+    .single > img { width: 100%; height: 100%; object-fit: contain; display: block; cursor: zoom-out; }
+    .single.cover > img { object-fit: cover; }
+    .single .broken {
+      display: flex; flex-direction: column; align-items: center; gap: var(--os-sp-sm);
+      color: rgba(255, 255, 255, 0.55); font-size: var(--os-fs-sm);
+    }
+    .single .broken i { font-size: 30px; }
+
+    /* Centered with a calc() offset, NOT translateY(-50%): the design system styles every
+       <button> with `button:active { transform: scale(0.97) }`, which outranks a `.nav` class
+       selector and REPLACES the transform on mousedown. Any transform doing layout duty here
+       gets thrown away mid-click and the button drops by half its height. The height is fixed,
+       so calc() centers it just as well and leaves transform free for the platform's press
+       effect. Same reason `line-height` is 1, not 0 — a zero line-height gives the icon a
+       0px-tall box, so `align-items: center` centers nothing and the glyph renders low. */
+    .nav {
+      position: absolute; top: calc(50% - 22px); z-index: 7;
+      display: flex; align-items: center; justify-content: center;
+      width: 34px; height: 44px; padding: 0; cursor: pointer; font-size: 20px; line-height: 1;
+      color: #fff; background: rgba(20, 18, 16, 0.42); border: 0;
+      border-radius: var(--os-radius-md); backdrop-filter: blur(4px);
+      transition: opacity 220ms, background 150ms, transform 120ms;
+    }
+    .nav:hover { background: rgba(20, 18, 16, 0.72); }
+    .nav.prev { left: var(--os-sp-sm); }
+    .nav.next { right: var(--os-sp-sm); }
+
+    .tools {
+      position: absolute; z-index: 7; left: 50%; transform: translateX(-50%);
+      bottom: var(--os-sp-md); display: flex; align-items: center; gap: 2px;
+      padding: 4px; border-radius: var(--os-radius-full);
+      background: rgba(20, 18, 16, 0.62); backdrop-filter: blur(8px);
+      transition: opacity 260ms;
+    }
+    .tools button, .tools select {
+      font: inherit; font-size: var(--os-fs-sm); cursor: pointer; color: #fff;
+      background: transparent; border: 0; border-radius: var(--os-radius-full);
+      padding: 5px 10px; display: inline-flex; align-items: center; gap: 5px;
+      transition: background 150ms, color 150ms;
+    }
+    .tools button:hover { background: rgba(255, 255, 255, 0.16); }
+    .tools button.on { background: var(--ch); color: var(--ch-fg, #fff); }
+    .tools button.danger:hover { background: var(--os-cError); }
+    .tools button i { font-size: 15px; line-height: 1; }
+    .tools select {
+      padding: 5px 4px; font-feature-settings: 'tnum' 1; font-size: var(--os-fs-2xs);
+      appearance: none; text-align: center;
+    }
+    .tools select option { color: var(--os-text); background: var(--os-bg-surface); }
+    .tools .sep { width: 1px; height: 18px; background: rgba(255, 255, 255, 0.2); margin: 0 3px; }
+
+    .fade-out { opacity: 0; pointer-events: none; }
+
+    /* ---- Empty / drop / toasts --------------------------------------------------------- */
+    .empty {
+      flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: var(--os-sp-sm); text-align: center;
+      color: var(--os-text-muted); padding: var(--os-sp-xl);
+    }
+    .empty i { font-size: 30px; color: var(--os-text-subtle); }
+    .empty .big { font-size: var(--os-fs-md); color: var(--os-text-secondary); }
+    .empty .hint { font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1; }
+
+    .dropveil {
+      position: absolute; inset: var(--os-sp-sm); z-index: 20; pointer-events: none;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: var(--os-sp-xs); color: var(--ch); font-size: var(--os-fs-md);
+      border: 2px dashed var(--ch); border-radius: var(--os-radius-lg);
+      background: color-mix(in srgb, var(--os-bg) 88%, transparent);
+    }
+    .dropveil i { font-size: 30px; }
+
+    .toasts {
+      position: absolute; z-index: 30; left: 50%; transform: translateX(-50%);
+      top: var(--os-sp-sm); display: flex; flex-direction: column; gap: var(--os-sp-xs);
+      max-width: calc(100% - var(--os-sp-lg));
+    }
+    .toast {
+      display: flex; align-items: center; gap: var(--os-sp-xs); cursor: pointer;
+      font-size: var(--os-fs-sm); color: var(--os-cError);
+      background: var(--os-bg-surface); border: 1px solid var(--os-cError-muted);
+      border-radius: var(--os-radius-md); padding: 6px 10px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+    }
+    .toast i { flex: 0 0 auto; font-size: 15px; line-height: 1; }
+
+    .busy {
+      display: inline-flex; align-items: center; gap: var(--os-sp-xs);
+      font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1; color: var(--os-text-muted);
+    }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import {
+      frame, html, render, useState, useEffect, useRef, useCallback,
+      useFramePush, applyChannel, WAITING,
+    } from "/lib/js/framelib.js";
+    import { photoAtTime, msUntilNextChange } from "./slideshow-clock.js";
+
+    // Must match the caps enforced in frame.ts.
+    const MAX_EDGE = 2560;
+    const THUMB_EDGE = 480;
+    const MAX_BYTES = 25 * 1024 * 1024;
+    // Re-encoding these through a canvas would cost PNG transparency and GIF/WebP animation, so
+    // originals that are already small enough go up untouched.
+    const KEEP_ORIGINAL = new Set(["image/png", "image/gif", "image/webp"]);
+    const INTERVALS = [[5, "5s"], [10, "10s"], [15, "15s"], [30, "30s"], [60, "1m"], [300, "5m"], [900, "15m"]];
+
+    // frame.api forwards ?sfi= automatically; frame.fetch does not, so binary calls add it here.
+    function withSfi(p) {
+      try {
+        const sfi = new URLSearchParams(location.search).get("sfi");
+        if (sfi && !/[?&]sfi=/.test(p)) return p + (p.includes("?") ? "&" : "?") + "sfi=" + encodeURIComponent(sfi);
+      } catch (_) { /* no search params */ }
+      return p;
+    }
+
+    // ----- Image preparation (client-side downscale) ------------------------------------
+    function dims(src) {
+      return { w: src.naturalWidth || src.width || 0, h: src.naturalHeight || src.height || 0 };
+    }
+
+    async function decode(file) {
+      if (self.createImageBitmap) {
+        // from-image applies the EXIF orientation, so phone photos aren't stored sideways.
+        try { return await createImageBitmap(file, { imageOrientation: "from-image" }); } catch (_) { /* older webview */ }
+        try { return await createImageBitmap(file); } catch (_) { /* fall through */ }
+      }
+      const url = URL.createObjectURL(file);
+      try {
+        const img = new Image();
+        await new Promise((ok, fail) => { img.onload = ok; img.onerror = fail; img.src = url; });
+        return img;
+      } finally { setTimeout(() => URL.revokeObjectURL(url), 5000); }
+    }
+
+    function scaleTo(src, maxEdge) {
+      const { w: sw, h: sh } = dims(src);
+      const scale = Math.min(1, maxEdge / Math.max(sw || 1, sh || 1));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round((sw || 1) * scale));
+      c.height = Math.max(1, Math.round((sh || 1) * scale));
+      c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
+      return c;
+    }
+
+    const toBlob = (canvas, type, q) => new Promise((r) => canvas.toBlob(r, type, q));
+
+    async function prepare(file) {
+      const src = await decode(file);
+      const { w, h } = dims(src);
+      const mime = (file.type || "").toLowerCase();
+      const keep = KEEP_ORIGINAL.has(mime) && file.size <= MAX_BYTES && Math.max(w, h) <= MAX_EDGE;
+
+      const full = keep ? file : await toBlob(scaleTo(src, MAX_EDGE), "image/jpeg", 0.85);
+      const fullMime = keep ? mime : "image/jpeg";
+      // PNG thumbnails stay PNG so transparency doesn't turn into black in the grid.
+      const thumb = await toBlob(scaleTo(src, THUMB_EDGE), mime === "image/png" ? "image/png" : "image/jpeg", 0.8);
+
+      if (src.close) src.close();
+      return { full, fullMime, thumb, w, h };
+    }
+
+    // ----- App ---------------------------------------------------------------------------
+    function App() {
+      const [st, setSt] = useState(null);
+      // Non-editors browse without touching the shared wall state. An override that PINS a photo
+      // also opts them out of the slideshow — they asked to look at that one. Entering full-frame
+      // without picking anything (the "Show" button) leaves them unpinned, so they watch the show.
+      const [override, setOverride] = useState(null);
+      const [busy, setBusy] = useState(null);
+      const [notes, setNotes] = useState([]);
+      const [broken, setBroken] = useState(() => new Set());
+      const [dragging, setDragging] = useState(false);
+      const [chrome, setChrome] = useState(true);
+      const [, tick] = useState(0);
+
+      const skew = useRef(0);        // server_ms - our Date.now(), applied to every clock read
+      const fileInput = useRef(null);
+      const hideTimer = useRef(null);
+      const dragDepth = useRef(0);
+      const now = useCallback(() => Date.now() + skew.current, []);
+
+      const refresh = useCallback(async () => {
+        const s = await frame.apiSafe("api/state").catch(() => null);
+        if (s && s !== WAITING && s.display) {
+          if (typeof s.server_ms === "number") skew.current = s.server_ms - Date.now();
+          setSt(s);
+        }
+      }, []);
+
+      useEffect(() => { refresh(); }, [refresh]);
+      useFramePush({
+        // An editor moved the wall: everyone follows, and a local browser rejoins the show.
+        display_changed: () => { setOverride(null); refresh(); },
+        photos_changed: refresh,
+      });
+
+      useEffect(() => {
+        if (st?.me?.space_color) applyChannel(document.body, st.me.space_color);
+      }, [st?.me?.space_color]);
+
+      const note = useCallback((msg) => {
+        const item = { id: Math.random().toString(36).slice(2), msg: String(msg) };
+        setNotes((n) => [...n, item]);
+        setTimeout(() => setNotes((n) => n.filter((x) => x.id !== item.id)), 6000);
+      }, []);
+
+      const poke = useCallback(() => {
+        setChrome(true);
+        clearTimeout(hideTimer.current);
+        hideTimer.current = setTimeout(() => setChrome(false), 2600);
+      }, []);
+
+      // ---- Derived display state --------------------------------------------------------
+      const d = st?.display;
+      const photos = st?.photos || [];
+      const canEdit = !!st?.can_edit;
+      const eff = override || (d ? { mode: d.mode, photoId: d.current_photo_id } : { mode: "grid", photoId: "" });
+      const running = !!d && d.slideshow_on && eff.mode === "single" && !override?.pinned && photos.length > 1;
+
+      const shown = eff.mode !== "single" || !photos.length ? null
+        : running ? photoAtTime(photos, d.anchor_photo_id, d.anchor_ms, d.slideshow_secs, now())
+        : (photos.find((p) => p.id === eff.photoId) || photos[0]);
+
+      // Re-render exactly at the next slideshow boundary. No dependency array on purpose: the
+      // timer re-arms after every render and always recomputes its delay from the anchor, so it
+      // self-corrects instead of accumulating drift.
+      useEffect(() => {
+        if (!running) return;
+        const ms = msUntilNextChange(d.anchor_ms, d.slideshow_secs, now());
+        const t = setTimeout(() => tick((n) => n + 1), ms + 25);
+        return () => clearTimeout(t);
+      });
+
+      useEffect(() => {
+        if (eff.mode === "single") poke();
+        return () => clearTimeout(hideTimer.current);
+      }, [eff.mode, poke]);
+
+      // ---- Actions ----------------------------------------------------------------------
+      // `pin` distinguishes "show me THIS photo" from "put me in full-frame" — only the former
+      // takes a non-editor out of a running slideshow.
+      const go = useCallback(async (mode, photoId, pin = true) => {
+        if (!canEdit) {
+          setOverride({ mode, photoId: photoId || "", pinned: mode === "single" && pin });
+          return;
+        }
+        const body = { mode };
+        if (photoId) body.photo_id = photoId;
+        const s = await frame.api("api/display", body).catch(() => null);
+        if (s) setSt(s); else refresh();
+      }, [canEdit, refresh]);
+
+      const step = useCallback((delta) => {
+        if (!photos.length) return;
+        const i = photos.findIndex((p) => p.id === shown?.id);
+        const n = photos.length;
+        go("single", photos[(((i < 0 ? 0 : i) + delta) % n + n) % n].id);
+      }, [photos, shown, go]);
+
+      const saveSettings = useCallback(async (patch) => {
+        // The client holds the running show's computed position, so hand it back whenever the
+        // show's shape changes — that's what lets the backend store a real photo when it stops.
+        const body = { ...patch, current_photo_id: shown?.id || "" };
+        const s = await frame.api("api/settings", body).catch(() => null);
+        if (s) { setOverride(null); setSt(s); }
+      }, [shown]);
+
+      const removePhoto = useCallback(async (id) => {
+        if (!(await frame.confirm("Delete this photo from the frame?", { danger: true, okLabel: "Delete" }))) return;
+        const s = await frame.api("api/delete/" + id, {}, "POST").catch(() => null);
+        if (s) { setOverride(null); setSt(s); } else refresh();
+      }, [refresh]);
+
+      const upload = useCallback(async (list) => {
+        const all = [...(list || [])];
+        const files = all.filter((f) => /^image\//i.test(f.type || ""));
+        const skipped = all.length - files.length;
+        if (skipped) note(`${skipped} non-image file${skipped === 1 ? "" : "s"} skipped.`);
+        if (!files.length) return;
+
+        for (let i = 0; i < files.length; i++) {
+          setBusy({ i: i + 1, n: files.length });
+          const f = files[i];
+          try {
+            const { full, fullMime, thumb, w, h } = await prepare(f);
+            if (!full) throw new Error(`Couldn't read "${f.name}".`);
+            if (full.size > MAX_BYTES) throw new Error(`"${f.name}" is too large even after resizing.`);
+            // ArrayBuffer, never a File: WebKit reads File/Blob bodies asynchronously and the
+            // axum:// bridge captures the request before that read finishes, so a File arrives empty.
+            const qs = `api/upload?name=${encodeURIComponent(f.name)}&mime=${encodeURIComponent(fullMime)}&w=${w}&h=${h}`;
+            const res = await frame.fetch(withSfi(qs), { method: "POST", body: await full.arrayBuffer() });
+            if (!res.ok) {
+              const j = await res.json().catch(() => ({}));
+              throw new Error(j.error || `Upload failed (${res.status})`);
+            }
+            const { photo_id } = await res.json();
+            if (thumb && photo_id) {
+              // A missing thumbnail is survivable — the backend falls back to the full image.
+              await frame.fetch(withSfi(`api/upload/${photo_id}/thumb`), {
+                method: "POST", body: await thumb.arrayBuffer(),
+              }).catch(() => {});
+            }
+          } catch (e) { note(e?.message || String(e)); }
+        }
+        setBusy(null);
+        await refresh();
+      }, [note, refresh]);
+
+      // ---- Keyboard ---------------------------------------------------------------------
+      useEffect(() => {
+        function onKey(e) {
+          if (eff.mode !== "single") return;
+          if (e.key === "Escape") { go("grid", shown?.id); }
+          else if (e.key === "ArrowRight") { step(1); }
+          else if (e.key === "ArrowLeft") { step(-1); }
+          else return;
+          e.preventDefault();
+          poke();
+        }
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+      }, [eff.mode, shown, step, go, poke]);
+
+      // ---- Drag & drop ------------------------------------------------------------------
+      const dropHandlers = canEdit ? {
+        onDragEnter: (e) => { e.preventDefault(); dragDepth.current++; setDragging(true); },
+        onDragOver: (e) => { e.preventDefault(); },
+        onDragLeave: (e) => { e.preventDefault(); if (--dragDepth.current <= 0) { dragDepth.current = 0; setDragging(false); } },
+        onDrop: (e) => {
+          e.preventDefault();
+          dragDepth.current = 0;
+          setDragging(false);
+          upload(e.dataTransfer?.files);
+        },
+      } : {};
+
+      if (!st) return html`<div class="wrap"></div>`;
+
+      const markBroken = (id) => setBroken((s) => (s.has(id) ? s : new Set(s).add(id)));
+      const toasts = html`
+        <div class="toasts">
+          ${notes.map((n) => html`
+            <div class="toast" key=${n.id} onClick=${() => setNotes((x) => x.filter((y) => y.id !== n.id))}>
+              <i class="ph-light ph-warning-circle"></i><span>${n.msg}</span>
+            </div>`)}
+        </div>`;
+
+      // ---- Single (full-frame) ----------------------------------------------------------
+      if (eff.mode === "single" && shown) {
+        const many = photos.length > 1;
+        const hidden = chrome ? "" : " fade-out";
+        return html`
+          <div class="wrap" ...${dropHandlers} onMouseMove=${poke} onTouchStart=${poke}>
+            <div class=${"single" + (d.fit === "cover" ? " cover" : "")}>
+              ${broken.has(shown.id) ? html`
+                <div class="broken">
+                  <i class="ph-light ph-image-broken"></i>
+                  <span>This photo's file is missing.</span>
+                  ${canEdit ? html`
+                    <button class="btn" onClick=${() => removePhoto(shown.id)}>
+                      <i class="ph-light ph-trash-simple"></i> Remove it
+                    </button>` : null}
+                </div>`
+              : html`
+                <img src=${withSfi("api/photo/" + shown.id)} alt=${shown.name}
+                  onClick=${() => go("grid", shown.id)} onError=${() => markBroken(shown.id)} />`}
+            </div>
+
+            ${many ? html`
+              <button class=${"nav prev" + hidden} title="Previous" onClick=${() => step(-1)}>
+                <i class="ph-light ph-caret-left"></i>
+              </button>
+              <button class=${"nav next" + hidden} title="Next" onClick=${() => step(1)}>
+                <i class="ph-light ph-caret-right"></i>
+              </button>` : null}
+
+            <div class=${"tools" + hidden}>
+              <button title="Back to all photos" onClick=${() => go("grid", shown.id)}>
+                <i class="ph-light ph-squares-four"></i>
+              </button>
+              ${canEdit ? html`
+                <span class="sep"></span>
+                <button class=${d.fit === "cover" ? "on" : ""}
+                  title=${d.fit === "cover" ? "Filling the frame — click to fit" : "Fitting the frame — click to fill"}
+                  onClick=${() => saveSettings({ fit: d.fit === "cover" ? "contain" : "cover" })}>
+                  <i class=${"ph-light " + (d.fit === "cover" ? "ph-crop" : "ph-frame-corners")}></i>
+                </button>
+                ${many ? html`
+                  <button class=${d.slideshow_on ? "on" : ""}
+                    title=${d.slideshow_on ? "Stop the slideshow" : "Start the slideshow"}
+                    onClick=${() => saveSettings({ slideshow_on: !d.slideshow_on })}>
+                    <i class=${"ph-light " + (d.slideshow_on ? "ph-pause" : "ph-play")}></i>
+                  </button>
+                  <select title="Seconds per photo" value=${String(d.slideshow_secs)}
+                    onChange=${(e) => saveSettings({ slideshow_secs: parseInt(e.target.value, 10) })}>
+                    ${INTERVALS.map(([v, label]) => html`<option key=${v} value=${String(v)}>${label}</option>`)}
+                  </select>` : null}
+                <span class="sep"></span>
+                <button class="danger" title="Delete this photo" onClick=${() => removePhoto(shown.id)}>
+                  <i class="ph-light ph-trash-simple"></i>
+                </button>` : null}
+            </div>
+
+            ${dragging ? html`
+              <div class="dropveil"><i class="ph-light ph-images"></i><span>Drop photos to add them</span></div>` : null}
+            ${toasts}
+          </div>`;
+      }
+
+      // ---- Grid -------------------------------------------------------------------------
+      return html`
+        <div class="wrap" ...${dropHandlers}>
+          <div class="bar">
+            <i class="ph-light ph-image-square brand"></i>
+            <h1>Picture Frame</h1>
+            <span class="count">
+              ${busy ? html`<span class="busy"><i class="ph-light ph-spinner-gap"></i> uploading ${busy.i} of ${busy.n}</span>`
+                : photos.length ? `${photos.length} photo${photos.length === 1 ? "" : "s"}${d.slideshow_on ? " · slideshow on" : ""}`
+                : ""}
+            </span>
+            ${photos.length ? html`
+              <button class="btn" title="Show full frame"
+                onClick=${() => go("single", d.current_photo_id || photos[0].id, false)}>
+                <i class="ph-light ph-play"></i> Show
+              </button>` : null}
+            ${canEdit ? html`
+              <button class="btn" disabled=${!!busy} onClick=${() => !busy && fileInput.current?.click()}>
+                <i class="ph-light ph-plus"></i> Add photos
+              </button>
+              <input ref=${fileInput} type="file" accept="image/*" multiple style="display:none"
+                onChange=${(e) => { upload(e.target.files); e.target.value = ""; }} />` : null}
+          </div>
+
+          ${!photos.length ? html`
+            <div class="empty">
+              <i class="ph-light ph-images"></i>
+              <span class="big">No photos yet</span>
+              ${canEdit ? html`<span class="hint">click "Add photos", or drag them in from your desktop</span>` : null}
+            </div>`
+          : html`
+            <div class="grid">
+              ${photos.map((p) => html`
+                <div class=${"cell" + (p.id === d.current_photo_id ? " is-current" : "")} key=${p.id}
+                  role="button" tabIndex="0" title=${p.name}
+                  onClick=${() => go("single", p.id)}
+                  onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go("single", p.id); } }}>
+                  ${broken.has(p.id)
+                    ? html`<div class="broken"><i class="ph-light ph-image-broken"></i></div>`
+                    : html`<img src=${withSfi("api/thumb/" + p.id)} alt=${p.name} loading="lazy"
+                        onError=${() => markBroken(p.id)} />`}
+                  ${canEdit ? html`
+                    <button class="del" title="Delete"
+                      onClick=${(e) => { e.stopPropagation(); removePhoto(p.id); }}>
+                      <i class="ph-light ph-trash-simple"></i>
+                    </button>` : null}
+                </div>`)}
+            </div>`}
+
+          ${dragging ? html`
+            <div class="dropveil"><i class="ph-light ph-images"></i><span>Drop photos to add them</span></div>` : null}
+          ${toasts}
+        </div>`;
+    }
+
+    render(html`<${App}/>`, document.body);
+  </script>
+</body>
+</html>

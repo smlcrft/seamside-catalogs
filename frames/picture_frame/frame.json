@@ -1,0 +1,19 @@
+{
+    "name": "Picture Frame",
+    "description": "A digital picture frame for a space. Space editors drop photos in — by clicking Add or dragging them from the desktop — and everyone sees them as a grid of thumbnails; tap one and it fills the frame, tap again to go back. Turn on slideshow mode and the frame cycles through the photos at an interval you choose. There is one shared display: whatever an editor puts up is what every viewer sees, and the frame remembers exactly what it was showing, so a restarted frame or a rebooted machine comes back to the same photo. Viewer-role members and anonymous link visitors can browse the photos on their own screen without changing what the frame displays for anyone else. Photos are downscaled on the way in and stored with their bytes on the host beside a per-placement encrypted LocalTable; nothing leaves the device.",
+    "frame_type": "Tandem",
+    "tags": ["household", "photos", "media"],
+    "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": []
+    },
+    "created_at": "2026-07-29T00:00:00Z",
+    "modified_at": "2026-08-04T00:00:00Z",
+    "app_version_min": "0.1.12",
+    "depends_on_capabilities": [],
+    "default_width_px": 640,
+    "default_height_px": 480,
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}
