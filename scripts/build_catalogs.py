@@ -20,6 +20,7 @@ import binascii
 import hashlib
 import io
 import json
+import re
 import shutil
 import sys
 import tarfile
@@ -101,6 +102,37 @@ def validate_images_b64(meta: dict) -> str | None:
         if len(raw) < 3 or raw[0] != 0xFF or raw[1] != 0xD8 or raw[2] != 0xFF:
             return f"image {i} is not JPEG (missing FF D8 FF SOI marker)"
     return None
+
+# Tag validation ceilings. Tags are free-form lowercase kebab slugs on a frame.json
+# ("tags": ["finance", "household", "garden"]): generic topical tags plus specific
+# tags shared by a set of related frames. Purely descriptive — no install behavior.
+TAGS_MAX_COUNT = 8
+TAGS_MAX_LEN = 24
+TAG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def validate_tags(meta: dict) -> str | None:
+    """Return a human-readable error if a frame's optional `tags` is malformed, else
+    None. Rules: a list of at most TAGS_MAX_COUNT unique lowercase kebab slugs
+    (^[a-z0-9][a-z0-9-]*$), each at most TAGS_MAX_LEN chars."""
+    tags = meta.get("tags")
+    if tags is None:
+        return None
+    if not isinstance(tags, list):
+        return "tags must be a list of strings"
+    if len(tags) > TAGS_MAX_COUNT:
+        return f"{len(tags)} tags exceeds the maximum of {TAGS_MAX_COUNT}"
+    if len(set(tags)) != len(tags):
+        return "tags contains duplicates"
+    for t in tags:
+        if not isinstance(t, str):
+            return f"tag {t!r} is not a string"
+        if len(t) > TAGS_MAX_LEN:
+            return f"tag {t!r} exceeds {TAGS_MAX_LEN} chars"
+        if not TAG_RE.match(t):
+            return f"tag {t!r} is not a lowercase kebab slug (^[a-z0-9][a-z0-9-]*$)"
+    return None
+
 
 # Path-components to drop from frame tarballs. `data/` is per-host runtime
 # state that the installer preserves separately; the rest is OS clutter.
@@ -227,6 +259,12 @@ def build_frames_manifest() -> tuple[int, int]:
             errors += 1
             continue
 
+        tags_err = validate_tags(meta)
+        if tags_err:
+            print(f"  ✗ ERROR {sub.name}: tags invalid — {tags_err}")
+            errors += 1
+            continue
+
         tar_path = FRAMES_PKG / f"{sub.name}.tar.gz"
         build_frame_tarball(sub, tar_path)
         sha = sha256_hex(tar_path)
@@ -257,6 +295,9 @@ def build_frames_manifest() -> tuple[int, int]:
         # Optional minimum-Seamside-version gate (omitted when the frame.json doesn't set it).
         if meta.get("app_version_min"):
             item["app_version_min"] = meta["app_version_min"]
+        # Optional catalog tags (omitted when the frame.json has none; clients default to []).
+        if meta.get("tags"):
+            item["tags"] = meta["tags"]
         items.append(item)
         print(f"  + {sub.name:30s}  {sha[:12]}…  ({tar_path.stat().st_size:>7} B)")
 
