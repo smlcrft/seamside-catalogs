@@ -206,18 +206,25 @@ def pick_modified_at(meta: dict) -> str:
 
 
 def normalize_permissions(perms: dict | None) -> dict:
-    """Project a frame.json `permissions` block to the canonical {net, web, web_scripts}
-    shape the manifest advertises. Missing lists default to []. The app compares this
-    against the installed frame.json's permissions as SETS (order-insensitive), so the
-    three keys are kept explicit only to make the advertised access unambiguous.
+    """Project a frame.json `permissions` block to the canonical shape the manifest
+    advertises. Missing lists default to [], missing flags to False. The app compares
+    this against the installed frame.json's permissions — the three lists as SETS
+    (order-insensitive), the two device flags EXACTLY — and refuses to start a frame
+    whose package asks for more than the listing advertised. So every key the app
+    compares must be emitted here; dropping one is an install-blocking mismatch.
         net         → backend worker outbound fetch (host[:port])
         web         → frontend media/img/socket origins (https/wss)
-        web_scripts → HIGH-RISK external script origins (https/wss)"""
+        web_scripts → HIGH-RISK external script origins (https/wss)
+        microphone  → frame requests the viewer's microphone (per-viewer consent)
+        camera      → frame requests the viewer's camera (per-viewer consent)"""
     p = perms or {}
     def lst(key: str) -> list:
         v = p.get(key, [])
         return v if isinstance(v, list) else []
-    return {"net": lst("net"), "web": lst("web"), "web_scripts": lst("web_scripts")}
+    return {
+        "net": lst("net"), "web": lst("web"), "web_scripts": lst("web_scripts"),
+        "microphone": p.get("microphone") is True, "camera": p.get("camera") is True,
+    }
 
 
 # ---------------------------------------------------------------------------
