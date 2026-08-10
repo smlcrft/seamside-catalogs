@@ -205,26 +205,85 @@ def pick_modified_at(meta: dict) -> str:
     return meta.get("modified_at") or meta.get("created_at") or stamp_iso_utc_now()
 
 
+def normalize_local_devices(v: object) -> list:
+    """Project `permissions.local_devices` — a frame's request for LOCAL HARDWARE
+    attached to the host machine (an Upline serial device).
+
+    The app compares each entry on `key`, `mode`, `uuid`, `name`, and
+    `requires_keys` (as a sorted set); `description` is display copy for the
+    consent prompt and does NOT gate the install. Defaults mirror the Rust
+    `LocalDeviceRequest`: absent `mode` is "listen" (the read-only default), and
+    an absent `uuid`/`name` compares equal to an empty one, so omitting either is
+    safe.
+
+    Entry ORDER is preserved rather than sorted: the app sorts both sides before
+    comparing, so order cannot affect the match, and author order is what the
+    consent prompt shows."""
+    out = []
+    for e in v if isinstance(v, list) else []:
+        if not isinstance(e, dict):
+            continue
+        entry = {"key": e.get("key") if isinstance(e.get("key"), str) else ""}
+        # Defaults are omitted, not spelled out (see normalize_permissions).
+        desc = e.get("description")
+        if isinstance(desc, str) and desc:
+            entry["description"] = desc
+        # Anything unrecognized falls back to the SAFE mode, never the permissive
+        # one — a typo must not silently advertise write access. "listen" is the
+        # default, so it is omitted rather than written.
+        if e.get("mode") == "command":
+            entry["mode"] = "command"
+        rk = e.get("requires_keys")
+        if isinstance(rk, list):
+            rk = sorted({k for k in rk if isinstance(k, str) and k})
+            if rk:
+                entry["requires_keys"] = rk
+        for opt in ("uuid", "name"):
+            val = e.get(opt)
+            if isinstance(val, str) and val:
+                entry[opt] = val
+        out.append(entry)
+    return out
+
+
 def normalize_permissions(perms: dict | None) -> dict:
     """Project a frame.json `permissions` block to the canonical shape the manifest
-    advertises. Missing lists default to [], missing flags to False. The app compares
-    this against the installed frame.json's permissions — the three lists as SETS
-    (order-insensitive), the two device flags EXACTLY — and refuses to start a frame
-    whose package asks for more than the listing advertised. So every key the app
-    compares must be emitted here; dropping one is an install-blocking mismatch.
-        net         → backend worker outbound fetch (host[:port])
-        web         → frontend media/img/socket origins (https/wss)
-        web_scripts → HIGH-RISK external script origins (https/wss)
-        microphone  → frame requests the viewer's microphone (per-viewer consent)
-        camera      → frame requests the viewer's camera (per-viewer consent)"""
+    advertises. The app compares this against the installed frame.json's permissions
+    — the three lists as SETS (order-insensitive), the two device flags EXACTLY, and
+    local_devices as a set of canonicalized entries — and refuses to start a frame
+    whose package asks for more than the listing advertised.
+
+    ONLY NON-DEFAULT VALUES ARE EMITTED. A frame that wants nothing produces `{}`,
+    and the whole `permissions` key is then dropped from the entry. This is safe
+    because the comparison happens AFTER deserialization: an omitted field and an
+    explicit default deserialize to the same value, so omission can never weaken
+    the gate — it can only make the advertised set smaller, which the app treats
+    as the package asking for MORE than was advertised and blocks. The failure
+    mode of this function is therefore a false alarm, never a silent pass.
+
+    Adding a permission the app compares means teaching this function to emit it
+    when non-default; forgetting to is an install-blocking mismatch for any frame
+    that uses it.
+        net           → backend worker outbound fetch (host[:port])
+        web           → frontend media/img/socket origins (https/wss)
+        web_scripts   → HIGH-RISK external script origins (https/wss)
+        microphone    → frame requests the viewer's microphone (per-viewer consent)
+        camera        → frame requests the viewer's camera (per-viewer consent)
+        local_devices → HIGH-RISK request for physical hardware plugged into the
+                        host machine; `mode: command` can drive an actuator"""
     p = perms or {}
-    def lst(key: str) -> list:
-        v = p.get(key, [])
-        return v if isinstance(v, list) else []
-    return {
-        "net": lst("net"), "web": lst("web"), "web_scripts": lst("web_scripts"),
-        "microphone": p.get("microphone") is True, "camera": p.get("camera") is True,
-    }
+    out: dict = {}
+    for key in ("net", "web", "web_scripts"):
+        v = p.get(key)
+        if isinstance(v, list) and v:
+            out[key] = v
+    for flag in ("microphone", "camera"):
+        if p.get(flag) is True:
+            out[flag] = True
+    devices = normalize_local_devices(p.get("local_devices"))
+    if devices:
+        out["local_devices"] = devices
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -295,10 +354,19 @@ def build_frames_manifest() -> tuple[int, int]:
             # install — and verify it after: the app refuses the install if the packaged
             # frame.json's permissions don't match this. Sourced from the SAME frame.json
             # that's tarballed above, so manifest and package agree by construction.
-            "permissions": normalize_permissions(meta.get("permissions")),
             "package_url":        url,
             "package_sha256":     sha,
         }
+        # Advertise the frame's declared access (net / web / web_scripts / capture
+        # devices / local hardware) so a client can show it to the user BEFORE
+        # install — and verify it after: the app refuses to start a frame whose
+        # packaged frame.json asks for more than this. Sourced from the SAME
+        # frame.json that's tarballed above, so manifest and package agree by
+        # construction. Omitted entirely when the frame requests nothing, which
+        # the app reads as "advertised nothing" and still checks against.
+        perms = normalize_permissions(meta.get("permissions"))
+        if perms:
+            item["permissions"] = perms
         # Optional minimum-Seamside-version gate (omitted when the frame.json doesn't set it).
         if meta.get("app_version_min"):
             item["app_version_min"] = meta["app_version_min"]

@@ -37,17 +37,25 @@ type Peer = ReturnType<typeof parsePeerInfo>;
 // Interval and still width move TOGETHER, as one rung. They're the same trade seen from
 // two ends — smoothness versus detail — so splitting them into two controls would only
 // let the owner pick incoherent pairs. Fast rungs are for "is anyone at their desk";
-// slow rungs are for "what's on the workbench". Measured on a webcam-like frame at q0.6,
-// every rung lands within ~1.0-2.2 KB/s, so no rung is the expensive one and the choice
-// really is just smooth vs. sharp. Keep it that way when editing: a rung whose bytes/sec
-// falls far outside that band is a rung the owner would be punished or rewarded for
-// picking, which is exactly the two-dial confusion this ladder exists to avoid.
+// slow rungs are for "what's on the workbench". The invariant that matters is FLATNESS, not
+// any particular number: every rung should cost roughly the same bytes/sec, so no rung is the
+// expensive one and the choice really is just smooth vs. sharp. Note the wire cost is the
+// BASE64 payload, 4/3 the JPEG bytes. Measured at q0.6 on detailed 4:3 photos downscaled from
+// a 1920px capture, the ladder runs ~3.5-5.8 KB/s at every rung. (That source is more detailed
+// than a real webcam still, so the wide rungs are an upper bound — a real 1920px still is
+// ~70 KB, not the ~240 KB the proxy gives; the narrow rungs are close to real, since
+// downscaling flattens the difference.) Widening the fast half made the ladder FLATTER: the
+// old fast rungs (40px@0.5s, 80px@1s, 160px@2s) were the cheap outliers at ~1.8-2.6 KB/s
+// while the slow rungs already sat at 4-5.5. Keep it that way when editing — a rung whose
+// bytes/sec falls far outside its
+// neighbours' is a rung the owner would be punished or rewarded for picking, which is exactly
+// the two-dial confusion this ladder exists to avoid.
 const STEPS = [
-  { ms:   500, w:   40 },
-  { ms:  1000, w:   80 },
-  { ms:  2000, w:  160 },
-  { ms:  3000, w:  240 },
-  { ms:  5000, w:  320 },
+  { ms:   500, w:  100 },
+  { ms:  1000, w:  160 },
+  { ms:  2000, w:  240 },
+  { ms:  3000, w:  320 },
+  { ms:  5000, w:  480 },
   { ms: 10000, w:  640 },
   { ms: 15000, w:  720 },
   { ms: 30000, w: 1280 },
@@ -68,8 +76,9 @@ function stepFor(ms: unknown): Step {
 // a real q0.6 still is 5-38× — deliberately loose, because bouncing a legitimately
 // detailed frame is a worse failure than admitting a fat one. It exists to bound a
 // malformed or hostile sender and to keep the owner's rung enforceable, not to police
-// ordinary variation. The floor keeps the two narrowest rungs from being effectively
-// uncapped (w² is only 1.6 KB at 40px); the 1 MB ceiling keeps the two widest from
+// ordinary variation. The floor keeps the narrowest rung from being effectively uncapped
+// (w² is only 10 KB at 100px, under the 12 KB floor; every rung from 160px up clears it on
+// its own). The 1 MB ceiling keeps the two widest from
 // being effectively unbounded (w² runs to 3.7 MB at 1920px, and a real 1920px still is
 // ~70 KB, so 1 MB is still ~14× headroom).
 const maxB64 = (w: number) => Math.min(1_048_576, Math.max(12_288, w * w));

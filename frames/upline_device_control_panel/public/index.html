@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Local Device</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    body { margin: 0; font-family: var(--os-font-sans, system-ui, sans-serif);
+           background: var(--os-bg); color: var(--os-text); }
+    main { padding: var(--os-sp-lg); display: flex; flex-direction: column; gap: var(--os-sp-md); }
+
+    /* ═══ PATTERN: frame header ═════════════════════════════════════════════
+       A 24px first-line rail: every single-line item (brand, status, gear) is a
+       24px centered box and the title's line-height IS 24px, so optical centers
+       coincide by construction rather than by margin nudges. */
+    .fh { display: flex; align-items: flex-start; gap: var(--os-sp-sm); }
+    .fh > i.fh-brand { font-size: 22px; line-height: 1; color: var(--ch);
+                       height: 24px; display: flex; align-items: center; }
+    .fh .fh-titles { flex: 1; min-width: 0; }
+    .fh .fh-title { font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold);
+                    line-height: 24px; color: var(--os-text);
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fh .fh-tagline { margin: 2px 0 0; font-size: var(--os-fs-sm); color: var(--os-text-muted); }
+    .fh .fh-mode { font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+                   text-transform: lowercase; letter-spacing: 0.02em; white-space: nowrap;
+                   height: 24px; display: flex; align-items: center; gap: 6px; }
+    .fh .fh-gear { background: none; border: 0; cursor: pointer; color: var(--os-text-muted);
+                   width: 28px; height: 28px; margin: -2px 0; padding: 0;
+                   border-radius: var(--os-radius-sm); font-size: 18px; line-height: 1;
+                   display: flex; align-items: center; justify-content: center;
+                   transition: color 150ms, background 150ms; }
+    .fh .fh-gear:hover, .fh .fh-gear.on { color: var(--ch); background: var(--os-bg-subtle); }
+    .fh .fh-gear:active { transform: scale(0.92); }
+
+    /* Binary status: filled = live, hollow = not. */
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+           background: var(--os-cSuccess); }
+    .dot.off { background: none; box-shadow: inset 0 0 0 1px var(--os-text-disabled); }
+
+    /* ═══ widget grid ═══════════════════════════════════════════════════════
+       auto-fill with a 240px floor: one column narrow, 2-3 wide, no breakpoints. */
+    .grid { display: grid; gap: var(--os-sp-md);
+            grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
+    .w { padding: var(--os-sp-md); border: 1px solid var(--os-border-color-subtle);
+         border-radius: var(--os-radius-md); background: var(--os-bg-surface);
+         display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .w__top { display: flex; align-items: baseline; gap: var(--os-sp-sm); min-width: 0; }
+    .w__name { font-weight: var(--os-weight-medium); font-size: var(--os-fs-base);
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .w__meta { font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+               color: var(--os-text-muted); white-space: nowrap; }
+    .w__val { margin-left: auto; font-feature-settings: 'tnum' 1;
+              font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .w__val--lg { font-size: 24px; font-weight: var(--os-weight-semibold);
+                  letter-spacing: -0.02em; line-height: 1.15; }
+    /* Pending is a real Upline state (§6.1) — the echo is the acknowledgement —
+       so it looks different from a settled value rather than identical. */
+    .w__val.pending { color: var(--os-text-muted); font-style: italic; }
+    .sw { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto;
+          box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15); }
+
+    svg { display: block; width: 100%; height: 34px; overflow: visible; }
+
+    input[type=range] { width: 100%; accent-color: var(--ch, var(--os-c7)); margin: 2px 0; }
+    input[type=color] { width: 100%; height: 30px; padding: 0; cursor: pointer;
+                        border: 1px solid var(--os-border-color);
+                        border-radius: var(--os-radius-sm); background: var(--os-bg-inset); }
+    input[type=text], input[type=number] {
+      width: 100%; box-sizing: border-box; padding: 5px 8px;
+      border-radius: var(--os-radius-sm); border: 1px solid var(--os-border-color);
+      background: var(--os-bg-inset); color: var(--os-text); font: inherit;
+      font-size: var(--os-fs-sm); }
+    input.mono { font-family: var(--os-font-mono); }
+    input:disabled, button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    button.b { font: inherit; font-size: var(--os-fs-sm); padding: 5px 12px;
+               border-radius: var(--os-radius-sm); cursor: pointer;
+               border: 1px solid var(--os-border-color); background: var(--os-bg-surface);
+               color: var(--os-text); white-space: nowrap; }
+    button.b[aria-pressed="true"] { background: var(--ch, var(--os-c7)); color: #fff;
+                                    border-color: transparent; }
+    button.b--go { border-color: var(--ch, var(--os-c7)); color: var(--ch, var(--os-c7)); }
+    .row { display: flex; gap: 6px; align-items: center; }
+    .row > input { flex: 1; min-width: 0; }
+    .args { display: flex; flex-direction: column; gap: 4px; }
+    .args label { font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+                  color: var(--os-text-muted); }
+
+    /* 12-channel palette: the SPACE's own identity colors, so a device's color
+       control speaks the same language as everything around it. */
+    .pal { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+    .pal button { padding: 0; height: 22px; border-radius: var(--os-radius-sm);
+                  border: 1px solid var(--os-border-color-subtle); cursor: pointer; }
+    .pal button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--os-text); }
+
+    /* ═══ PATTERN: form field ═══════════════════════════════════════════════ */
+    .field { display: flex; flex-direction: column; gap: var(--os-sp-xs); }
+    .field > label { font-size: 11px; font-weight: var(--os-weight-semibold);
+                     text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted); }
+    .field .hint { font-size: var(--os-fs-2xs); color: var(--os-text-muted); line-height: 1.4; }
+
+    /* ═══ PATTERN: segmented choice ═════════════════════════════════════════
+       The CONTAINER owns border/radius/clipping; interior buttons are square and
+       never scale on press (a clipped shape distorts) — they darken instead. */
+    .seg { display: flex; border: 1px solid var(--os-border-color);
+           border-radius: var(--os-radius-md); overflow: hidden; }
+    .seg button { border-radius: 0; flex: 1; min-width: 0; background: var(--os-bg);
+                  border: 0; cursor: pointer; padding: 6px; font: inherit;
+                  font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+                  transition: background 150ms, color 150ms; }
+    .seg button + button { border-left: 1px solid var(--os-border-color); }
+    .seg button:hover:not(.active) { background: var(--os-bg-subtle); }
+    .seg button:active { transform: none; background: var(--os-bg-inset); transition-duration: 40ms; }
+    .seg button.active { background: var(--ch); color: var(--ch-fg); font-weight: var(--os-weight-medium); }
+
+    /* ═══ PATTERN: check row ════════════════════════════════════════════════ */
+    .check-row { display: flex; align-items: flex-start; gap: var(--os-sp-sm); cursor: pointer; }
+    .check-row .check-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .check-row .check-name { font-size: var(--os-fs-sm); color: var(--os-text); line-height: 22px; }
+    .check-row .check-sub { font-size: var(--os-fs-2xs); color: var(--os-text-muted); line-height: 1.4; }
+
+    .warn { font-size: var(--os-fs-sm); line-height: 1.55; color: var(--os-cWarn);
+            padding: var(--os-sp-sm) var(--os-sp-md);
+            border: 1px solid var(--os-cWarn); border-radius: var(--os-radius-sm); }
+    .err { font-size: var(--os-fs-sm); color: var(--os-cError); }
+    .note { color: var(--os-text-muted); font-size: var(--os-fs-sm); line-height: 1.6; }
+    .foot { font-size: var(--os-fs-sm); color: var(--os-text-disabled); }
+  </style>
+</head>
+<body>
+<main id="root"></main>
+<script type="module">
+  import { frame, html, render, useState, useEffect, useRef, useFramePush, Modal }
+    from "./lib/js/framelib.js";
+
+  const HISTORY = 120;
+
+  // ── schema → interface (Upline §11.1) ───────────────────────────────────
+  // Mode picks the KIND of control; type picks the widget. Nothing about any
+  // particular device is hardcoded, so an unseen device still renders.
+  const isNum    = (k) => k.type === "int" || /^fix[1-9]$/.test(k.type);
+  const isArray  = (k) => /^(strs|ints|fix[1-9]s)$/.test(k.type);
+  const hasRange = (k) => k.min !== "" && k.max !== "";
+  const canRead  = (k) => k.mode === "Read" || k.mode === "ReadWrite";
+  const canWrite = (k) => k.mode === "ReadWrite" || k.mode === "Write";
+  // A `d` key exists only to type and bound another key's argument (§8.1) —
+  // it MUST NOT be rendered as a standalone control.
+  const isStandalone = (k) => k.mode !== "Declaration";
+  const stepFor = (k) => (k.scale ? Math.pow(10, -k.scale) : 1);
+
+  // ── display modes ───────────────────────────────────────────────────────
+  // §11.1 gives the DEFAULT widget for a type; these are the alternatives a
+  // member may pick when one shape genuinely serves a key better. A 24-bit int
+  // is the motivating case: a 0–16777215 slider is technically correct and
+  // practically useless, since one pixel covers ~65k values.
+  const RGB_MAX = 16777215;
+  const looksLikeColor = (k) =>
+    k.type === "int" && k.min === "0" && String(parseInt(k.max, 10)) === String(RGB_MAX);
+
+  function modesFor(k) {
+    if (!canWrite(k)) return [];              // a readout has nothing to choose
+    const out = [];
+    if (isNum(k) && hasRange(k)) out.push({ id: "slider", label: "slider" });
+    if (looksLikeColor(k)) {
+      out.push({ id: "color",  label: "picker" });
+      out.push({ id: "palette", label: "palette" });
+      out.push({ id: "hex",    label: "hex" });
+    } else if (k.type === "int" && hasRange(k)) {
+      out.push({ id: "hex", label: "hex" });
+    }
+    if (!isNum(k) || !hasRange(k)) out.push({ id: "field", label: "field" });
+    else out.push({ id: "field", label: "number" });
+    return out;
+  }
+  const defaultMode = (k) => (modesFor(k)[0]?.id ?? "field");
+
+  // ── color helpers ───────────────────────────────────────────────────────
+  const toHex6 = (n) => "#" + Math.max(0, Math.min(RGB_MAX, n | 0)).toString(16).padStart(6, "0");
+  const fromHex = (h) => parseInt(String(h).replace(/^#/, ""), 16);
+
+  /** Resolve the space's 12 identity channels to concrete ints we can send. */
+  function useChannelPalette() {
+    const [pal, setPal] = useState([]);
+    useEffect(() => {
+      const probe = document.createElement("span");
+      probe.style.display = "none";
+      document.body.appendChild(probe);
+      const out = [];
+      for (let i = 1; i <= 12; i++) {
+        probe.style.color = "";
+        probe.style.color = `var(--os-c${i})`;
+        const m = getComputedStyle(probe).color.match(/(\d+)\D+(\d+)\D+(\d+)/);
+        if (m) out.push({ n: i, rgb: (+m[1] << 16) | (+m[2] << 8) | +m[3] });
+      }
+      probe.remove();
+      setPal(out);
+    }, []);
+    return pal;
+  }
+
+  function Spark({ points, min, max }) {
+    if (points.length < 2) return html`<svg viewBox="0 0 100 20"></svg>`;
+    // Prefer the DECLARED range so a plot doesn't rescale on every sample and
+    // exaggerate noise — falling back to the observed band when the declared
+    // range is so wide the signal would flatten to nothing.
+    const dLo = min !== "" ? parseFloat(min) : NaN;
+    const dHi = max !== "" ? parseFloat(max) : NaN;
+    let lo = Number.isFinite(dLo) ? dLo : Math.min(...points);
+    let hi = Number.isFinite(dHi) ? dHi : Math.max(...points);
+    const obsLo = Math.min(...points), obsHi = Math.max(...points);
+    if ((obsHi - obsLo) < (hi - lo) / 50) { lo = obsLo; hi = obsHi; }
+    const span = (hi - lo) < 1e-9 ? 1 : hi - lo;
+    const d = points.map((v, i) => {
+      const x = (i / (points.length - 1)) * 100;
+      const y = 20 - ((Math.min(Math.max(v, lo), hi) - lo) / span) * 20;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
+    }).join(" ");
+    return html`<svg viewBox="0 0 100 20" preserveAspectRatio="none">
+      <path d=${d} fill="none" stroke="var(--ch, var(--os-c7))" stroke-width="1.5"
+            vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round" />
+    </svg>`;
+  }
+
+  /** A declared key: readout, plot, and whatever input its mode allows. */
+  function KeyWidget({ k, value, pending, series, canAct, draft, setDraft, onSet, onRead, view, palette }) {
+    const writable = canWrite(k) && canAct;
+    const meta = [
+      k.type,
+      hasRange(k) && !looksLikeColor(k) ? `${k.min}–${k.max}` : "",
+      k.mode === "ReadWrite" ? "rw" : k.mode === "Write" ? "w" : "",
+    ].filter(Boolean).join(" · ");
+
+    // A `w` key is never reported (§8.1) — say so rather than print a dash that
+    // reads as "not yet".
+    const shown = !canRead(k) ? "write-only" : (value ?? "—");
+    const cur = draft ?? value ?? k.default ?? "";
+    // A `w` key never echoes, so it must not be left pending forever.
+    const commit = (v) => { if (v !== "" && v !== undefined) onSet(k.key, v, canRead(k)); };
+    const isColorish = looksLikeColor(k);
+    const asInt = parseInt(cur, 10);
+    const swatch = isColorish && Number.isFinite(asInt) ? toHex6(asInt) : null;
+
+    return html`
+      <div class="w">
+        <div class="w__top">
+          <span class="w__name">${k.key}</span>
+          <span class="w__meta">${meta}</span>
+          ${swatch && html`<span class="sw" style=${`background:${swatch}`}></span>`}
+          <span class=${"w__val" + (isNum(k) && canRead(k) && !isColorish ? " w__val--lg" : "") + (pending ? " pending" : "")}>
+            ${pending ? `${pending}…` : (isColorish && Number.isFinite(asInt) ? toHex6(asInt) : shown)}
+          </span>
+        </div>
+
+        ${isNum(k) && canRead(k) && !isColorish && html`
+          <${Spark} points=${series ?? []} min=${k.min} max=${k.max} />`}
+
+        ${writable && view === "slider" && html`
+          <input type="range" min=${k.min} max=${k.max} step=${stepFor(k)} value=${cur}
+                 onInput=${e => setDraft(k.key, e.target.value)}
+                 onChange=${e => commit(e.target.value)} />`}
+
+        ${writable && view === "color" && html`
+          <input type="color" value=${swatch ?? "#000000"}
+                 onInput=${e => setDraft(k.key, String(fromHex(e.target.value)))}
+                 onChange=${e => commit(String(fromHex(e.target.value)))} />`}
+
+        ${writable && view === "palette" && html`
+          <div class="pal">
+            ${palette.map(c => html`
+              <button key=${c.n} title=${`channel ${c.n}`} aria-pressed=${asInt === c.rgb}
+                      style=${`background:${toHex6(c.rgb)}`}
+                      onClick=${() => commit(String(c.rgb))}></button>`)}
+          </div>`}
+
+        ${writable && view === "hex" && html`
+          <div class="row">
+            <input type="text" class="mono" spellcheck="false"
+                   placeholder="#rrggbb" value=${Number.isFinite(asInt) ? toHex6(asInt) : cur}
+                   onInput=${e => setDraft(k.key, e.target.value)}
+                   onKeyDown=${e => { if (e.key === "Enter") {
+                     const n = fromHex(e.target.value);
+                     if (Number.isFinite(n)) commit(String(n));
+                   } }} />
+            <button class="b b--go" onClick=${() => {
+              const n = fromHex(draft ?? toHex6(asInt));
+              if (Number.isFinite(n)) commit(String(n));
+            }}>set</button>
+          </div>`}
+
+        ${writable && view === "field" && k.type === "bool" && html`
+          <button class="b" aria-pressed=${value === "1"} style="width:100%"
+                  onClick=${() => onSet(k.key, value === "1" ? 0 : 1, canRead(k))}>
+            ${value === "1" ? "on" : "off"}
+          </button>`}
+
+        ${writable && view === "field" && k.type !== "bool" && html`
+          <div class="row">
+            <input type=${isNum(k) ? "number" : "text"} step=${stepFor(k)}
+                   placeholder=${isArray(k) ? "a|b|c" : (k.default || "value")} value=${cur}
+                   onInput=${e => setDraft(k.key, e.target.value)}
+                   onKeyDown=${e => { if (e.key === "Enter") commit(e.target.value); }} />
+            <button class="b b--go" onClick=${() => commit(draft ?? cur)}>set</button>
+          </div>`}
+
+        ${canRead(k) && value === undefined && canAct && html`
+          <button class="b" onClick=${() => onRead(k.key)}>read</button>`}
+      </div>`;
+  }
+
+  /** An executable key: a button, plus a form for its declared arguments. */
+  function CommandWidget({ cmd, argSpecs, canAct, args, setArg, onRun }) {
+    return html`
+      <div class="w">
+        <div class="w__top">
+          <span class="w__name">${cmd.key}</span>
+          <span class="w__meta">command</span>
+        </div>
+        ${argSpecs.length > 0 && html`
+          <div class="args">
+            ${argSpecs.map(a => html`
+              <label key=${a.key + "-l"}>${a.key}${a.min !== "" && a.max !== "" ? ` (${a.min}–${a.max})` : ""}</label>
+              <input key=${a.key} type=${isNum(a) ? "number" : "text"} step=${stepFor(a)}
+                     placeholder=${a.default || ""} value=${args[a.key] ?? a.default ?? ""}
+                     onInput=${e => setArg(cmd.key, a.key, e.target.value)} />`)}
+          </div>`}
+        <button class="b b--go" disabled=${!canAct} onClick=${() => onRun(cmd.key)}>run</button>
+      </div>`;
+  }
+
+  /** Gear sheet: how this placement looks, and who may drive it. */
+  function SettingsSheet({ dev, views, onView, onPublic, busy, onClose }) {
+    const configurable = (dev.keys ?? []).filter(k => modesFor(k).length > 1);
+    return html`
+      <${Modal} title="Settings" onClose=${onClose}
+        actions=${html`<button class="b" onClick=${onClose}>done</button>`}>
+        <div style="display:flex;flex-direction:column;gap:var(--os-sp-lg)">
+
+          ${dev.is_editor && configurable.length > 0 && html`
+            <div style="display:flex;flex-direction:column;gap:var(--os-sp-md)">
+              ${configurable.map(k => html`
+                <div class="field" key=${k.key}>
+                  <label>${k.key}</label>
+                  <div class="seg">
+                    ${modesFor(k).map(m => html`
+                      <button key=${m.id} class=${views[k.key] === m.id ||
+                                (!views[k.key] && defaultMode(k) === m.id) ? "active" : ""}
+                              onClick=${() => onView(k.key, m.id)}>${m.label}</button>`)}
+                  </div>
+                  <span class="hint">How everyone viewing this placement sees ${k.key}.</span>
+                </div>`)}
+            </div>`}
+
+          ${dev.is_editor && configurable.length === 0 && html`
+            <p class="note">This device has no keys with an alternative presentation.</p>`}
+
+          ${dev.is_editor && html`
+            <div class="field">
+              <label>public control</label>
+              <label class="check-row">
+                <input type="checkbox" checked=${!!dev.public_control} disabled=${busy}
+                       onChange=${e => onPublic(e.target.checked)} />
+                <span class="check-text">
+                  <span class="check-name">Let anyone with the link control this device</span>
+                  <span class="check-sub">Off by default. Only space members with edit access can change values.</span>
+                </span>
+              </label>
+              ${dev.public_control && html`
+                <div class="warn">Anyone who can open this frame — including anonymous
+                  visitors following a share link — can move physical hardware connected
+                  to this computer.</div>`}
+            </div>`}
+
+          ${!dev.is_editor && html`
+            <p class="note">Only space members with edit access can change these settings.</p>`}
+        </div>
+      </${Modal}>`;
+  }
+
+  function App() {
+    const [dev, setDev] = useState(null);
+    const [series, setSeries] = useState({});
+    const [drafts, setDrafts] = useState({});
+    const [pending, _setPending] = useState({});
+    const [cmdArgs, setCmdArgs] = useState({});
+    const [views, setViews] = useState({});
+    const [err, setErr] = useState("");
+    const [sheet, setSheet] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const seriesRef = useRef({});
+    // The push handler registers once, so it would close over a stale `pending`.
+    const pendingRef = useRef({});
+    const palette = useChannelPalette();
+
+    const setPending = (updater) => _setPending(p => {
+      const next = typeof updater === "function" ? updater(p) : updater;
+      pendingRef.current = next;
+      return next;
+    });
+
+    async function load() {
+      try {
+        const d = await frame.api("api/device");
+        setDev(d);
+        if (d?.views) setViews(d.views);
+      } catch (e) { console.error(e); }
+    }
+    useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+
+    // §6.1: a value we sent is PENDING until the device echoes it. Never write
+    // back a value we received — that is a feedback loop, not a change.
+    const onSet = (key, value, echoes = true) => {
+      setErr("");
+      if (echoes) setPending(p => ({ ...p, [key]: String(value) }));
+      else setDrafts(d => { const o = { ...d }; delete o[key]; return o; });
+      frame.busSend({ type: "set", key, value });
+    };
+    const onRead = (name) => { setErr(""); frame.busSend({ type: "read", name }); };
+    const onRun = (command) => {
+      setErr("");
+      frame.busSend({ type: "run", command, args: cmdArgs[command] ?? {} });
+    };
+    const setDraft = (key, v) => setDrafts(d => ({ ...d, [key]: v }));
+    const setArg = (cmd, arg, v) => setCmdArgs(a => ({ ...a, [cmd]: { ...(a[cmd] ?? {}), [arg]: v } }));
+    const onView = (key, mode) => {
+      setViews(v => ({ ...v, [key]: mode }));   // optimistic: it is a display choice
+      frame.busSend({ type: "set_view", key, mode });
+    };
+    const onPublic = (enabled) => { setBusy(true); setErr(""); frame.busSend({ type: "set_public_control", enabled }); };
+
+    useFramePush({
+      device_tick: (msg) => {
+        const vals = msg?.values ?? {};
+        const next = { ...seriesRef.current };
+        for (const [k, raw] of Object.entries(vals)) {
+          const n = parseFloat(raw);
+          if (Number.isFinite(n)) next[k] = [...(next[k] ?? []), n].slice(-HISTORY);
+        }
+        seriesRef.current = next;
+        setSeries(next);
+        setDev(d => d ? { ...d, values: { ...d.values, ...vals } } : d);
+        // A draft clears ONLY when it was a write we sent and the echo came
+        // back. Clearing on any tick would reset a field being typed into — at
+        // 10 Hz that eats focus and the caret.
+        const settled = Object.keys(vals).filter(k => k in pendingRef.current);
+        if (settled.length) {
+          setPending(p => { const o = { ...p }; for (const k of settled) delete o[k]; return o; });
+          setDrafts(d => { const o = { ...d }; for (const k of settled) delete o[k]; return o; });
+        }
+      },
+      act_result: (msg) => {
+        setBusy(false);
+        if (msg?.ok) return;
+        setErr(msg?.error || "action failed");
+        setPending({});
+      },
+      settings_changed: () => { setBusy(false); load(); },
+    });
+
+    if (!dev) return html`<main><p class="note">loading…</p></main>`;
+
+    if (!dev.connected) {
+      return html`<main>
+        <div class="fh"><i class="fh-brand ph-light ph-usb"></i>
+          <div class="fh-titles"><div class="fh-title">local device</div></div></div>
+        <p class="note">
+          ${dev.can_connect
+            ? "No device connected to this placement yet. Seamside should have asked — if you dismissed it, reload this frame to be asked again."
+            : "The owner hasn't connected a device to this placement."}
+        </p></main>`;
+    }
+
+    // `_r|0` means no receive path at all — everything renders read-only (§11.2).
+    const canAct = dev.can_command && dev.can_edit && dev.rx_bytes > 0;
+    const keys = (dev.keys ?? []).filter(isStandalone);
+    const commands = dev.commands ?? [];
+    const specOf = (name) => (dev.keys ?? []).find(k => k.key === name);
+
+    return html`<main>
+      <div class="fh">
+        <i class="fh-brand ph-light ph-usb"></i>
+        <div class="fh-titles">
+          <div class="fh-title">${dev.name}</div>
+          ${dev.desc && html`<p class="fh-tagline">${dev.desc}</p>`}
+        </div>
+        <span class="fh-mode">
+          <span class=${"dot" + (dev.online ? "" : " off")}></span>
+          ${dev.online ? "connected" : "offline"}
+        </span>
+        <button class=${"fh-gear" + (sheet ? " on" : "")} title="Settings"
+                onClick=${() => setSheet(true)}><i class="ph-light ph-gear-six"></i></button>
+      </div>
+
+      ${keys.length === 0 && commands.length === 0 && html`
+        <p class="note">This device declares no keys.</p>`}
+
+      <div class="grid">
+        ${keys.map(k => html`
+          <${KeyWidget} key=${k.key} k=${k} value=${dev.values?.[k.key]} pending=${pending[k.key]}
+                        series=${series[k.key]} canAct=${canAct} draft=${drafts[k.key]}
+                        view=${views[k.key] ?? defaultMode(k)} palette=${palette}
+                        setDraft=${setDraft} onSet=${onSet} onRead=${onRead} />`)}
+        ${commands.map(c => html`
+          <${CommandWidget} key=${c.key} cmd=${c} argSpecs=${(c.args ?? []).map(specOf).filter(Boolean)}
+                            canAct=${canAct} args=${cmdArgs[c.key] ?? {}}
+                            setArg=${setArg} onRun=${onRun} />`)}
+      </div>
+
+      ${err && html`<p class="err">${err}</p>`}
+
+      <p class="foot">
+        ${!dev.online ? "Device is offline."
+          : dev.rx_bytes === 0 ? "This device only transmits — nothing can be sent to it."
+          : !dev.can_command ? "Read-only access."
+          : !dev.can_edit ? "You have view-only access to this device."
+          : dev.is_editor ? `Accepts ${dev.rx_bytes} byte lines.`
+          : "The owner has enabled public control."}
+      </p>
+
+      ${sheet && html`
+        <${SettingsSheet} dev=${dev} views=${views} onView=${onView} onPublic=${onPublic}
+                          busy=${busy} onClose=${() => setSheet(false)} />`}
+    </main>`;
+  }
+
+  render(html`<${App} />`, document.getElementById("root"));
+</script>
+</body>
+</html>

@@ -74,11 +74,11 @@
       aspect-ratio: 4 / 3; min-height: 0;
       display: flex; align-items: center; justify-content: center;
     }
-    /* The still is 160px wide by design — it fills the plate rather than sitting in
-       it at native size. `cover` crops the overflowing axis when the camera's aspect
-       doesn't match the plate's, so the image always reaches every edge.
-       `image-rendering: auto` is the browser's own bilinear upscale: free, GPU-side,
-       and the reason a 160px still reads as soft rather than blocky. Never
+    /* The still is narrower than the plate by design (100-480px on the fast rungs) — it
+       fills the plate rather than sitting in it at native size. `cover` crops the
+       overflowing axis when the camera's aspect doesn't match the plate's, so the image
+       always reaches every edge. `image-rendering: auto` is the browser's own bilinear
+       upscale: free, GPU-side, and the reason a small still reads as soft rather than blocky. Never
        `pixelated` here, and never a CSS blur filter — that would cost real frames. */
     .stage-view img {
       width: 100%; height: 100%; display: block;
@@ -333,7 +333,7 @@
       // Capture loop — restarts cleanly when the owner moves to another rung. Interval
       // and width always change together, so both are deps.
       const intervalMs = (st && st.interval_ms) || 2000;
-      const stillW = (st && st.still_w) || 160;
+      const stillW = (st && st.still_w) || 240;
       useEffect(() => {
         if (!sharing) return;
         const shoot = () => sendStill(stillW);
