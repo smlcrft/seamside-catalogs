@@ -1,5 +1,5 @@
 {
-    "name": "Upline Local Device Control Panel",
+    "name": "Local Device Controller",
     "description": "Generic control panel for a local Upline serial device: builds its interface from the device's own schema. Place it more than once to control several devices independently.",
     "frame_type": "Tandem",
     "app_version_min": "0.2.6",
@@ -17,7 +17,7 @@
         ]
     },
     "created_at": "2026-08-08T00:00:00Z",
-    "modified_at": "2026-08-10T19:53:32Z",
+    "modified_at": "2026-08-10T20:17:21Z",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
     "attribution_log": []

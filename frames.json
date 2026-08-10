@@ -310,6 +310,33 @@
     },
     {
       "kind": "Frames",
+      "id": "local_device_controller",
+      "name": "Local Device Controller",
+      "description": "Generic control panel for a local Upline serial device: builds its interface from the device's own schema. Place it more than once to control several devices independently.",
+      "icon": "",
+      "modified_at": "2026-08-10T20:17:21Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 0,
+        "default_height_px": 0,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/local_device_controller.tar.gz",
+      "package_sha256": "c4fc1cc5da9a8e7c85bffef5d52abd8e1e2147fc2153c37c76ffc408cf3abee0",
+      "permissions": {
+        "local_devices": [
+          {
+            "key": "sensor",
+            "description": "read and control any connected device",
+            "mode": "command"
+          }
+        ]
+      },
+      "app_version_min": "0.2.6"
+    },
+    {
+      "kind": "Frames",
       "id": "market_weather",
       "name": "Market Weather",
       "description": "A turnout forecaster for outdoor commerce \u2014 farmers markets, festivals, food trucks, street vendors, walkable storefronts. Set a location and Market Weather pulls 72 hours of weather from Open-Meteo (keyless), compares it against the last 30 days' local norms, and folds in temperature comfort, rain, UV, daylight, wind, weekend bonus, and time-of-day into a single composite turnout curve. The graph overlays each contributing factor as a faint band (daytime in pale yellow, rain in blue rising from the bottom, extreme heat/cold in red, weekend bonus in green) so you can see at a glance WHY the bold turnout line moves the way it does \u2014 and plan how much to stock, bake, or brew for the days ahead.",
@@ -562,33 +589,6 @@
         "media",
         "music"
       ]
-    },
-    {
-      "kind": "Frames",
-      "id": "upline_device_control_panel",
-      "name": "Upline Local Device Control Panel",
-      "description": "Generic control panel for a local Upline serial device: builds its interface from the device's own schema. Place it more than once to control several devices independently.",
-      "icon": "",
-      "modified_at": "2026-08-10T19:53:32Z",
-      "frame_preview": {
-        "frame_type": "Tandem",
-        "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
-      },
-      "capability_preview": null,
-      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/upline_device_control_panel.tar.gz",
-      "package_sha256": "f705c8aecb2f390e74309e562ae6f204e1d1012e810af12272371615ac11c377",
-      "permissions": {
-        "local_devices": [
-          {
-            "key": "sensor",
-            "description": "read and control any connected device",
-            "mode": "command"
-          }
-        ]
-      },
-      "app_version_min": "0.2.6"
     },
     {
       "kind": "Frames",

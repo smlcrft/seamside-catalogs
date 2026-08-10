@@ -54,6 +54,28 @@ const PUBLIC_CONTROL = "allow_public_control";
 // surprising amount of reach for read-only access.
 const VIEW_PREFIX = "view:";
 
+// Keys hidden from people outside the space, e.g. `hidden:servo` -> true.
+//
+// Enforced in the WORKER, not in CSS. A non-member never receives a hidden key's
+// schema or its value, so hiding is real rather than cosmetic — the widget is
+// absent because the data is absent. Space members (including Viewers) still see
+// everything; this draws the line at the space boundary, not at edit permission.
+const HIDDEN_PREFIX = "hidden:";
+
+/** Drop hidden entries for anyone outside the space. Works for keys and commands
+ *  alike — both are addressed by `key`, so one namespace covers both. */
+function visibleOnly<T extends { key: string }>(list: T[], hidden: string[], isMember: boolean): T[] {
+  return isMember ? list : list.filter(e => !hidden.includes(e.key));
+}
+
+async function hiddenKeys(sfiId: string): Promise<string[]> {
+  if (!sfiId) return [];
+  const all = await frameSettings(sfiId).all();
+  return Object.entries(all)
+    .filter(([k, v]) => k.startsWith(HIDDEN_PREFIX) && v === true)
+    .map(([k]) => k.slice(HIDDEN_PREFIX.length));
+}
+
 async function viewModes(sfiId: string): Promise<Record<string, string>> {
   if (!sfiId) return {};
   const all = await frameSettings(sfiId).all();
@@ -83,10 +105,21 @@ const wired = new Set<string>();
 function wireEvents(sfiId: string) {
   if (!sfiId || wired.has(sfiId)) return;
   wired.add(sfiId);
-  localDevice("sensor", sfiId).onEvent((e) => {
-    // Push to the placement the record came from — never broadcast, or placement A
-    // would see placement B's device readings.
-    pushToInstance(e.sfi_id, { type: "device_tick", at_ms: e.at_ms, values: e.values });
+  localDevice("sensor", sfiId).onEvent(async (e) => {
+    // `pushToInstance` reaches EVERY viewer of the placement — there is no
+    // per-viewer targeting — so a hidden key's value must never enter the
+    // stream. Filtering here is what makes hiding real: a non-member's browser
+    // never receives the bytes, rather than receiving them and not drawing them.
+    //
+    // The cost is that members read hidden keys from the /api/device poll (which
+    // IS per-peer) instead of live. That is the honest trade: a slower refresh
+    // for a member beats a silent disclosure to the public.
+    const hidden = await hiddenKeys(e.sfi_id);
+    const values = hidden.length
+      ? Object.fromEntries(Object.entries(e.values).filter(([k]) => !hidden.includes(k)))
+      : e.values;
+    if (Object.keys(values).length === 0 && hidden.length) return;
+    pushToInstance(e.sfi_id, { type: "device_tick", at_ms: e.at_ms, values });
   });
 }
 
@@ -102,6 +135,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
   if (reqPath === "/api/device" && method === "GET") {
     const dev = localDevice("sensor", peer.sfi_id);
     const info = dev.info();
+    const hidden = await hiddenKeys(peer.sfi_id);
     if (!info) {
       // Distinguish "the owner needs to connect one" from "you're a guest" — a
       // viewer shouldn't be told to click something only the owner can see.
@@ -128,11 +162,19 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
       can_command: info.can_command,
       // The schema IS the UI spec — the frontend builds every control from this.
       // Mode picks the kind of control, type picks the widget (§11.1).
-      keys: info.keys,
-      commands: info.commands,
+      //
+      // Hidden keys are STRIPPED for non-members rather than flagged: a viewer
+      // outside the space never learns the key exists, and cannot read its value
+      // out of the response. Members get the full schema plus the hidden list so
+      // an editor can see what is hidden and unhide it.
+      keys: visibleOnly(info.keys, hidden, peer.is_sfi_member),
+      commands: visibleOnly(info.commands, hidden, peer.is_sfi_member),
+      hidden: peer.is_sfi_member ? hidden : [],
       // `_r|0` means the device has no receive path, so nothing is writable.
       rx_bytes: info.rx_bytes,
-      values: dev.state(),
+      values: peer.is_sfi_member
+        ? dev.state()
+        : Object.fromEntries(Object.entries(dev.state()).filter(([k]) => !hidden.includes(k))),
     });
   }
 
@@ -152,7 +194,20 @@ onUiMessage(async (sfiId, data, peer) => {
     enabled?: boolean; mode?: string;
   };
   if (msg?.type !== "set" && msg?.type !== "run" && msg?.type !== "read"
-      && msg?.type !== "set_public_control" && msg?.type !== "set_view") return;
+      && msg?.type !== "set_public_control" && msg?.type !== "set_view"
+      && msg?.type !== "set_hidden") return;
+
+  // Visibility is editor-level, like presentation. It decides what people
+  // outside the space can see of this device, so it is a sharing decision.
+  if (msg.type === "set_hidden") {
+    if (!peer.is_sfi_editor) {
+      return pushToInstance(sfiId, { type: "act_result", ok: false, error: "only space editors can hide keys" });
+    }
+    if (!msg.key) return;
+    if (msg.enabled === true) await frameSettings(sfiId).set(HIDDEN_PREFIX + msg.key, true);
+    else await frameSettings(sfiId).remove(HIDDEN_PREFIX + msg.key);  // shown is the default; don't store it
+    return pushToInstance(sfiId, { type: "settings_changed" });
+  }
 
   // Presentation is editor-level. It moves no hardware, so it does not need the
   // control gate — but it IS shared state that every viewer of this placement

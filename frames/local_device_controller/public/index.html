@@ -57,6 +57,20 @@
     /* Pending is a real Upline state (§6.1) — the echo is the acknowledgement —
        so it looks different from a settled value rather than identical. */
     .w__val.pending { color: var(--os-text-muted); font-style: italic; }
+    /* Visibility toggle: editors only. Bare ghost icon, revealed by the widget —
+       an affordance on the key, not a control competing with the device. */
+    .eye { background: none; border: 0; padding: 0; margin: 0 2px 0 -2px; cursor: pointer;
+           color: var(--os-text-disabled); font-size: 14px; line-height: 1; flex: 0 0 auto;
+           display: inline-flex; align-items: center; transition: color 150ms; }
+    .w:hover .eye { color: var(--os-text-muted); }
+    .eye:hover { color: var(--ch, var(--os-c7)); }
+    .eye:active { transform: scale(0.92); }
+    /* Hidden is a state worth seeing at a glance, so it stays lit and the whole
+       widget recedes — an editor should never wonder why the public sees less. */
+    .eye.hid, .w:hover .eye.hid { color: var(--os-cWarn); }
+    .w.hid { border-style: dashed; }
+    .w.hid .w__name { color: var(--os-text-muted); }
+
     .sw { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto;
           box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15); }
 
@@ -223,7 +237,8 @@
   }
 
   /** A declared key: readout, plot, and whatever input its mode allows. */
-  function KeyWidget({ k, value, pending, series, canAct, draft, setDraft, onSet, onRead, view, palette }) {
+  function KeyWidget({ k, value, pending, series, canAct, draft, setDraft, onSet, onRead, view, palette,
+                       isEditor, hidden, onHide }) {
     const writable = canWrite(k) && canAct;
     const meta = [
       k.type,
@@ -242,8 +257,14 @@
     const swatch = isColorish && Number.isFinite(asInt) ? toHex6(asInt) : null;
 
     return html`
-      <div class="w">
+      <div class=${"w" + (hidden ? " hid" : "")}>
         <div class="w__top">
+          ${isEditor && html`
+            <button class=${"eye" + (hidden ? " hid" : "")} onClick=${() => onHide(k.key, !hidden)}
+                    title=${hidden ? "Hidden from people outside the space — click to show"
+                                   : "Visible to everyone — click to hide from people outside the space"}>
+              <i class=${"ph-light " + (hidden ? "ph-eye-slash" : "ph-eye")}></i>
+            </button>`}
           <span class="w__name">${k.key}</span>
           <span class="w__meta">${meta}</span>
           ${swatch && html`<span class="sw" style=${`background:${swatch}`}></span>`}
@@ -309,10 +330,16 @@
   }
 
   /** An executable key: a button, plus a form for its declared arguments. */
-  function CommandWidget({ cmd, argSpecs, canAct, args, setArg, onRun }) {
+  function CommandWidget({ cmd, argSpecs, canAct, args, setArg, onRun, isEditor, hidden, onHide }) {
     return html`
-      <div class="w">
+      <div class=${"w" + (hidden ? " hid" : "")}>
         <div class="w__top">
+          ${isEditor && html`
+            <button class=${"eye" + (hidden ? " hid" : "")} onClick=${() => onHide(cmd.key, !hidden)}
+                    title=${hidden ? "Hidden from people outside the space — click to show"
+                                   : "Visible to everyone — click to hide from people outside the space"}>
+              <i class=${"ph-light " + (hidden ? "ph-eye-slash" : "ph-eye")}></i>
+            </button>`}
           <span class="w__name">${cmd.key}</span>
           <span class="w__meta">command</span>
         </div>
@@ -384,6 +411,7 @@
     const [pending, _setPending] = useState({});
     const [cmdArgs, setCmdArgs] = useState({});
     const [views, setViews] = useState({});
+    const [hidden, setHidden] = useState([]);
     const [err, setErr] = useState("");
     const [sheet, setSheet] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -403,6 +431,9 @@
         const d = await frame.api("api/device");
         setDev(d);
         if (d?.views) setViews(d.views);
+        // Non-members never receive this — their hidden keys are simply absent
+        // from the schema, so there is nothing for them to reconcile.
+        setHidden(Array.isArray(d?.hidden) ? d.hidden : []);
       } catch (e) { console.error(e); }
     }
     useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
@@ -427,6 +458,11 @@
       frame.busSend({ type: "set_view", key, mode });
     };
     const onPublic = (enabled) => { setBusy(true); setErr(""); frame.busSend({ type: "set_public_control", enabled }); };
+    // Optimistic: the reply triggers a reload, which is what settles it.
+    const onHide = (key, enabled) => {
+      setHidden(h => enabled ? [...new Set([...h, key])] : h.filter(x => x !== key));
+      frame.busSend({ type: "set_hidden", key, enabled });
+    };
 
     useFramePush({
       device_tick: (msg) => {
@@ -499,12 +535,18 @@
           <${KeyWidget} key=${k.key} k=${k} value=${dev.values?.[k.key]} pending=${pending[k.key]}
                         series=${series[k.key]} canAct=${canAct} draft=${drafts[k.key]}
                         view=${views[k.key] ?? defaultMode(k)} palette=${palette}
+                        isEditor=${!!dev.is_editor} hidden=${hidden.includes(k.key)} onHide=${onHide}
                         setDraft=${setDraft} onSet=${onSet} onRead=${onRead} />`)}
         ${commands.map(c => html`
           <${CommandWidget} key=${c.key} cmd=${c} argSpecs=${(c.args ?? []).map(specOf).filter(Boolean)}
                             canAct=${canAct} args=${cmdArgs[c.key] ?? {}}
+                            isEditor=${!!dev.is_editor} hidden=${hidden.includes(c.key)} onHide=${onHide}
                             setArg=${setArg} onRun=${onRun} />`)}
       </div>
+
+      ${dev.is_editor && hidden.length > 0 && html`
+        <p class="foot">${hidden.length} ${hidden.length === 1 ? "key is" : "keys are"} hidden from
+          people outside the space. Members still see everything.</p>`}
 
       ${err && html`<p class="err">${err}</p>`}
 
