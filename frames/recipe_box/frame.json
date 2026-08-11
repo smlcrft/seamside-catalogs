@@ -1,0 +1,17 @@
+{
+    "name": "Recipe Box",
+    "description": "The family recipe collection, unique per placement. Space editors store recipes with ingredients, steps, servings, tags, and notes, then read them from a clean cooking view set like a well-made recipe card. Search and tag filters keep a growing collection easy to browse. Everyone else, including anyone the frame is shared with publicly, sees a live read-only view of the collection. Recipes live in encrypted LocalTables scoped to the placement, and the owner can graduate the collection to a shared table so the Meal Planner and future kitchen frames work over the same recipes. Every change is pushed live to all viewers.",
+    "frame_type": "Tandem",
+    "tags": ["household", "kitchen"],
+    "permissions": {
+        "net": []
+    },
+    "default_width_px": 760,
+    "default_height_px": 560,
+    "created_at": "2026-08-04T23:00:00Z",
+    "modified_at": "2026-08-04T23:00:00Z",
+    "app_version_min": "0.2.5",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

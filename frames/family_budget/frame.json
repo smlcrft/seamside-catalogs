@@ -1,0 +1,17 @@
+{
+    "name": "Family Budget",
+    "description": "An envelope-lite family budget, unique per placement: money in, money out, categorized, one month at a time. Space editors record income and expenses against channel-colored category envelopes, set a monthly budget per envelope, and step through months to watch spending fill each bar. Everyone else, including anyone the frame is shared with publicly, sees a live read-only view of the month. Categories and transactions live in encrypted LocalTables scoped to the placement, every change is pushed live to all viewers, and the owner can graduate a placement's data to shared tables so other frames can bind the same rows.",
+    "frame_type": "Tandem",
+    "tags": ["household", "money"],
+    "permissions": {
+        "net": []
+    },
+    "default_width_px": 760,
+    "default_height_px": 560,
+    "created_at": "2026-08-04T22:00:00Z",
+    "modified_at": "2026-08-04T22:00:00Z",
+    "app_version_min": "0.2.5",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flashcards</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    /* the render root carries the height too, or `main { height: 100% }` resolves
+       against an auto-height div and the frame stops driving its own layout */
+    html, body, #app { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      height: 100%; max-width: 680px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-xl));
+    }
+
+    .header { display: flex; align-items: center; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .header > i {
+      flex: 0 0 auto; width: 24px; height: 24px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 20px; line-height: 1; color: var(--ch);
+    }
+    .header h1 {
+      flex: 1 1 auto; min-width: 0; margin: 0;
+      font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); line-height: 24px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .header .mode {
+      flex: 0 0 auto; height: 24px; display: inline-flex; align-items: center;
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted); white-space: nowrap;
+    }
+    .iconbtn {
+      flex: 0 0 auto; width: 24px; height: 24px; padding: 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-subtle); font-size: 16px; line-height: 1;
+      transition: color 150ms, background 150ms;
+    }
+    .iconbtn i { font-size: 16px; line-height: 1; color: inherit; width: auto; height: auto; }
+    .iconbtn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+    .iconbtn:active { transform: scale(0.92); }
+    .iconbtn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm);
+      color: var(--os-text-secondary); flex: 0 0 auto;
+    }
+
+    /* ---- studying ---------------------------------------------------------------------
+       While a session is running the card IS the screen: nothing else gets to compete for
+       attention, and the chrome shrinks to a progress line and the answers. */
+    .runbar {
+      flex: 0 0 auto; display: flex; align-items: center; gap: var(--os-sp-md);
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-feature-settings: 'tnum' 1;
+    }
+    .runbar .deck { color: var(--os-text-secondary); }
+    .meter { flex: 1; height: 3px; background: var(--os-bg-inset); border-radius: var(--os-radius-full); overflow: hidden; }
+    .meter div { height: 100%; background: var(--ch); border-radius: var(--os-radius-full); transition: width var(--os-transition-normal); }
+
+    .stage { flex: 1 1 auto; min-height: 0; display: grid; place-items: stretch; perspective: 1400px; }
+    /* THE ONE FUN MOMENT: the card turns over. A flashcard is a physical object and the
+       whole ritual is the turn — a crossfade would throw that away. */
+    .card {
+      position: relative; width: 100%; height: 100%; min-height: 150px;
+      transform-style: preserve-3d; -webkit-transform-style: preserve-3d;
+      transition: transform 460ms cubic-bezier(0.22, 1, 0.36, 1);
+      cursor: pointer;
+    }
+    .card.flipped { transform: rotateY(180deg); }
+    @media (prefers-reduced-motion: reduce) { .card { transition: none; } }
+    .face {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      padding: var(--os-sp-xl);
+      backface-visibility: hidden; -webkit-backface-visibility: hidden;
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-lg); box-shadow: var(--os-shadow-sm);
+      overflow: auto;
+    }
+    .face.back { transform: rotateY(180deg); background: color-mix(in srgb, var(--ch), var(--os-bg-surface) 95%); }
+    /* the card's text is the frame's editorial voice — a prompt is a spoken line */
+    .face p {
+      margin: 0; text-align: center; font-family: var(--os-font-serif);
+      font-size: clamp(20px, 4.6vw, 30px); font-weight: 500; line-height: 1.3;
+      letter-spacing: -0.01em; color: var(--os-text); overflow-wrap: anywhere;
+    }
+    .face.back p { font-size: clamp(17px, 3.8vw, 24px); }
+    .hint {
+      position: absolute; left: 0; right: 0; bottom: var(--os-sp-sm);
+      text-align: center; font-size: var(--os-fs-2xs); color: var(--os-text-subtle);
+    }
+
+    .answers { flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--os-sp-sm); }
+    .ans {
+      display: flex; flex-direction: column; align-items: center; gap: 1px;
+      padding: var(--os-sp-sm) var(--os-sp-xs); cursor: pointer; font: inherit;
+      background: none; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
+      color: var(--os-text-secondary);
+      transition: box-shadow 40ms ease, background 40ms ease, padding 40ms ease, color 150ms, border-color 150ms;
+    }
+    .ans .w { font-size: var(--os-fs-sm); }
+    .ans .n { font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-feature-settings: 'tnum' 1; }
+    .ans:hover { color: var(--os-text); border-color: var(--os-text-subtle); background: var(--os-bg-subtle); }
+    /* constant-total padding depress (PRECISION §4): 8 top / 8 bottom at rest */
+    .ans:active { padding: 9px var(--os-sp-xs) 7px; background: var(--os-bg-inset); box-shadow: inset 0 2px 4px rgba(0,0,0,0.07); }
+    .ans:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .ans.again:hover { color: var(--os-cError); border-color: var(--os-cError); }
+    .ans.easy:hover { color: var(--ch); border-color: var(--ch); }
+    .flipbtn {
+      flex: 0 0 auto; width: 100%; background: var(--ch); color: var(--ch-fg, var(--os-c1-fg));
+      border: 0; border-radius: var(--os-radius-md); cursor: pointer;
+      padding: var(--os-sp-sm) var(--os-sp-lg); font: inherit; font-size: var(--os-fs-sm);
+      font-weight: var(--os-weight-medium);
+      transition: filter 150ms, transform 80ms var(--os-ease-spring);
+    }
+    .flipbtn:hover { filter: brightness(1.08); }
+    .flipbtn:active { transform: scale(0.99); }
+    .flipbtn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    /* ---- decks ------------------------------------------------------------------------ */
+    .verdict {
+      flex: 0 0 auto; margin: var(--os-sp-xs) 0 0;
+      font-family: var(--os-font-serif); font-size: clamp(19px, 4.2vw, 25px);
+      font-weight: 500; letter-spacing: -0.01em; line-height: 1.3; color: var(--os-text);
+    }
+    .verdict em { font-style: italic; color: var(--ch); }
+
+    .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-bottom: var(--os-sp-sm); }
+    .deck {
+      display: flex; align-items: center; gap: var(--os-sp-md); min-width: 0;
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-md); padding: var(--os-sp-md);
+      margin-bottom: var(--os-sp-sm);
+    }
+    .deck.ready { border-color: color-mix(in srgb, var(--ch), transparent 55%); }
+    .d-fig { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-start; min-width: 44px; }
+    .d-fig .n {
+      font-size: clamp(24px, 5vw, 32px); font-weight: var(--os-weight-semibold);
+      letter-spacing: -0.02em; line-height: 1; color: var(--ch); font-feature-settings: 'tnum' 1;
+    }
+    .d-fig .n.none { color: var(--os-text-subtle); }
+    .d-fig .unit { font-size: var(--os-fs-2xs); color: var(--os-text-muted); margin-top: 2px; }
+    .d-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .d-name {
+      background: none; border: 0; padding: 0; font: inherit; text-align: left; cursor: pointer;
+      font-size: var(--os-fs-md); font-weight: var(--os-weight-medium); color: var(--os-text);
+      overflow-wrap: anywhere;
+    }
+    .d-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+    .d-name:focus-visible { outline: none; box-shadow: var(--os-focus-ring); border-radius: var(--os-radius-sm); }
+    .read-only .d-name { cursor: default; }
+    .d-meta { font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-feature-settings: 'tnum' 1; }
+    .btn-primary {
+      flex: 0 0 auto; background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); border: 0; cursor: pointer;
+      padding: var(--os-sp-sm) var(--os-sp-lg); border-radius: var(--os-radius-md);
+      font: inherit; font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium); white-space: nowrap;
+      transition: filter 150ms, transform 80ms var(--os-ease-spring), opacity 150ms;
+    }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+    .btn-primary:active:not(:disabled) { transform: scale(0.97); }
+    .btn-primary:disabled { opacity: 0.35; cursor: default; }
+    .btn-primary:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .btn-quiet {
+      flex: 0 0 auto; background: none; border: 1px solid var(--os-border-color);
+      border-radius: var(--os-radius-md); padding: var(--os-sp-sm) var(--os-sp-md); cursor: pointer;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-secondary); white-space: nowrap;
+      transition: box-shadow 40ms ease, background 40ms ease, padding 40ms ease, color 150ms, border-color 150ms;
+    }
+    .btn-quiet:hover { color: var(--os-text); border-color: var(--os-text-subtle); background: var(--os-bg-subtle); }
+    .btn-quiet:active { padding: 9px var(--os-sp-md) 7px; background: var(--os-bg-inset); box-shadow: inset 0 2px 4px rgba(0,0,0,0.07); }
+    .btn-quiet:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    .add {
+      display: flex; align-items: center; flex: 0 0 auto; width: 100%;
+      background: var(--os-bg-inset); border: 0; border-radius: var(--os-radius-md);
+      padding: 2px var(--os-sp-xs); transition: background 150ms, box-shadow 150ms;
+    }
+    .add:focus-within { background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color); }
+    .add > i { color: var(--os-text-subtle); font-size: 14px; line-height: 0; flex: 0 0 auto; margin: 0 var(--os-sp-xs); }
+    .add input, .add select {
+      display: block; border: 0; background: transparent; box-shadow: none; font: inherit;
+      font-size: var(--os-fs-sm); color: var(--os-text); padding: 6px var(--os-sp-sm); min-width: 0;
+    }
+    .add input:focus, .add select:focus { outline: none; background: transparent; box-shadow: none; }
+    .add input.f-front, .add input.f-back { flex: 1 1 0; width: auto; }
+    .add input.f-back { border-left: 1px solid var(--os-border-color-subtle); }
+    .add select.f-deck { flex: 0 1 110px; border-left: 1px solid var(--os-border-color-subtle); cursor: pointer; }
+    .read-only .add { display: none; }
+
+    .empty {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: var(--os-sp-sm); text-align: center; color: var(--os-text-muted); font-size: var(--os-fs-sm);
+      padding: var(--os-sp-xl);
+    }
+    .empty i { font-size: 28px; color: var(--os-text-subtle); }
+
+    @media (max-width: 430px) {
+      .answers { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+
+    // The four answers, and the SM-2 quality each one means. Words rather than numbers,
+    // because nobody rates their own recall on a 0-5 scale honestly.
+    const ANSWERS = [
+      { key: "again", label: "again", q: 1, pick: (p) => p.again },
+      { key: "hard",  label: "hard",  q: 3, pick: (p) => p.hard  },
+      { key: "good",  label: "good",  q: 4, pick: (p) => p.good  },
+      { key: "easy",  label: "easy",  q: 5, pick: (p) => p.easy  },
+    ];
+    const inDays = (n) => n === 1 ? "tomorrow" : n < 30 ? n + "d" : n < 365 ? Math.round(n / 30) + "mo" : Math.round(n / 365) + "y";
+    const whenLabel = (iso, today) => {
+      if (!iso) return "";
+      const d = Math.round((new Date(iso + "T12:00:00") - new Date(today + "T12:00:00")) / 86400000);
+      if (d <= 0) return "now";
+      if (d === 1) return "tomorrow";
+      return "in " + inDays(d);
+    };
+
+    function App() {
+      const [me, setMe]     = useState(null);
+      const [st, setSt]     = useState(null);
+      const [run, setRun]   = useState(null);     // { deckId, queue: [ids], at, flipped }
+      const [draft, setDraft] = useState({ front: "", back: "", deck_id: "" });
+      const [busy, setBusy] = useState(false);
+
+      async function refresh() {
+        const r = await frame.api("api/list").catch(() => null);
+        if (r && r.decks) setSt(r);
+      }
+      const write = (path, body) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+          return Promise.resolve({});
+        }
+        return frame.api(path, body);
+      };
+      useEffect(() => {
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({ flashcards_changed: refresh });
+
+      const cur = run && st ? st.cards.find((c) => c.id === run.queue[run.at]) : null;
+
+      // Space flips, 1-4 answer. Studying is a rhythm and reaching for the mouse breaks it.
+      useEffect(() => {
+        if (!run || !cur) return;
+        const onKey = (e) => {
+          if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+          if (e.key === " " || e.key === "Enter") { e.preventDefault(); setRun((r) => r && { ...r, flipped: true }); return; }
+          if (e.key === "Escape") { setRun(null); return; }
+          if (!run.flipped) return;
+          const i = ["1", "2", "3", "4"].indexOf(e.key);
+          if (i >= 0) { e.preventDefault(); answer(ANSWERS[i]); }
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+      }, [run, cur]);
+
+      if (!me || !st) return html`<div></div>`;
+      const isEditor = !!me.is_sfi_editor;
+      const canStudy = !!st.can_study;
+      const totalDue = st.cards.filter((c) => c.due_now).length;
+
+      function start(deckId) {
+        const q = st.cards.filter((c) => c.deck_id === deckId && c.due_now).map((c) => c.id);
+        if (!q.length) return;
+        setRun({ deckId, queue: q, at: 0, flipped: false });
+      }
+      async function answer(a) {
+        if (!cur || busy) return;
+        setBusy(true);
+        // The review is a POST, not a bus send: the reply carries the interval this answer
+        // actually produced, and the schedule is the one thing that must not be guessed at.
+        await frame.api("api/review", { card_id: cur.id, quality: a.q }).catch(() => null);
+        setBusy(false);
+        setRun((r) => {
+          if (!r) return r;
+          // "again" means it comes back this session, at the end.
+          const queue = a.q < 3 ? [...r.queue, r.queue[r.at]] : r.queue;
+          const at = r.at + 1;
+          return at >= queue.length ? null : { ...r, queue, at, flipped: false };
+        });
+        refresh();
+      }
+      function addCard() {
+        const front = draft.front.trim(), back = draft.back.trim();
+        const deckId = draft.deck_id || (st.decks[0] && st.decks[0].id);
+        if (!front || !back || !deckId) return;
+        write("api/card", { front, back, deck_id: deckId }).catch(() => {});
+        setDraft({ front: "", back: "", deck_id: deckId });
+      }
+      async function addDeck() {
+        const name = await frame.prompt("What is the deck called?", { title: "New deck", okLabel: "Create" });
+        if (name && name.trim()) write("api/deck", { name: name.trim() });
+      }
+      async function editDeck(d) {
+        if (!isEditor) return;
+        const what = await frame.choose(d.name, {
+          title: "Deck",
+          options: [
+            { id: "rename", label: "Rename", icon: "ph-pencil-simple" },
+            { id: "remove", label: "Remove", icon: "ph-trash-simple", detail: `${d.total} card${d.total === 1 ? "" : "s"}, and everyone's progress` },
+          ],
+        });
+        if (what === "rename") {
+          const v = await frame.prompt("Deck name", { title: "Rename", value: d.name, okLabel: "Save" });
+          if (v && v.trim()) write("api/deck/" + d.id, { name: v.trim() });
+        } else if (what === "remove") {
+          if (await frame.confirm(`Remove "${d.name}" and its ${d.total} card${d.total === 1 ? "" : "s"}?`, { title: "Deck", okLabel: "Remove" }))
+            write("api/deck/" + d.id + "/delete");
+        }
+      }
+
+      const mode = me.is_owner ? "owner" : isEditor ? "editor" : canStudy ? "member" : "viewer";
+
+      // ---- a session in progress: the card owns the screen ------------------------------
+      if (run && cur) {
+        const deck = st.decks.find((d) => d.id === run.deckId);
+        const pct = Math.round((run.at / run.queue.length) * 100);
+        return html`
+          <main>
+            <div class="runbar">
+              <span class="deck">${deck ? deck.name : "studying"}</span>
+              <div class="meter"><div style=${"width:" + pct + "%"}></div></div>
+              <span>${run.at + 1} of ${run.queue.length}</span>
+              <button class="iconbtn" title="Stop for now (esc)" onClick=${() => setRun(null)}>
+                <i class="ph-light ph-x"></i>
+              </button>
+            </div>
+
+            <div class="stage">
+              <div class=${"card" + (run.flipped ? " flipped" : "")}
+                onClick=${() => setRun((r) => r && { ...r, flipped: !r.flipped })}>
+                <div class="face">
+                  <p>${cur.front}</p>
+                  ${!run.flipped ? html`<span class="hint">space to turn it over</span>` : null}
+                </div>
+                <div class="face back"><p>${cur.back}</p></div>
+              </div>
+            </div>
+
+            ${run.flipped
+              ? html`
+                <div class="answers">
+                  ${ANSWERS.map((a, i) => html`
+                    <button class=${"ans " + a.key} key=${a.key} disabled=${busy} onClick=${() => answer(a)}>
+                      <span class="w">${a.label}</span>
+                      <span class="n">${inDays(a.pick(cur.preview))}</span>
+                    </button>`)}
+                </div>`
+              : html`<button class="flipbtn" onClick=${() => setRun((r) => r && { ...r, flipped: true })}>show the answer</button>`}
+          </main>`;
+      }
+
+      // ---- the decks --------------------------------------------------------------------
+      return html`
+        <main class=${isEditor ? "" : "read-only"}>
+          <div class="header">
+            <i class="ph-light ph-cards"></i>
+            <h1>Flashcards</h1>
+            <span class="mode">${mode}</span>
+            ${isEditor ? html`
+              <button class="iconbtn" title="New deck" onClick=${addDeck}>
+                <i class="ph-light ph-plus"></i>
+              </button>` : null}
+          </div>
+
+          ${!canStudy ? html`
+            <div class="banner">
+              <i class="ph-light ph-eye"></i>
+              <span>Join this space to study these decks — your progress is kept per person.</span>
+            </div>` : null}
+
+          ${st.decks.length === 0
+            ? html`
+              <div class="empty">
+                <i class="ph-light ph-cards"></i>
+                <span>${isEditor ? "No decks yet. The + up in the corner makes one." : "Nothing here yet."}</span>
+              </div>`
+            : html`
+              <div class="verdict">
+                ${totalDue > 0
+                  ? html`<em>${totalDue}</em> card${totalDue === 1 ? "" : "s"} ready.`
+                  : st.next_due
+                    ? html`Nothing due — back ${whenLabel(st.next_due, st.today)}.`
+                    : html`Nothing to review yet.`}
+              </div>
+
+              <div class="scroll">
+                ${st.decks.map((d) => html`
+                  <div class=${"deck" + (d.due > 0 ? " ready" : "")} key=${d.id}>
+                    <div class="d-fig">
+                      <span class=${"n" + (d.due === 0 ? " none" : "")}>${d.due}</span>
+                      <span class="unit">due</span>
+                    </div>
+                    <div class="d-body">
+                      <button class="d-name" disabled=${!isEditor} onClick=${() => editDeck(d)}>${d.name}</button>
+                      <span class="d-meta">${d.total} card${d.total === 1 ? "" : "s"}${d.fresh ? ` · ${d.fresh} never seen` : ""}</span>
+                    </div>
+                    ${canStudy
+                      ? html`<button class="btn-primary" disabled=${d.due === 0} onClick=${() => start(d.id)}>study</button>`
+                      : null}
+                  </div>
+                `)}
+              </div>
+
+              ${isEditor ? html`
+                <div class="add">
+                  <i class="ph-light ph-plus"></i>
+                  <input class="f-front" maxlength="1000" placeholder="Front…" value=${draft.front}
+                    onInput=${(e) => setDraft({ ...draft, front: e.target.value })}
+                    onKeyDown=${(e) => { if (e.key === "Enter") addCard(); }} />
+                  <input class="f-back" maxlength="2000" placeholder="Back…" value=${draft.back}
+                    onInput=${(e) => setDraft({ ...draft, back: e.target.value })}
+                    onKeyDown=${(e) => { if (e.key === "Enter") addCard(); }} />
+                  <select class="f-deck" value=${draft.deck_id || st.decks[0].id}
+                    onChange=${(e) => setDraft({ ...draft, deck_id: e.target.value })}>
+                    ${st.decks.map((d) => html`<option key=${d.id} value=${d.id}>${d.name}</option>`)}
+                  </select>
+                </div>` : null}
+            `}
+        </main>`;
+    }
+
+    render(html`<${App} />`, document.getElementById("app"));
+  </script>
+</body>
+</html>

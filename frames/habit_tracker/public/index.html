@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Habit Tracker</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); --cell: 12px; --gap: 3px; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    /* the render root carries the height too, or `main { height: 100% }` resolves
+       against an auto-height div and the frame stops driving its own layout */
+    html, body, #app { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      height: 100%; max-width: 1100px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-xl));
+    }
+
+    .header { display: flex; align-items: center; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .header > i {
+      flex: 0 0 auto; width: 24px; height: 24px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 20px; line-height: 1; color: var(--ch);
+    }
+    .header h1 {
+      flex: 1 1 auto; min-width: 0; margin: 0;
+      font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); line-height: 24px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .header .mode {
+      flex: 0 0 auto; height: 24px; display: inline-flex; align-items: center;
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted); white-space: nowrap;
+    }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm);
+      color: var(--os-text-secondary); flex: 0 0 auto;
+    }
+
+    /* ---- the day's page --------------------------------------------------------------
+       Rewritten after review: the first version was a contributions-style density grid,
+       which optimises for MANY habits and MONTHS of history. The real case is two to five
+       things and one question — did I do it today? — and that question was one square
+       among forty-four identical ones. So the hierarchy is inverted: the run is the
+       headline figure, the day's action is a target you cannot miss, and the history
+       shrinks to a quiet trail that is evidence rather than interface. */
+
+    /* the frame's ONE editorial line (PRECISION §2: serif, display only, never chrome) */
+    .verdict {
+      flex: 0 0 auto; margin: var(--os-sp-xs) 0 var(--os-sp-sm);
+      font-family: var(--os-font-serif); font-size: clamp(20px, 4.4vw, 26px);
+      font-weight: 500; letter-spacing: -0.01em; line-height: 1.3; color: var(--os-text);
+    }
+    .verdict em { font-style: italic; color: var(--ch); }
+
+    .rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--os-sp-sm); }
+
+    .card {
+      display: flex; align-items: center; gap: var(--os-sp-lg); min-width: 0;
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-md); padding: var(--os-sp-md) var(--os-sp-lg);
+      transition: background 200ms, border-color 200ms;
+    }
+    /* done today: the card settles rather than shouting */
+    .card.done { background: color-mix(in srgb, var(--ch), var(--os-bg-surface) 93%); border-color: color-mix(in srgb, var(--ch), transparent 60%); }
+
+    /* the headline figure (PRECISION §2 display number: sans + tnum, 24-40px, 600, -0.02em) */
+    .fig { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-start; min-width: 46px; }
+    .fig .n {
+      font-size: clamp(28px, 6vw, 40px); font-weight: var(--os-weight-semibold);
+      letter-spacing: -0.02em; line-height: 1; color: var(--os-text);
+      font-feature-settings: 'tnum' 1; display: inline-block;
+    }
+    .card.done .fig .n { color: var(--ch); }
+    .fig .n.zero { color: var(--os-text-subtle); }
+    /* THE ONE FUN MOMENT — now on a figure big enough to actually see it move. */
+    .fig .n.up { animation: run-up 320ms var(--os-ease-spring); }
+    @keyframes run-up {
+      0%   { transform: scale(1); }
+      45%  { transform: scale(1.22); }
+      100% { transform: scale(1); }
+    }
+    @media (prefers-reduced-motion: reduce) { .fig .n.up { animation: none; } }
+    .fig .unit {
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted); letter-spacing: 0.02em;
+      margin-top: 2px; white-space: nowrap;
+    }
+
+    .body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--os-sp-xs); }
+    .h-name {
+      background: none; border: 0; padding: 0; font: inherit; text-align: left; cursor: pointer;
+      font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); letter-spacing: -0.01em;
+      color: var(--os-text); min-width: 0; overflow-wrap: anywhere;
+    }
+    .h-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+    .h-name:focus-visible { outline: none; box-shadow: var(--os-focus-ring); border-radius: var(--os-radius-sm); }
+    .read-only .h-name { cursor: default; }
+    .read-only .h-name:hover { text-decoration: none; }
+
+    /* the trail: a fortnight, quiet. Evidence that the run is real, not the control. */
+    /* The trail is evidence, not interface, so it is the thing that gives way when the frame
+       gets small: overflow hidden means it can never push the day's action off the card. */
+    .trail { display: flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; }
+    .cell {
+      flex: 0 0 auto; width: 9px; height: 9px; padding: 0; border: 0; border-radius: 2px;
+      background: var(--os-bg-inset); cursor: pointer;
+      transition: background 150ms, transform 80ms var(--os-ease-spring);
+    }
+    .cell.on { background: color-mix(in srgb, var(--ch), transparent 35%); }
+    main:not(.read-only) .cell:hover { background: color-mix(in srgb, var(--ch), transparent 60%); }
+    .cell:active { transform: scale(0.8); }
+    .cell:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .read-only .cell { cursor: default; }
+    .trail .best {
+      margin-left: var(--os-sp-sm); font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; white-space: nowrap;
+    }
+
+    /* THE action. One per habit, unmissable, and the only thing on the card sized like a
+       target — the previous version hid today inside a row of identical squares. */
+    .today {
+      flex: 0 0 auto; width: 52px; height: 52px; padding: 0; cursor: pointer;
+      border-radius: var(--os-radius-full); background: none;
+      border: 2px solid var(--os-border-color);
+      display: inline-flex; align-items: center; justify-content: center;
+      color: transparent; font-size: 24px; line-height: 1;
+      transition: background 180ms, border-color 180ms, color 180ms, transform 80ms var(--os-ease-spring);
+    }
+    .today i { font-size: 24px; line-height: 1; }
+    main:not(.read-only) .today:hover { border-color: var(--ch); background: color-mix(in srgb, var(--ch), transparent 88%); }
+    .today:active { transform: scale(0.9); }
+    .today:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .card.done .today { background: var(--ch); border-color: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); }
+    .read-only .today { cursor: default; }
+
+    /* ---- getting small ---------------------------------------------------------------
+       A frame is its own viewport, so these read the TILE, not the screen. The order things
+       are allowed to go is a design decision, not an accident of layout: history first
+       (whole days at a time, oldest dropped, never a sliced square), then the personal best,
+       then the size of the figure and the name. The day's action is the last thing to
+       change and it never leaves — it is the reason the frame is on the wall. */
+    @media (max-width: 460px) {
+      .card { gap: var(--os-sp-md); padding: var(--os-sp-md); }
+      .fig { min-width: 40px; }
+      .trail .cell:nth-child(-n+4) { display: none; }          /* ten days */
+    }
+    @media (max-width: 380px) {
+      .card { gap: var(--os-sp-sm); padding: var(--os-sp-sm) var(--os-sp-md); }
+      .fig { min-width: 34px; }
+      .fig .n { font-size: 26px; }
+      .h-name { font-size: var(--os-fs-base); }
+      .trail .cell:nth-child(-n+7) { display: none; }          /* a week */
+      .trail .best { display: none; }
+      .today { width: 44px; height: 44px; }
+      .today i { font-size: 20px; }
+    }
+    @media (max-width: 320px) {
+      .fig { min-width: 28px; }
+      .fig .n { font-size: 22px; }
+      .fig .unit { display: none; }
+      .trail .cell:nth-child(-n+10) { display: none; }         /* four days */
+      .today { width: 38px; height: 38px; }
+      .today i { font-size: 18px; }
+    }
+    /* short as well as narrow: the editorial line keeps its job but stops taking a third
+       of the frame to do it */
+    @media (max-height: 330px) {
+      .verdict { font-size: clamp(16px, 5vh, 20px); margin: 0 0 var(--os-sp-xs); }
+      .card { padding: var(--os-sp-sm) var(--os-sp-md); }
+    }
+    /* Below this the question is how many habits you can SEE at once, and a row costs its
+       height in the trail underneath the name. The trail goes — it is the last thing you
+       open a small tile to read — and every habit gets a line instead of one and a half. */
+    @media (max-height: 300px) {
+      /* the frame's own margins are the cheapest height there is */
+      main { padding: var(--os-sp-sm); gap: 4px; }
+      .verdict { margin: 0 0 4px; }
+      .trail { display: none; }
+      .card { padding: 6px var(--os-sp-md); gap: var(--os-sp-md); }
+      .rows { gap: 6px; }
+      .today { width: 36px; height: 36px; }
+      .today i { font-size: 16px; }
+      .fig .n { font-size: 22px; }
+      .fig .unit { display: none; }
+      .fig { min-width: 26px; }
+    }
+
+    /* ---- add strip ------------------------------------------------------------------ */
+    .add {
+      display: flex; align-items: center; flex: 0 0 auto; width: 100%; max-width: 420px;
+      background: var(--os-bg-inset); border: 0; border-radius: var(--os-radius-md);
+      padding: 2px var(--os-sp-xs); transition: background 150ms, box-shadow 150ms;
+    }
+    .add:focus-within { background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color); }
+    .add > i { color: var(--os-text-subtle); font-size: 14px; line-height: 0; flex: 0 0 auto; margin: 0 var(--os-sp-xs); }
+    .add input {
+      display: block; flex: 1 1 0; min-width: 0; border: 0; background: transparent; box-shadow: none;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text); padding: 6px var(--os-sp-sm);
+    }
+    .add input:focus { outline: none; background: transparent; box-shadow: none; }
+    .read-only .add { display: none; }
+
+    .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-xl); flex: 1; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+
+    // Day strings are built from LOCAL calendar fields and stepped with setDate, never by
+    // adding 86400000 — that breaks across a DST boundary, which is exactly the kind of
+    // one-day-off bug a habit grid would show and nobody would believe.
+    const p2 = (n) => String(n).padStart(2, "0");
+    const dstr = (d) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+    function lastDays(n) {
+      const out = [];
+      const d = new Date();
+      d.setHours(12, 0, 0, 0);          // midday: immune to DST shifting the date
+      d.setDate(d.getDate() - (n - 1));
+      for (let i = 0; i < n; i++) { out.push(dstr(d)); d.setDate(d.getDate() + 1); }
+      return out;
+    }
+
+    /** Current run: walk back from today. A day you haven't got to yet doesn't break a
+     * run — the streak stands until the day is actually over. */
+    function currentRun(set, days) {
+      let i = days.length - 1;
+      if (!set.has(days[i])) i--;       // today not marked yet: start at yesterday
+      let n = 0;
+      for (; i >= 0 && set.has(days[i]); i--) n++;
+      return n;
+    }
+    function bestRun(set, days) {
+      let best = 0, run = 0;
+      for (const d of days) { run = set.has(d) ? run + 1 : 0; if (run > best) best = run; }
+      return best;
+    }
+
+    function App() {
+      const [me, setMe]   = useState(null);
+      const [st, setSt]   = useState(null);
+      const [draft, setDraft] = useState("");
+      const [bumped, setBumped] = useState({});   // habit id -> true while the run springs
+      const prevRuns = useRef({});
+
+      async function refresh() {
+        const r = await frame.api("api/list").catch(() => null);
+        if (r && r.habits) setSt(r);
+      }
+      const write = (path, body) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+          return Promise.resolve({});
+        }
+        return frame.api(path, body);
+      };
+      useEffect(() => {
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({ habits_changed: refresh });
+
+      // Fire the run animation only when a run actually GREW, so a plain re-render or
+      // someone else's edit doesn't set every number bouncing. This sits ABOVE the early
+      // return on purpose: a hook that only runs on some renders changes the hook order
+      // between them, which is a rule this component would otherwise break silently.
+      useEffect(() => {
+        if (!st) return;
+        const days = lastDays(st.window_days || 120);
+        const next = {};
+        const bumps = {};
+        for (const h of st.habits) {
+          const run = currentRun(new Set(h.days), days);
+          next[h.id] = run;
+          if (prevRuns.current[h.id] !== undefined && run > prevRuns.current[h.id]) bumps[h.id] = true;
+        }
+        prevRuns.current = next;
+        if (Object.keys(bumps).length) {
+          setBumped(bumps);
+          const t = setTimeout(() => setBumped({}), 340);
+          return () => clearTimeout(t);
+        }
+      }, [st]);
+
+      if (!me || !st) return html`<div></div>`;
+      const isEditor = !!me.is_sfi_editor;
+      const days = lastDays(st.window_days || 120);
+      const today = st.today;
+
+      function addHabit() {
+        const name = draft.trim();
+        if (!name) return;
+        write("api/habit", { name }).catch(() => {});
+        setDraft("");
+      }
+      function toggle(h, day, on) {
+        if (!isEditor) return;
+        // Optimistic: the square fills under the finger, the push reconciles.
+        setSt((s) => s && ({
+          ...s,
+          habits: s.habits.map((x) => x.id !== h.id ? x : ({
+            ...x, days: on ? x.days.filter((d) => d !== day) : [...x.days, day].sort(),
+          })),
+        }));
+        write("api/mark", { habit_id: h.id, day, done: on ? 0 : 1 }).catch(() => {});
+      }
+      async function editHabit(h) {
+        if (!isEditor) return;
+        const what = await frame.choose(h.name, {
+          title: "Habit",
+          options: [
+            { id: "rename", label: "Rename", icon: "ph-pencil-simple" },
+            { id: "remove", label: "Remove", icon: "ph-trash-simple", detail: "Its marks go too" },
+          ],
+        });
+        if (what === "rename") {
+          const v = await frame.prompt("Habit", { title: "Rename", value: h.name, okLabel: "Save" });
+          if (v && v.trim() && v.trim() !== h.name) write("api/habit/" + h.id, { name: v.trim() });
+        } else if (what === "remove") {
+          if (await frame.confirm(`Remove "${h.name}" and everything marked for it?`, { title: "Habit", okLabel: "Remove" }))
+            write("api/habit/" + h.id + "/delete");
+        }
+      }
+
+      const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
+
+      // The trail is a fortnight, not four months: it is evidence the run is real, and a
+      // longer one was the thing that buried the day's action in noise.
+      const trail = days.slice(-14);
+      const doneToday = st.habits.filter((h) => h.days.includes(today)).length;
+      const total = st.habits.length;
+
+      // The frame's one spoken line (PRECISION §2: Fedro, display only, never chrome).
+      // It says where the day stands so nobody has to count circles to find out.
+      // "kept" wants an object ("kept the habit"), so "2 of 4 kept" reads stiff. The
+      // sentence does not need a verb at all — the count and the day carry it.
+      const verdict = total === 0 ? null
+        : doneToday === 0 ? html`Nothing yet today.`
+        : doneToday === total ? html`<em>All ${total}</em> done today.`
+        : html`<em>${doneToday}</em> of ${total} so far today.`;
+
+      return html`
+        <main class=${isEditor ? "" : "read-only"}>
+          <div class="header">
+            <i class="ph-light ph-chart-line-up"></i>
+            <h1>Habit Tracker</h1>
+            <span class="mode">${mode}</span>
+          </div>
+
+          ${!isEditor ? html`
+            <div class="banner">
+              <i class="ph-light ph-eye"></i>
+              <span>${me.is_anon ? "You are watching this." : "You can see this but not mark it."}</span>
+            </div>` : null}
+
+          ${verdict ? html`<div class="verdict">${verdict}</div>` : null}
+
+          ${total === 0
+            ? html`<div class="empty">${isEditor ? "Nothing tracked yet. Name one thing below." : "Nothing here yet."}</div>`
+            : html`
+              <div class="rows">
+                ${st.habits.map((h) => {
+                  const set = new Set(h.days);
+                  const cur = currentRun(set, days);
+                  const best = bestRun(set, days);
+                  const done = set.has(today);
+                  return html`
+                    <div class=${"card" + (done ? " done" : "")} key=${h.id}>
+                      <div class="fig">
+                        <span class=${"n" + (cur === 0 ? " zero" : "") + (bumped[h.id] ? " up" : "")}>${cur}</span>
+                        <span class="unit">${cur === 1 ? "day" : "days"}</span>
+                      </div>
+
+                      <div class="body">
+                        <button class="h-name" disabled=${!isEditor} title=${isEditor ? "Rename or remove" : h.name}
+                          onClick=${() => editHabit(h)}>${h.name}</button>
+                        <div class="trail">
+                          ${trail.map((d) => html`<button key=${d} type="button"
+                            class=${"cell" + (set.has(d) ? " on" : "")}
+                            disabled=${!isEditor}
+                            title=${d + (set.has(d) ? " — done" : " — tap to fill in")}
+                            onClick=${() => toggle(h, d, set.has(d))}></button>`)}
+                          ${best > cur ? html`<span class="best">best ${best}</span>` : null}
+                        </div>
+                      </div>
+
+                      <button class="today" disabled=${!isEditor}
+                        title=${done ? "Done today — press to undo" : "Mark it done for today"}
+                        onClick=${() => toggle(h, today, done)}>
+                        <i class="ph-light ph-check"></i>
+                      </button>
+                    </div>`;
+                })}
+              </div>`}
+
+          ${isEditor ? html`
+            <div class="add">
+              <i class="ph-light ph-plus"></i>
+              <input maxlength="80" placeholder="Track something new…" value=${draft}
+                onInput=${(e) => setDraft(e.target.value)}
+                onKeyDown=${(e) => { if (e.key === "Enter") addHabit(); }} />
+            </div>` : null}
+        </main>`;
+    }
+
+    render(html`<${App} />`, document.getElementById("app"));
+  </script>
+</body>
+</html>

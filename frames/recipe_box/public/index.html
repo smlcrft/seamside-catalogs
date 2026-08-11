@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recipe Box</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); }   /* follows the space channel at runtime */
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      height: 100%; max-width: 760px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-xl));
+    }
+    /* two screens, two measures: a recipe you cook from keeps a reading column (760px),
+       the shelf you browse spreads out and shows more of the book at once */
+    main.shelf { max-width: 1120px; }
+
+    /* ---- header rail (24px first line; see PRECISION §6) --------------------------- */
+    .header { display: flex; align-items: flex-start; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .header .brand {
+      font-size: 20px; color: var(--ch);
+      display: inline-flex; width: 24px; height: 24px;
+      align-items: center; justify-content: center; line-height: 1; flex: 0 0 auto;
+    }
+    .titles { flex: 1 1 auto; min-width: 0; }
+    h1.t-title {
+      margin: 0; font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold);
+      line-height: 24px; letter-spacing: -0.01em;
+    }
+    h1.t-title .static { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    h1.t-title input {
+      display: block; width: 100%; margin: 0 0 0 -4px; padding: 0 4px;
+      font: inherit; line-height: 24px; height: 24px; color: var(--os-text);
+      background: transparent; border: 1px solid transparent; border-radius: var(--os-radius-sm);
+      transition: background 150ms, border-color 150ms;
+    }
+    h1.t-title input:hover { background: var(--os-bg-subtle); }
+    h1.t-title input:focus { outline: none; background: var(--os-bg-surface); border-color: var(--os-border-color); box-shadow: none; }
+    .subline {
+      margin-top: 2px; font-size: var(--os-fs-sm); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .header .mode {
+      flex: 0 0 auto; height: 24px; display: flex; align-items: center;
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; text-transform: lowercase; white-space: nowrap;
+    }
+    .iconbtn {
+      flex: 0 0 auto; width: 28px; height: 28px; margin: -2px 0; padding: 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-muted); font-size: 18px; line-height: 1;
+      transition: color 150ms, background 150ms;
+    }
+    .iconbtn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+    .iconbtn:active { transform: scale(0.92); }
+    .iconbtn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    /* the data drawer — ONE quiet button for a configuration most people never touch.
+       Owner-only (nobody else sees it), no state text at rest: where the rows live is
+       not news, it's a setting. Everything (storage state, graduation) lives behind it.
+       The glyph is the platform's Tables icon (ph-dresser, the pivot-nav rail) so the
+       frame and the OS say "tables" the same way. See docs/table-graduation.md. */
+    .drawer {
+      flex: 0 0 auto; position: relative;
+      width: 24px; height: 24px; padding: 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-subtle); font-size: 16px; line-height: 1;
+      transition: color 150ms, background 150ms;
+    }
+    .drawer:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+    .drawer:active { transform: scale(0.92); }
+    .drawer:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    /* the ONE ambient signal, and it is rare: a channel dot while a move is unfinished */
+    .drawer.pending::after {
+      content: ""; position: absolute; top: 0; right: 0;
+      width: 5px; height: 5px; border-radius: var(--os-radius-full); background: var(--ch);
+      animation: drawer-breathe 2s ease-in-out infinite;
+    }
+    @keyframes drawer-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    @media (prefers-reduced-motion: reduce) { .drawer.pending::after { animation: none; } }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs); flex: 0 0 auto;
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+    }
+
+    /* ---- filter row ---------------------------------------------------------------- */
+    .filters { display: flex; align-items: center; gap: var(--os-sp-sm); flex-wrap: wrap; flex: 0 0 auto; }
+    .search {
+      flex: 0 1 220px; min-width: 140px; height: 32px;
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: var(--os-bg-inset); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-sm); padding: 0 var(--os-sp-sm);
+      transition: border-color 150ms, background 150ms;
+    }
+    .search:focus-within { border-color: var(--os-text-muted); background: var(--os-bg-surface); }
+    .search i { color: var(--os-text-subtle); font-size: 14px; line-height: 0; flex: 0 0 auto; }
+    .search input {
+      width: 100%; border: 0; background: transparent; font: inherit; font-size: var(--os-fs-sm);
+      color: var(--os-text); padding: 0; outline: none; box-shadow: none;
+    }
+    .search input:focus { outline: none; background: transparent; border: 0; box-shadow: none; }
+    .search input::placeholder { color: var(--os-text-muted); }
+    .tagrow { display: flex; align-items: center; gap: var(--os-sp-xs); flex-wrap: wrap; min-width: 0; }
+    button.tag {
+      font: inherit; font-size: var(--os-fs-2xs); text-transform: lowercase; cursor: pointer;
+      background: var(--os-bg-inset); color: var(--os-text-muted); border: 0;
+      border-radius: var(--os-radius-full); padding: 2px var(--os-sp-sm); white-space: nowrap;
+      transition: color 150ms, background 150ms;
+    }
+    button.tag:hover:not(.active) { color: var(--os-text); background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color-subtle); }
+    button.tag:active { transform: none; }
+    button.tag.active { background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); }
+    button.tag:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    /* ---- the shelf ------------------------------------------------------------------
+       You pick a recipe by looking at it, so the book is a grid of photo cards, not a
+       list of rows with a thumbnail bolted on the left. Same card vocabulary as the
+       meal planner's picker (photo over a two-line body) one size up, because this is
+       the book itself. auto-fill means one column on a phone and five in a wide frame
+       with no breakpoints. */
+    .rlist {
+      display: grid; align-content: start;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: var(--os-sp-md);
+      overflow-y: auto; min-height: 0; padding: 2px;
+    }
+    .rcard {
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-md); padding: 0; overflow: hidden; min-width: 0;
+      display: flex; flex-direction: column; cursor: pointer;
+      transition: border-color 150ms, box-shadow 150ms, transform 150ms;
+    }
+    /* the photo IS the card's face; without one, a channel-tinted pot fills the same
+       block so the shelf keeps an even rhythm instead of ragged card heights */
+    .rcard .ptile {
+      flex: 0 0 auto; width: 100%; height: 116px;
+      display: flex; align-items: center; justify-content: center;
+      background: color-mix(in srgb, var(--ch), transparent 90%); color: var(--ch); font-size: 30px;
+      overflow: hidden;
+    }
+    .rcard .ptile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .rcard:hover { border-color: var(--os-text-subtle); box-shadow: var(--os-shadow-sm); transform: translateY(-1px); }
+    .rcard:active { transform: scale(0.98); }
+    .rcard .r-info { flex: 1 1 auto; min-width: 0; padding: var(--os-sp-sm) var(--os-sp-md) var(--os-sp-md); }
+    .rcard .r-name { font-weight: var(--os-weight-semibold); font-size: var(--os-fs-sm); overflow-wrap: anywhere; }
+    .rcard .r-sub { margin-top: var(--os-sp-xs); display: flex; align-items: center; gap: var(--os-sp-xs); flex-wrap: wrap; }
+    .r-serv {
+      font-size: var(--os-fs-sm); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; white-space: nowrap;
+    }
+    .chip {
+      background: var(--os-bg-inset); border-radius: var(--os-radius-full);
+      padding: 1px var(--os-sp-sm); font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      text-transform: lowercase; white-space: nowrap;
+    }
+
+    /* the open recipe's own action. The header rail is frame chrome (role, data,
+       settings), so an action on the record sits a row down and says what it does —
+       a bare pencil beside an already-editable title just read as "rename". */
+    .recrow { display: flex; justify-content: flex-end; flex: 0 0 auto; }
+    button.rec-edit {
+      display: inline-flex; align-items: center; gap: var(--os-sp-xs); flex: 0 0 auto;
+      background: none; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); cursor: pointer;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      transition: border-color 150ms, color 150ms, background 150ms; white-space: nowrap;
+    }
+    button.rec-edit i { font-size: 16px; line-height: 0; }
+    button.rec-edit:hover { border-color: var(--os-text-subtle); color: var(--os-text); background: var(--os-bg-subtle); }
+    button.rec-edit:active { transform: none; background: var(--os-bg-inset); }
+    button.rec-edit:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    button.new-recipe {
+      /* a control, not a slot: it sits under the shelf at its own size rather than
+         stretching a ghost bar the full width of a wide frame */
+      display: flex; align-items: center; gap: var(--os-sp-sm); align-self: flex-start; flex: 0 0 auto;
+      background: none; border: 1px solid var(--os-border-color-subtle); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); cursor: pointer;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-muted);
+      transition: border-color 150ms, color 150ms;
+    }
+    button.new-recipe i { font-size: 16px; line-height: 0; }
+    button.new-recipe:hover { border-color: var(--os-text-subtle); color: var(--os-text); }
+    button.new-recipe:active { transform: none; background: var(--os-bg-inset); }
+    button.new-recipe:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    .btn-primary {
+      background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); border: 0; cursor: pointer;
+      padding: var(--os-sp-sm) var(--os-sp-lg); border-radius: var(--os-radius-md);
+      font: inherit; font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium);
+      display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+      transition: filter 150ms, transform 80ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+    .btn-primary:active:not(:disabled) { transform: scale(0.97); }
+    .btn-primary:disabled { opacity: 0.5; cursor: default; }
+    .btn-primary:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    .notice {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: var(--os-sp-sm); text-align: center; padding: var(--os-sp-xl);
+    }
+    .notice i { font-size: 28px; color: var(--os-text-subtle); }
+    .notice h2 { margin: 0; font-size: var(--os-fs-md); font-weight: var(--os-weight-semibold); }
+    .notice p { margin: 0 0 var(--os-sp-sm); font-size: var(--os-fs-sm); color: var(--os-text-secondary); max-width: 380px; }
+
+    .data-ghost {
+      font: inherit; font-size: var(--os-fs-sm); cursor: pointer;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-secondary); border-radius: var(--os-radius-sm);
+      padding: calc(var(--os-sp-xs) + 1px) var(--os-sp-md);
+      transition: color 150ms, border-color 150ms;
+    }
+    .data-ghost:hover { color: var(--os-text); border-color: var(--os-text-subtle); }
+
+    .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-lg); flex: 1; }
+
+    /* ---- recipe detail: the cooking view ------------------------------------------- */
+    /* The view someone cooks from: one step up in size (fs-md) with generous leading,
+       an aligned tnum number rail, and hairlines between ingredients. */
+    .detail { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--os-sp-xl); padding-bottom: var(--os-sp-sm); }
+    /* The recipe card is literal: the cook view sits on a raised surface so the page
+       has ground + card layers (PRECISION §3 two-surface minimum) and the card ends
+       where the recipe ends instead of the text floating in open cream. */
+    .cook {
+      display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: var(--os-sp-2xl);
+      align-items: start;
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-lg); padding: var(--os-sp-xl) var(--os-sp-2xl) var(--os-sp-2xl);
+    }
+    .cook.one { grid-template-columns: minmax(0, 1fr); }
+    @media (max-width: 620px) { .cook { grid-template-columns: minmax(0, 1fr); gap: var(--os-sp-xl); padding: var(--os-sp-lg); } }
+    .sec-label {
+      font-size: 11px; font-weight: var(--os-weight-semibold);
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
+      margin: 0 0 var(--os-sp-sm);
+    }
+    ul.ing { list-style: none; margin: 0; padding: 0; }
+    ul.ing li {
+      padding: var(--os-sp-sm) 0; line-height: 1.55; font-size: var(--os-fs-md);
+      word-break: break-word;
+    }
+    ul.ing li + li { border-top: 1px solid var(--os-border-color-subtle); }
+    ol.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--os-sp-lg); }
+    ol.steps li { display: flex; align-items: baseline; gap: var(--os-sp-md); }
+    ol.steps .n {
+      flex: 0 0 20px; text-align: right; font-size: var(--os-fs-sm);
+      font-weight: var(--os-weight-semibold); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1;
+    }
+    ol.steps .s-body { flex: 1 1 auto; min-width: 0; font-size: var(--os-fs-md); line-height: 1.65; word-break: break-word; }
+    .colhint { font-size: var(--os-fs-sm); color: var(--os-text-muted); }
+    .hero {
+      width: 100%; max-height: 180px; object-fit: cover; display: block;
+      border-radius: var(--os-radius-lg); border: 1px solid var(--os-border-color-subtle);
+    }
+
+    /* photo control in the editor modals: current thumb (or tinted placeholder) + ghosts */
+    .photo-field { display: flex; align-items: center; gap: var(--os-sp-md); }
+    .pf-thumb {
+      width: 72px; height: 72px; object-fit: cover; display: block;
+      border-radius: var(--os-radius-md); border: 1px solid var(--os-border-color-subtle);
+    }
+    .pf-empty {
+      width: 72px; height: 72px; border-radius: var(--os-radius-md);
+      display: inline-flex; align-items: center; justify-content: center;
+      background: color-mix(in srgb, var(--ch), transparent 90%); color: var(--ch); font-size: 22px;
+    }
+    .pf-btn {
+      font: inherit; font-size: var(--os-fs-2xs); cursor: pointer; text-transform: lowercase;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-secondary); border-radius: var(--os-radius-sm);
+      padding: 3px var(--os-sp-sm); display: inline-flex; align-items: center;
+      transition: color 150ms, border-color 150ms;
+    }
+    .pf-btn:hover { color: var(--os-text); border-color: var(--os-text-subtle); }
+    .pf-btn:active { background: var(--os-bg-inset); }
+    .pf-btn:focus-visible, .pf-btn:has(input:focus-visible) { outline: none; box-shadow: var(--os-focus-ring); }
+    .notes-body {
+      margin: 0; white-space: pre-wrap; word-break: break-word;
+      font-size: var(--os-fs-base); line-height: 1.6; color: var(--os-text-secondary); max-width: 560px;
+    }
+
+    /* ---- edit modals (kanban's .ed idiom) ------------------------------------------ */
+    .ed { display: flex; flex-direction: column; gap: var(--os-sp-md); min-width: min(420px, 78vw); }
+    .ed label {
+      display: block; font-size: 11px; font-weight: var(--os-weight-semibold);
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
+      margin-bottom: var(--os-sp-sm);
+    }
+    .ed input, .ed textarea {
+      width: 100%; font: inherit; color: var(--os-text);
+      background: var(--os-bg-inset); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-sm); padding: var(--os-sp-sm) var(--os-sp-md); outline: none;
+      transition: border-color 150ms, background 150ms;
+    }
+    .ed input:focus, .ed textarea:focus { border-color: var(--os-text-muted); background: var(--os-bg-surface); box-shadow: none; }
+    .ed textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
+    .ed .cols { display: flex; gap: var(--os-sp-md); }
+    .ed .cols > div { flex: 1; min-width: 0; }
+    .ed input.f-serv { font-feature-settings: 'tnum' 1; }
+    .ed-del {
+      font: inherit; font-size: var(--os-fs-sm); cursor: pointer; margin-right: auto;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-subtle); border-radius: var(--os-radius-sm);
+      padding: calc(var(--os-sp-xs) + 1px) var(--os-sp-md); transition: color 150ms, border-color 150ms;
+    }
+    .ed-del:hover { color: var(--os-cError); border-color: var(--os-cError); }
+    .ed-del.armed { color: var(--os-cError); border-color: var(--os-cError); background: var(--os-cError-muted); }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useFramePush, applyChannel, Modal } from "./lib/js/framelib.js";
+
+    // Selection survives remounts (the push-driven refresh re-renders the app).
+    const NAV = { recipeId: null };
+
+    const tagList = (r) => (r.tags ? String(r.tags).split(",").filter(Boolean) : []);
+    const lines = (s) => (s ? String(s).split("\n").map((x) => x.trim()).filter(Boolean) : []);
+    const normTags = (s) => [...new Set(String(s || "").split(",").map((t) => t.trim().toLowerCase()).filter(Boolean))].join(",");
+    const normServ = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0 ? n : 0; };
+    const EMPTY_DRAFT = { title: "", servings: "", tags: "", ingredients: "", steps: "", notes: "", photo: "" };
+
+    // Downscale a picked image to the contract's thumbnail size (longest edge 512px,
+    // JPEG ~0.75) before it goes anywhere near the table — the photo column carries a
+    // thumbnail, never an original (see docs/schema-contracts.md).
+    function downscale(file, cb) {
+      const img = new Image();
+      img.onload = () => {
+        const max = 512;
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        c.getContext("2d").drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(img.src);
+        cb(c.toDataURL("image/jpeg", 0.75));
+      };
+      img.onerror = () => URL.revokeObjectURL(img.src);
+      img.src = URL.createObjectURL(file);
+    }
+
+    function App() {
+      const [me, setMe]             = useState(null);
+      const [recipes, setRecipes]   = useState(null);   // null until the first load lands
+      const [recipeId, setRecipeId] = useState(NAV.recipeId);
+      const [storage, setStorage]   = useState(null);   // { backend, pending, can_manage }
+      const [waiting, setWaiting]   = useState(false);  // graduated placement, binding missing
+      const [search, setSearch]     = useState("");
+      const [activeTag, setActiveTag] = useState(null);
+      const [creating, setCreating] = useState(false);
+      const [draft, setDraft]       = useState(EMPTY_DRAFT);
+      const [editing, setEditing]   = useState(false);  // edit modal open on the detail view
+      const [edArmed, setEdArmed]   = useState(false);
+
+      const apply = (r) => { if (r && r.recipes) setRecipes(r.recipes); };
+      async function refresh() {
+        const r = await frame.api("api/recipes").catch(() => null);
+        if (!r) return;
+        if (r.storage) setStorage(r.storage);
+        setWaiting(!!r.waiting_for_binding);
+        if (r.recipes) {
+          setRecipes(r.recipes);
+          if (NAV.recipeId && !r.recipes.some((x) => x.id === NAV.recipeId)) {
+            NAV.recipeId = null; setRecipeId(null);   // recipe deleted under us
+          }
+        }
+      }
+      // Writes go over the tether (frame.busSend) — fire-and-forget; the UI refreshes
+      // from the recipes_changed push, sender included. Feature-detect: an older viewer's
+      // framelib has no busSend, so fall back to the HTTP write it was using before.
+      const write = (path, body) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+          return Promise.resolve({});
+        }
+        return frame.api(path, body);
+      };
+      useEffect(() => {
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({ recipes_changed: refresh });
+
+      if (!me) return html`<div></div>`;
+      const isEditor = !!me.is_sfi_editor;
+
+      function open(id) { NAV.recipeId = id; setRecipeId(id); setEditing(false); setEdArmed(false); }
+      function back() { NAV.recipeId = null; setRecipeId(null); setEditing(false); setEdArmed(false); }
+
+      // ---- mutations -------------------------------------------------------------------
+      function createRecipe() {
+        const title = draft.title.trim();
+        if (!title) return;
+        write("api/recipe", {
+          title,
+          ingredients_lines: draft.ingredients,
+          steps_lines: draft.steps,
+          servings: normServ(draft.servings),
+          tags: draft.tags,
+          notes: draft.notes,
+          photo: draft.photo,
+        }).then(apply).catch(() => {});
+        setDraft(EMPTY_DRAFT);
+        setCreating(false);
+      }
+      function saveRecipe(r, patch) {
+        setRecipes((rs) => (rs || []).map((x) => x.id === r.id ? { ...x, ...patch } : x));
+        write("api/recipe/" + r.id, patch).then(apply).catch(() => {});
+      }
+      function deleteRecipe(r) {
+        if (!edArmed) { setEdArmed(true); return; }
+        setEdArmed(false); setEditing(false);
+        setRecipes((rs) => (rs || []).filter((x) => x.id !== r.id));
+        back();
+        write("api/recipe/" + r.id + "/delete", {}).catch(() => {});
+      }
+
+      // ---- the data drawer (owner-only) ------------------------------------------------
+      // One button, one surface: the frame says nothing about storage at rest, and every
+      // data action lives here. Single call site so #755 (frame-chrome data controls) can
+      // replace this wholesale. See docs/table-graduation.md.
+      async function onDrawer() {
+        if (storage.pending) {
+          const stop = await frame.confirm("Stop the move to a shared table?", {
+            title: "Recipe data", okLabel: "Stop", cancelLabel: "Keep going",
+          });
+          if (stop) { await write("api/data/cancel_graduate", {}).catch(() => null); refresh(); }
+          return;
+        }
+        if (storage.backend === "shared") {
+          await frame.alert("These recipes live in a shared table, so other frames in this space can work with the same rows.", { title: "Recipe data" });
+          return;
+        }
+        const mode = frame.choose
+          ? await frame.choose("These recipes live on this device.", {
+              title: "Recipe data",
+              options: [
+                { id: "convert", label: "Move to a shared table", icon: "ph-dresser",
+                  detail: "Copies these recipes so other frames can use them" },
+                { id: "adopt", label: "Use an existing shared table", icon: "ph-plugs-connected",
+                  detail: "Point this recipe box at a table you already have" },
+              ],
+            })
+          : ((await frame.confirm("Move this recipe box's data to a shared table?", { title: "Recipe data", okLabel: "Move" })) ? "convert" : null);
+        if (mode) { await write("api/data/graduate", { mode }).catch(() => null); refresh(); }
+      }
+
+      const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
+
+      // ---- shared chrome ---------------------------------------------------------------
+      const banner = !isEditor ? html`
+        <div class="banner">
+          <i class="ph-light ph-eye"></i>
+          ${me.is_sfi_member
+            ? html`You have viewer-only access. Ask the owner to raise your role to edit these recipes.`
+            : html`You're viewing this recipe box publicly. Join this space to add and edit recipes.`}
+        </div>` : null;
+
+      const storageChip = storage && storage.can_manage ? html`
+        <button class=${"drawer" + (storage.pending ? " pending" : "")}
+          title=${storage.pending ? "Finishing a move to a shared table" : "Recipe data"}
+          onClick=${onDrawer}>
+          <i class="ph-light ph-dresser"></i>
+        </button>` : null;
+
+      const waitingNotice = waiting ? html`
+        <div class="notice">
+          <i class="ph-light ph-table"></i>
+          <h2>Almost there</h2>
+          <p>${me.is_owner
+            ? html`Pick the recipes table to finish.`
+            : html`The owner is finishing this recipe box's move to shared tables.`}</p>
+          ${me.is_owner ? html`<button class="data-ghost" onClick=${refresh}>Open the picker again</button>` : null}
+        </div>` : null;
+
+      const photoField = (value, onSet) => html`
+        <div>
+          <label>Photo</label>
+          <div class="photo-field">
+            ${value ? html`<img class="pf-thumb" src=${value} alt="" />`
+                    : html`<span class="pf-empty"><i class="ph-light ph-image"></i></span>`}
+            <label class="pf-btn">
+              ${value ? "replace" : "add a photo"}
+              <input type="file" accept="image/*" hidden
+                onChange=${(e) => {
+                  const f = e.target.files && e.target.files[0];
+                  if (f) downscale(f, onSet);
+                  e.target.value = "";
+                }} />
+            </label>
+            ${value ? html`<button class="pf-btn" onClick=${() => onSet("")}>remove</button>` : null}
+          </div>
+        </div>`;
+
+      const editorForm = (d, set) => html`
+        <div class="ed">
+          <div>
+            <label>Title</label>
+            <input value=${d.title} maxlength="200" placeholder="Nonna's ragù"
+              onInput=${(e) => set({ ...d, title: e.target.value })} />
+          </div>
+          ${photoField(d.photo, (p) => set({ ...d, photo: p }))}
+          <div class="cols">
+            <div>
+              <label>Servings</label>
+              <input class="f-serv" inputmode="numeric" placeholder="0" value=${d.servings}
+                onInput=${(e) => set({ ...d, servings: e.target.value })} />
+            </div>
+            <div>
+              <label>Tags</label>
+              <input value=${d.tags} maxlength="200" placeholder="weeknight, pasta"
+                onInput=${(e) => set({ ...d, tags: e.target.value })} />
+            </div>
+          </div>
+          <div>
+            <label>Ingredients</label>
+            <textarea maxlength="8000" placeholder=${"One per line\n2 cups flour\nsalt"}
+              onInput=${(e) => set({ ...d, ingredients: e.target.value })}>${d.ingredients}</textarea>
+          </div>
+          <div>
+            <label>Steps</label>
+            <textarea maxlength="8000" placeholder="One per line"
+              onInput=${(e) => set({ ...d, steps: e.target.value })}>${d.steps}</textarea>
+          </div>
+          <div>
+            <label>Notes</label>
+            <textarea maxlength="4000" placeholder="Optional. Where it came from, what to change next time…"
+              onInput=${(e) => set({ ...d, notes: e.target.value })}>${d.notes}</textarea>
+          </div>
+        </div>`;
+
+      const createModal = creating ? html`
+        <${Modal} title="New recipe" onClose=${() => { setCreating(false); setDraft(EMPTY_DRAFT); }}
+          actions=${html`
+            <button onClick=${() => { setCreating(false); setDraft(EMPTY_DRAFT); }}>Cancel</button>
+            <button class="btn-primary" disabled=${!draft.title.trim()} onClick=${createRecipe}>Add recipe</button>
+          `}>
+          ${editorForm(draft, setDraft)}
+        </${Modal}>` : null;
+
+      // ---- level 2: the cooking view ---------------------------------------------------
+      const cur = recipeId && recipes ? recipes.find((x) => x.id === recipeId) : null;
+      if (cur && !waiting) {
+        const ing = lines(cur.ingredients_lines);
+        const steps = lines(cur.steps_lines);
+        const subParts = [];
+        if (cur.servings) subParts.push("serves " + cur.servings);
+        subParts.push(...tagList(cur));
+
+        const showIng = isEditor || ing.length > 0;
+        const showSteps = isEditor || steps.length > 0;
+        const oneCol = (showIng ? 1 : 0) + (showSteps ? 1 : 0) === 1;
+
+        return html`
+          <main class=${isEditor ? "" : "read-only"}>
+            <div class="header">
+              <button class="iconbtn" title="All recipes" onClick=${back}>
+                <i class="ph-light ph-arrow-left"></i>
+              </button>
+              <i class="ph-light ph-cooking-pot brand"></i>
+              <div class="titles">
+                <h1 class="t-title">
+                  ${isEditor
+                    ? html`<input value=${cur.title} maxlength="200"
+                        onBlur=${(e) => { const v = e.target.value.trim(); if (v && v !== cur.title) saveRecipe(cur, { title: v }); }}
+                        onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />`
+                    : html`<span class="static">${cur.title}</span>`}
+                </h1>
+                ${subParts.length ? html`<div class="subline">${subParts.join(" · ")}</div>` : null}
+              </div>
+              <span class="mode">${mode}</span>
+            </div>
+
+            ${banner}
+
+            ${isEditor ? html`
+              <div class="recrow">
+                <button class="rec-edit" onClick=${() => { setEditing(true); setEdArmed(false); }}>
+                  <i class="ph-light ph-pencil-simple"></i>edit recipe
+                </button>
+              </div>` : null}
+
+            ${!showIng && !showSteps
+              ? html`<div class="empty">Nothing here yet.</div>`
+              : html`
+                <div class="detail">
+                  ${cur.photo ? html`<img class="hero" src=${cur.photo} alt="" />` : null}
+                  <div class=${"cook" + (oneCol ? " one" : "")}>
+                    ${showIng ? html`
+                      <div>
+                        <div class="sec-label">ingredients</div>
+                        ${ing.length
+                          ? html`<ul class="ing">${ing.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul>`
+                          : html`<div class="colhint">Nothing yet. Edit the recipe to add ingredients.</div>`}
+                      </div>` : null}
+                    ${showSteps ? html`
+                      <div>
+                        <div class="sec-label">steps</div>
+                        ${steps.length
+                          ? html`<ol class="steps">${steps.map((x, i) => html`
+                              <li key=${i}><span class="n">${i + 1}</span><span class="s-body">${x}</span></li>`)}</ol>`
+                          : html`<div class="colhint">Nothing yet. Edit the recipe to add steps.</div>`}
+                      </div>` : null}
+                  </div>
+                  ${cur.notes ? html`
+                    <div>
+                      <div class="sec-label">notes</div>
+                      <p class="notes-body">${cur.notes}</p>
+                    </div>` : null}
+                </div>`}
+
+            ${editing ? html`
+              <${Modal} title="Edit recipe" onClose=${() => { setEditing(false); setEdArmed(false); }}
+                actions=${html`
+                  <button class=${"ed-del" + (edArmed ? " armed" : "")} onClick=${() => deleteRecipe(cur)}>
+                    ${edArmed ? "Click again to delete" : "Delete recipe"}
+                  </button>
+                  <button onClick=${() => { setEditing(false); setEdArmed(false); }}>Done</button>
+                `}>
+                <div class="ed">
+                  <div>
+                    <label>Title</label>
+                    <input value=${cur.title} maxlength="200"
+                      onBlur=${(e) => { const v = e.target.value.trim(); if (v && v !== cur.title) saveRecipe(cur, { title: v }); }}
+                      onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                  </div>
+                  ${photoField(cur.photo, (p) => saveRecipe(cur, { photo: p }))}
+                  <div class="cols">
+                    <div>
+                      <label>Servings</label>
+                      <input class="f-serv" inputmode="numeric" placeholder="0" value=${cur.servings || ""}
+                        onBlur=${(e) => { const v = normServ(e.target.value.trim()); if (v !== cur.servings) saveRecipe(cur, { servings: v }); }}
+                        onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                    </div>
+                    <div>
+                      <label>Tags</label>
+                      <input value=${tagList(cur).join(", ")} maxlength="200" placeholder="weeknight, pasta"
+                        onBlur=${(e) => { const v = normTags(e.target.value); if (v !== cur.tags) saveRecipe(cur, { tags: v }); }}
+                        onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label>Ingredients</label>
+                    <textarea maxlength="8000" placeholder="One per line"
+                      onBlur=${(e) => { if (e.target.value !== cur.ingredients_lines) saveRecipe(cur, { ingredients_lines: e.target.value }); }}>${cur.ingredients_lines}</textarea>
+                  </div>
+                  <div>
+                    <label>Steps</label>
+                    <textarea maxlength="8000" placeholder="One per line"
+                      onBlur=${(e) => { if (e.target.value !== cur.steps_lines) saveRecipe(cur, { steps_lines: e.target.value }); }}>${cur.steps_lines}</textarea>
+                  </div>
+                  <div>
+                    <label>Notes</label>
+                    <textarea maxlength="4000" placeholder="Optional. Where it came from, what to change next time…"
+                      onBlur=${(e) => { if (e.target.value !== cur.notes) saveRecipe(cur, { notes: e.target.value }); }}>${cur.notes}</textarea>
+                  </div>
+                </div>
+              </${Modal}>` : null}
+          </main>`;
+      }
+
+      // ---- level 1: the collection -----------------------------------------------------
+      const allTags = recipes ? [...new Set(recipes.flatMap(tagList))].sort() : [];
+      const tag = activeTag && allTags.includes(activeTag) ? activeTag : null;
+      const q = search.trim().toLowerCase();
+      const shown = (recipes || []).filter((r) => {
+        if (tag && !tagList(r).includes(tag)) return false;
+        if (q && !(String(r.title).toLowerCase().includes(q) || tagList(r).some((t) => t.includes(q)))) return false;
+        return true;
+      });
+
+      return html`
+        <main class=${"shelf" + (isEditor ? "" : " read-only")}>
+          <div class="header">
+            <i class="ph-light ph-cooking-pot brand"></i>
+            <div class="titles"><h1 class="t-title"><span class="static">Recipe Box</span></h1></div>
+            <span class="mode">${mode}</span>
+            ${storageChip}
+          </div>
+
+          ${banner}
+
+          ${waitingNotice
+          ?? (recipes === null ? null
+          : recipes.length === 0
+            ? (isEditor ? html`
+                <div class="notice">
+                  <i class="ph-light ph-cooking-pot"></i>
+                  <h2>Add your first recipe</h2>
+                  <p>Keep the family collection in one place: ingredients, steps, and the notes that make each dish yours.</p>
+                  <button class="btn-primary" onClick=${() => setCreating(true)}>
+                    <i class="ph-light ph-plus"></i>New recipe
+                  </button>
+                </div>`
+              : html`<div class="empty">Nothing here yet.</div>`)
+            : html`
+              <div class="filters">
+                <div class="search">
+                  <i class="ph-light ph-magnifying-glass"></i>
+                  <input placeholder="Search recipes…" value=${search} maxlength="120"
+                    onInput=${(e) => setSearch(e.target.value)} />
+                </div>
+                ${allTags.length ? html`
+                  <div class="tagrow">
+                    ${allTags.map((t) => html`
+                      <button key=${t} class=${"tag" + (tag === t ? " active" : "")}
+                        onClick=${() => setActiveTag(tag === t ? null : t)}>${t}</button>
+                    `)}
+                  </div>` : null}
+              </div>
+              ${shown.length === 0
+                ? html`<div class="empty">No matches.</div>`
+                : html`
+                  <div class="rlist">
+                    ${shown.map((r) => html`
+                      <div class="rcard" key=${r.id} onClick=${() => open(r.id)}>
+                        <span class="ptile">
+                          ${r.photo ? html`<img src=${r.photo} alt="" />` : html`<i class="ph-light ph-cooking-pot"></i>`}
+                        </span>
+                        <div class="r-info">
+                          <div class="r-name">${r.title}</div>
+                          ${(r.servings || tagList(r).length) ? html`
+                            <div class="r-sub">
+                              ${r.servings ? html`<span class="r-serv">serves ${r.servings}</span>` : null}
+                              ${tagList(r).map((t) => html`<span class="chip" key=${t}>${t}</span>`)}
+                            </div>` : null}
+                        </div>
+                      </div>
+                    `)}
+                  </div>`}
+              ${isEditor ? html`
+                <button class="new-recipe" onClick=${() => setCreating(true)}>
+                  <i class="ph-light ph-plus"></i>New recipe
+                </button>` : null}`)}
+
+          ${createModal}
+        </main>
+      `;
+    }
+
+    render(html`<${App}/>`, document.body);
+  </script>
+</body>
+</html>

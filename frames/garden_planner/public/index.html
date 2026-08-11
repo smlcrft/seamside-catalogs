@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Garden Plotter</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="./index.css">
+</head>
+<body class="ch5">
+  <header class="page-header">
+    <div class="title">
+      <i class="ph-light ph-plant icon-md"></i>
+      <h1 id="org-name">Garden Plotter</h1>
+    </div>
+    <div class="header-actions">
+      <span id="weather-chip" class="weather-chip hidden">
+        <i class="ph-light ph-sun icon-sm"></i>
+        <span id="weather-text">—</span>
+      </span>
+      <span id="count-badge" class="badge">0</span>
+      <button id="mode-btn" class="ghost hidden" title="Toggle edit mode">
+        <i class="ph-light ph-pencil-simple icon-sm"></i> <span id="mode-label" class="btn-label">edit</span>
+      </button>
+      <button id="add-btn" class="hidden" title="Add a plot">
+        <i class="ph-light ph-plus icon-sm"></i> <span class="btn-label">add plot</span>
+      </button>
+      <!-- The rail proper: role, then data, then settings. Everything to the left of it
+           is a content action on the garden, which is why those stay worded buttons. -->
+      <span id="role-label" class="role-label">viewer</span>
+      <button id="data-btn" class="ghost hidden" title="Garden data">
+        <i class="ph-light ph-dresser icon-sm"></i>
+      </button>
+      <button id="settings-btn" class="ghost hidden" title="Settings">
+        <i class="ph-light ph-gear-six icon-sm"></i>
+      </button>
+    </div>
+  </header>
+
+  <p id="readonly-note" class="muted readonly-note hidden">
+    <i class="ph-light ph-lock-simple icon-sm"></i>
+    Only the frame owner can edit this garden.
+  </p>
+
+  <p id="setup-note" class="muted setup-note hidden">
+    <i class="ph-light ph-info icon-sm"></i>
+    No location set yet — open <button class="link" id="setup-open-settings">settings</button> to add a city or zip code so plots can show stress colors.
+  </p>
+
+  <section id="legend" class="legend">
+    <span class="legend-label">stress</span>
+    <span class="stress-chip stress-low"><span class="dot"></span>low</span>
+    <span class="stress-chip stress-mid"><span class="dot"></span>medium</span>
+    <span class="stress-chip stress-high"><span class="dot"></span>high</span>
+    <span class="stress-chip stress-unknown"><span class="dot"></span>unknown</span>
+  </section>
+
+  <section id="canvas-wrap" class="canvas-wrap">
+    <div id="canvas" class="canvas">
+      <div id="empty" class="empty hidden">
+        <i class="ph-light ph-plant icon-md"></i>
+        <div id="empty-text">No plots yet.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Plot detail dialog -->
+  <div id="detail-overlay" class="overlay hidden">
+    <div class="surface dialog">
+      <header class="dialog-header">
+        <h2 id="detail-title">Plot</h2>
+        <button id="detail-close" class="ghost" title="Close"><i class="ph-light ph-x icon-sm"></i></button>
+      </header>
+      <div id="detail-body" class="detail-body"></div>
+      <div class="dialog-actions">
+        <button id="detail-edit" class="hidden">edit</button>
+        <button id="detail-cancel" class="ghost">close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Plot edit dialog -->
+  <div id="edit-overlay" class="overlay hidden">
+    <div class="surface dialog">
+      <header class="dialog-header">
+        <h2 id="edit-title">New plot</h2>
+        <button id="edit-close" class="ghost" title="Close"><i class="ph-light ph-x icon-sm"></i></button>
+      </header>
+      <label class="field">
+        <span>Plot name</span>
+        <input id="edit-name" type="text" maxlength="200" placeholder="e.g. North bed">
+      </label>
+      <div class="field-row">
+        <label class="field">
+          <span>Width (cells)</span>
+          <input id="edit-width" type="number" min="1" max="40" value="3">
+        </label>
+        <label class="field">
+          <span>Height (cells)</span>
+          <input id="edit-height" type="number" min="1" max="40" value="2">
+        </label>
+      </div>
+      <div class="field">
+        <span>Sun exposure</span>
+        <div class="seg-toggle" id="shade-mode">
+          <button data-shade="100" class="seg-btn active"><i class="ph-light ph-sun icon-sm"></i> full sun</button>
+          <button data-shade="50" class="seg-btn"><i class="ph-light ph-cloud-sun icon-sm"></i> part shade</button>
+          <button data-shade="0" class="seg-btn"><i class="ph-light ph-cloud icon-sm"></i> full shade</button>
+        </div>
+      </div>
+      <div class="field">
+        <span>Owned by</span>
+        <div class="seg-toggle" id="assign-mode">
+          <button data-mode="member" class="seg-btn active">Member</button>
+          <button data-mode="manual" class="seg-btn">Non-member</button>
+          <button data-mode="none" class="seg-btn">Community</button>
+        </div>
+      </div>
+      <label class="field" id="assign-member-field">
+        <span>Pick a member</span>
+        <select id="edit-member"></select>
+      </label>
+      <label class="field hidden" id="assign-manual-field">
+        <span>Non-member name</span>
+        <input id="edit-manual" type="text" maxlength="200" placeholder="e.g. Anna's friend">
+      </label>
+      <fieldset class="field plant-field">
+        <legend>Plants in this plot</legend>
+        <div class="muted plant-help">Tick a plant family to add it. Optionally set when it was planted and at what stage so stress can be computed for that plant.</div>
+        <div id="edit-plants" class="plant-list"></div>
+      </fieldset>
+      <label class="field">
+        <span>Notes (optional)</span>
+        <textarea id="edit-notes" rows="2" maxlength="1000"></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button id="edit-delete" class="ghost danger hidden">delete</button>
+        <button id="edit-cancel" class="ghost">cancel</button>
+        <button id="edit-save">save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings dialog -->
+  <div id="settings-overlay" class="overlay hidden">
+    <div class="surface dialog">
+      <header class="dialog-header">
+        <h2>Garden settings</h2>
+        <button id="settings-close" class="ghost" title="Close"><i class="ph-light ph-x icon-sm"></i></button>
+      </header>
+      <label class="field">
+        <span>Garden name</span>
+        <input id="cfg-org" type="text" maxlength="120">
+      </label>
+      <label class="field">
+        <span>Location (city, region, or zip)</span>
+        <input id="cfg-location" type="text" maxlength="120" placeholder="e.g. Portland, Oregon">
+      </label>
+      <div class="field-row">
+        <label class="field">
+          <span>Grid columns</span>
+          <input id="cfg-cols" type="number" min="4" max="80">
+        </label>
+        <label class="field">
+          <span>Grid rows</span>
+          <input id="cfg-rows" type="number" min="4" max="80">
+        </label>
+        <label class="field">
+          <span>Cell size (px)</span>
+          <input id="cfg-px" type="number" min="16" max="80">
+        </label>
+      </div>
+      <label class="field row-field">
+        <input id="cfg-owner-only" type="checkbox">
+        <span>Only the frame owner can edit the garden</span>
+      </label>
+      <label class="field row-field">
+        <input id="cfg-allow-public" type="checkbox">
+        <span>Allow public (anonymous) viewers to see plot layouts</span>
+      </label>
+      <div class="dialog-actions">
+        <button id="settings-cancel" class="ghost">cancel</button>
+        <button id="settings-save">save</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./index.js"></script>
+</body>
+</html>

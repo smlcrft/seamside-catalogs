@@ -1,0 +1,17 @@
+{
+    "name": "Bookmarks",
+    "description": "A place to put links so you can find them again. Paste a URL anywhere in the frame and it saves itself — no form, no dialog — reading the site's name off the address and colouring it so the same site always looks the same. The search box is the frame's real interface: it filters by title, address and tag as you type, because a link you cannot find again is the same as one you never saved. Tag anything, filter by tag, rename what the URL got wrong. Space editors save and edit; everyone else, including anyone the frame is shared with publicly, can read and follow the same links. Nothing is fetched from the sites you save: this frame asks for no network access at all, so a private bookmark stays a private bookmark. Links live in an encrypted LocalTable scoped to the placement.",
+    "frame_type": "Tandem",
+    "tags": ["everyday", "bookmarks", "links", "reference"],
+    "permissions": {
+        "net": []
+    },
+    "default_width_px": 620,
+    "default_height_px": 560,
+    "created_at": "2026-08-10T00:00:00Z",
+    "modified_at": "2026-08-10T00:00:00Z",
+    "app_version_min": "0.2.5",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

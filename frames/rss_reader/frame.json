@@ -1,0 +1,26 @@
+{
+    "name": "RSS Reader",
+    "description": "A reader for the open web, shared with the people you read alongside. Paste any site or feed address and the frame finds the feed, pulls the items in, and keeps them in groups you name. What you have read is yours alone; what you boost and what you say about an item is shared, so a space becomes a small room of co-readers rather than a lonely inbox. Keyboard-first: j and k move, m marks read, b boosts. Because a reader must be able to reach whatever you subscribe to, this frame asks for open network access \u2014 the platform answers by running it in a satellite process that can reach the wider internet but is blocked from your own machine and local network. Feeds, items and comments live in encrypted LocalTables scoped to the placement.",
+    "frame_type": "Tandem",
+    "tags": [
+        "everyday",
+        "reading",
+        "rss",
+        "news"
+    ],
+    "permissions": {
+        "net": [
+            "*"
+        ],
+        "web": [],
+        "web_scripts": []
+    },
+    "default_width_px": 900,
+    "default_height_px": 640,
+    "created_at": "2026-07-01T00:00:00Z",
+    "modified_at": "2026-08-10T00:00:00Z",
+    "app_version_min": "0.2.5",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

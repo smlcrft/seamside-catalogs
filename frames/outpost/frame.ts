@@ -468,7 +468,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return replyPort.postMessage({
       status: 200, body: buf, contentType: String(media.mime || "application/octet-stream"),
       headers: { "Content-Disposition": `inline; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(mediaName)}` },
-    }, [buf.buffer]);
+    }, [buf.buffer as ArrayBuffer]);
   }
 
   if (reqPath === "/api/vote" && method === "POST") {

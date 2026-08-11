@@ -1,0 +1,903 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Class Schedule</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); --hour: 46px; --gutter: 44px; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    /* the render root has to carry the height too, or `main { height: 100% }` resolves
+       against an auto-height div and the frame stops driving its own layout */
+    html, body, #app { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      height: 100%; max-width: 980px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: var(--os-sp-sm);
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-xl));
+    }
+
+    .header { display: flex; align-items: center; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .header > i {
+      flex: 0 0 auto; width: 24px; height: 24px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 20px; line-height: 1; color: var(--ch);
+    }
+    .header h1 {
+      flex: 1 1 auto; min-width: 0; margin: 0;
+      font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); line-height: 24px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .header .mode {
+      flex: 0 0 auto; height: 24px; display: inline-flex; align-items: center;
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted); white-space: nowrap;
+    }
+    .iconbtn {
+      flex: 0 0 auto; width: 24px; height: 24px; padding: 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-subtle); font-size: 16px; line-height: 1;
+      transition: color 150ms, background 150ms;
+    }
+    .iconbtn i { font-size: 16px; line-height: 1; color: inherit; width: auto; height: auto; }
+    .iconbtn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+    .iconbtn:active { transform: scale(0.92); }
+    .iconbtn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm);
+      color: var(--os-text-secondary); flex: 0 0 auto;
+    }
+
+    /* the frame's ONE editorial line: it answers the question you open a timetable to ask */
+    .verdict {
+      flex: 0 0 auto; margin: 2px 0 var(--os-sp-xs);
+      font-family: var(--os-font-serif); font-size: clamp(18px, 3.8vw, 24px);
+      font-weight: 500; letter-spacing: -0.01em; line-height: 1.3; color: var(--os-text);
+    }
+    .verdict em { font-style: italic; color: var(--ch); }
+
+    /* ---- the week ---------------------------------------------------------------------
+       A grid is the right shape here — it is the one frame whose data really is two
+       dimensional. What it must NOT do is draw the whole 24 hours and the whole 7 days:
+       the range comes from the classes that exist, so an empty weekend and an empty
+       small-hours block never take up room. */
+    /* The grid FILLS the frame. The hour height is measured from the space available
+       rather than nailed to 46px, so a tall tile spreads the day out instead of leaving
+       dead space under it, and a short one compresses to a floor and scrolls. */
+    .weekwrap { flex: 1 1 auto; min-height: 0; overflow: auto; }
+    .week { display: grid; min-width: 420px; }
+    .dayhead {
+      position: sticky; top: 0; z-index: 3; background: var(--os-bg);
+      padding: 0 0 var(--os-sp-xs); text-align: center;
+      font-size: 11px; font-weight: var(--os-weight-semibold); text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--os-text-muted);
+    }
+    .dayhead.today { color: var(--ch); }
+    .corner { position: sticky; top: 0; z-index: 3; background: var(--os-bg); }
+
+    /* the hour labels are centred on their lines, so the row needs a little air top and
+       bottom or the first and last labels get sliced */
+    .gutter, .col { margin: 7px 0 8px; }
+    .gutter { position: relative; }
+    .hourlabel {
+      position: absolute; right: var(--os-sp-sm); transform: translateY(-50%);
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; white-space: nowrap;
+    }
+    .col {
+      position: relative; border-left: 1px solid var(--os-border-color-subtle);
+    }
+    .col.today { background: color-mix(in srgb, var(--ch), transparent 96%); }
+    .hourline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--os-border-color-subtle); }
+    .hourline.half { border-top-style: dotted; opacity: 0.6; }
+
+    .block {
+      position: absolute; left: 2px; right: 2px; overflow: hidden;
+      border-radius: var(--os-radius-sm); padding: 3px var(--os-sp-xs);
+      /* The channel is carried by the FILL, not by a coloured stroke down one edge. An edge
+         rail is a stripe pretending to be an identity; the tint is the identity. */
+      background: color-mix(in srgb, var(--bc), transparent 80%);
+      cursor: pointer; text-align: left; font: inherit;
+      display: flex; flex-direction: column; gap: 1px;
+      transition: filter 150ms, box-shadow 150ms;
+    }
+    .block:hover { filter: brightness(0.97); box-shadow: var(--os-shadow-sm); }
+    /* the block under the pointer rides above whatever it is passing over */
+    .block.lifted { z-index: 5; box-shadow: var(--os-shadow-md); }
+    .block:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .read-only .block { cursor: default; }
+    /* the block IS the handle — grab it to move the class, grab its foot to change how
+       long it runs. touch-action off so a drag drags instead of scrolling the week. */
+    .block { cursor: grab; touch-action: none; }
+    .block:active { cursor: grabbing; }
+    .read-only .block, .block.renaming { cursor: default; touch-action: auto; }
+    .grip {
+      position: absolute; left: 0; right: 0; bottom: 0; height: 7px; cursor: ns-resize;
+    }
+    .grip::after {
+      content: ""; position: absolute; left: 50%; bottom: 2px; width: 16px; height: 2px;
+      transform: translateX(-50%); border-radius: 1px; background: var(--bc);
+      opacity: 0; transition: opacity 150ms;
+    }
+    .block:hover .grip::after { opacity: 0.55; }
+    .block .t {
+      font-size: var(--os-fs-2xs); font-weight: var(--os-weight-medium);
+      color: color-mix(in srgb, var(--bc), var(--os-text) 35%);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .block .w { font-size: 10px; color: var(--os-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* the class happening right now gets the solid treatment — it is the only block whose
+       state changes on its own, so it is the only one that earns emphasis */
+    .block.live { background: var(--bc); }
+    .block.live .t, .block.live .w { color: var(--os-bg-surface); }
+
+    /* the time, tracked across today's column */
+    .nowline { position: absolute; left: 0; right: 0; z-index: 2; pointer-events: none; }
+    .nowline::before {
+      content: ""; position: absolute; left: 0; right: 0; top: 0;
+      border-top: 2px solid var(--os-cError);
+    }
+    .nowline::after {
+      content: ""; position: absolute; left: -4px; top: -3px;
+      width: 8px; height: 8px; border-radius: var(--os-radius-full); background: var(--os-cError);
+    }
+
+    /* ---- today, the default view -------------------------------------------------------
+       You open a timetable far more often to ask "what now?" than to edit it, so the
+       agenda leads and the grid is one tap away. */
+    .countdown {
+      flex: 0 0 auto; display: flex; align-items: baseline; gap: var(--os-sp-sm);
+      padding: var(--os-sp-md) 0 var(--os-sp-xs);
+    }
+    .countdown .big {
+      font-size: clamp(28px, 6.5vw, 40px); font-weight: var(--os-weight-semibold);
+      letter-spacing: -0.02em; line-height: 1; color: var(--os-text);
+      font-feature-settings: 'tnum' 1;
+    }
+    .countdown .big.live { color: var(--ch); }
+    .countdown .cap { font-size: var(--os-fs-sm); color: var(--os-text-muted); }
+
+    .agenda { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+    .ag {
+      display: flex; align-items: center; gap: var(--os-sp-md); min-width: 0;
+      padding: var(--os-sp-sm) var(--os-sp-xs); border-radius: var(--os-radius-sm);
+      transition: background 150ms;
+    }
+    .ag + .ag { border-top: 1px solid var(--os-border-color-subtle); }
+    .ag:hover { background: var(--os-bg-subtle); }
+    .ag.past { opacity: 0.45; }
+    .ag.now { background: color-mix(in srgb, var(--bc), transparent 92%); }
+    /* the class's channel rides in the time itself — a filled pill you can read, rather
+       than a coloured stripe down the edge of the row */
+    .ag .when {
+      /* one measure for every time, so the names still line up in a column */
+      flex: 0 0 auto; min-width: 76px; text-align: center;
+      font-size: var(--os-fs-sm); white-space: nowrap;
+      font-feature-settings: 'tnum' 1; font-variant-numeric: tabular-nums;
+      padding: 3px var(--os-sp-sm); border-radius: var(--os-radius-sm);
+      background: color-mix(in srgb, var(--bc), transparent 86%);
+      color: color-mix(in srgb, var(--bc), var(--os-text) 40%);
+    }
+    .ag.now .when { background: var(--bc); color: var(--os-bg-surface); }
+    .ag .who { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .ag .nm { font-size: var(--os-fs-sm); overflow-wrap: anywhere; }
+    .ag .pl { font-size: var(--os-fs-2xs); color: var(--os-text-muted); }
+    .ag .dur { flex: 0 0 auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-feature-settings: 'tnum' 1; }
+
+    .peek { flex: 0 0 auto; padding-top: var(--os-sp-md); }
+    .peek .lbl {
+      font-size: 11px; font-weight: var(--os-weight-semibold); text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--os-text-muted); padding-bottom: var(--os-sp-xs);
+    }
+    .peek .ag { padding-top: var(--os-sp-xs); padding-bottom: var(--os-sp-xs); }
+
+    .seg { display: flex; flex: 0 0 auto; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md); overflow: hidden; }
+    .seg button {
+      border-radius: 0; background: var(--os-bg); border: 0; cursor: pointer;
+      padding: var(--os-sp-xs) var(--os-sp-md); font: inherit; font-size: var(--os-fs-sm);
+      color: var(--os-text-secondary); transition: background 150ms, color 150ms;
+    }
+    .seg button + button { border-left: 1px solid var(--os-border-color); }
+    .seg button:hover:not(.active) { background: var(--os-bg-subtle); }
+    .seg button.active { background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); font-weight: var(--os-weight-medium); }
+    .toolbar { display: flex; align-items: center; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .toolbar .sp { flex: 1 1 auto; }
+    .toolbar .tip { font-size: var(--os-fs-2xs); color: var(--os-text-muted); }
+
+    /* ---- drawing a class straight onto the grid ------------------------------------- */
+    .col.drawable { cursor: crosshair; }
+    .ghost {
+      position: absolute; left: 2px; right: 2px; z-index: 4; pointer-events: none;
+      border-radius: var(--os-radius-sm); border: 1.5px dashed var(--ch);
+      background: color-mix(in srgb, var(--ch), transparent 88%);
+      display: flex; align-items: flex-start; justify-content: center; padding-top: 2px;
+      font-size: var(--os-fs-2xs); color: var(--ch); font-feature-settings: 'tnum' 1;
+    }
+    /* the new block names itself in place — no dialog between drawing and typing */
+    .naming-new {
+      position: absolute; left: 2px; z-index: 5; --bc: var(--ch);
+      border-radius: var(--os-radius-sm);
+      background: var(--os-bg-surface); box-shadow: var(--os-shadow-md);
+      padding: 2px var(--os-sp-xs); display: flex; flex-direction: column; gap: 1px;
+    }
+    .naming-new input, .block.renaming input {
+      width: 100%; border: 0; background: none; box-shadow: none; padding: 0;
+      font: inherit; font-size: var(--os-fs-2xs); font-weight: var(--os-weight-medium);
+      color: var(--os-text);
+    }
+    .naming-new input:focus, .block.renaming input:focus { outline: none; background: none; box-shadow: none; }
+    /* Repeat, decided where the class is rather than in a dialog after the fact: the block
+       under the caret blooms wide enough to hold a week and you tick the days it meets. */
+    .block.renaming, .naming-new {
+      width: max(100%, 202px); right: auto; min-height: 76px;
+    }
+    .block.renaming.flip, .naming-new.flip { left: auto; right: 2px; }
+    .days-mini { display: flex; gap: 2px; padding-top: 3px; }
+    .days-mini button {
+      flex: 0 0 auto; width: 25px; height: 18px; padding: 0; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm);
+      background: var(--os-bg-surface); font: inherit; font-size: 9px; line-height: 1;
+      color: var(--os-text-muted); text-transform: uppercase; letter-spacing: 0.02em;
+      transition: background 150ms, color 150ms, border-color 150ms;
+    }
+    .days-mini button:hover { border-color: var(--os-text-subtle); color: var(--os-text); }
+    .days-mini button.on { background: var(--bc); border-color: var(--bc); color: var(--os-bg-surface); }
+
+    /* under the caret: the times you just drew, then the way out to the full record */
+    .t2 {
+      display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+      font-size: 10px; color: var(--os-text-muted); font-feature-settings: 'tnum' 1;
+      white-space: nowrap;
+    }
+    /* an editor is not a block: it lifts onto its own opaque surface, because a tinted
+       translucent panel over neighbouring classes reads as a smear, not as a thing you type
+       into. The channel stays as the left edge so you never lose which class you are in. */
+    .block.renaming {
+      cursor: default; z-index: 6; overflow: visible;
+      background: var(--os-bg-surface); box-shadow: var(--os-shadow-md);
+    }
+    .block.renaming .t2 { color: var(--os-text-muted); }
+    .more {
+      background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 10px;
+      color: var(--os-text-secondary); text-decoration: underline; text-underline-offset: 2px;
+    }
+    .more:hover { color: var(--os-text); }
+
+    /* ---- add sheet --------------------------------------------------------------------- */
+    .scrim {
+      position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.18);
+      display: flex; align-items: center; justify-content: center; padding: var(--os-sp-md);
+      animation: scrim-in 120ms ease-out;
+    }
+    @keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
+    .sheet {
+      width: min(340px, 100%); background: var(--os-bg-surface);
+      border: 1px solid var(--os-border-color); border-radius: var(--os-radius-lg);
+      box-shadow: var(--os-shadow-lg); padding: var(--os-sp-lg);
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+      animation: sheet-in 160ms var(--os-ease-spring);
+      max-height: 100%; overflow: auto;
+    }
+    @keyframes sheet-in { from { opacity: 0; transform: scale(0.97) translateY(4px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .scrim, .sheet { animation: none; } }
+    .sheet h2 { margin: 0; font-size: var(--os-fs-md); font-weight: var(--os-weight-semibold); }
+    .field { display: flex; flex-direction: column; gap: var(--os-sp-xs); }
+    .field label {
+      font-size: 11px; font-weight: var(--os-weight-semibold); text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--os-text-muted);
+    }
+    .field input {
+      border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm);
+      background: var(--os-bg); font: inherit; font-size: var(--os-fs-sm);
+      color: var(--os-text); padding: var(--os-sp-sm);
+    }
+    .field input:focus { outline: none; border-color: var(--os-text-muted); box-shadow: none; }
+    .days { display: flex; gap: 4px; flex-wrap: wrap; }
+    .days button {
+      flex: 1 1 auto; min-width: 34px; padding: var(--os-sp-sm) 0; cursor: pointer;
+      background: none; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm);
+      font: inherit; font-size: var(--os-fs-2xs); color: var(--os-text-secondary);
+      text-transform: uppercase; letter-spacing: 0.04em;
+      transition: background 150ms, color 150ms, border-color 150ms;
+    }
+    .days button:hover { border-color: var(--os-text-subtle); color: var(--os-text); }
+    .days button.on { background: var(--ch); border-color: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); }
+    .days button:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .times { display: flex; align-items: flex-end; gap: var(--os-sp-sm); }
+    .times .field { flex: 1 1 0; }
+    .times .dash { padding-bottom: 10px; color: var(--os-text-muted); }
+    .sheet-foot { display: flex; align-items: center; gap: var(--os-sp-sm); }
+    .sheet-foot .sp { flex: 1 1 auto; }
+    .btn-primary {
+      background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); border: 0; cursor: pointer;
+      padding: var(--os-sp-sm) var(--os-sp-lg); border-radius: var(--os-radius-md);
+      font: inherit; font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium);
+      transition: filter 150ms, transform 80ms var(--os-ease-spring), opacity 150ms;
+    }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+    .btn-primary:active:not(:disabled) { transform: scale(0.97); }
+    .btn-primary:disabled { opacity: 0.4; cursor: default; }
+    .btn-quiet {
+      background: none; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); cursor: pointer;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      transition: box-shadow 40ms ease, background 40ms ease, padding 40ms ease, color 150ms, border-color 150ms;
+    }
+    .btn-quiet:hover { color: var(--os-text); border-color: var(--os-text-subtle); background: var(--os-bg-subtle); }
+    .btn-quiet:active { padding: 9px var(--os-sp-md) 7px; background: var(--os-bg-inset); box-shadow: inset 0 2px 4px rgba(0,0,0,0.07); }
+
+    .empty {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: var(--os-sp-sm); text-align: center; color: var(--os-text-muted); font-size: var(--os-fs-sm);
+    }
+    .empty i { font-size: 28px; color: var(--os-text-subtle); }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useLayoutEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+
+    const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    // JS getDay() is Sunday-first; a timetable is Monday-first.
+    const todayIdx = () => (new Date().getDay() + 6) % 7;
+    const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+    const hhmm = (m) => {
+      const d = new Date(2000, 0, 1, Math.floor(m / 60), m % 60);
+      return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    };
+    const hourLabel = (h) => {
+      const d = new Date(2000, 0, 1, h, 0);
+      return d.toLocaleTimeString(undefined, { hour: "numeric" });
+    };
+    // "9:30" / "930" / "9" all mean something; be generous, since this is typed under time
+    // pressure by someone copying a timetable off a screen.
+    function parseTime(s, dflt) {
+      const t = String(s || "").trim().toLowerCase();
+      if (!t) return dflt;
+      const m = t.match(/^(\d{1,2})[:.h]?(\d{2})?\s*(am|pm)?$/);
+      if (!m) return dflt;
+      let h = parseInt(m[1], 10);
+      const min = m[2] ? parseInt(m[2], 10) : 0;
+      if (m[3] === "pm" && h < 12) h += 12;
+      if (m[3] === "am" && h === 12) h = 0;
+      if (h > 23 || min > 59) return dflt;
+      return h * 60 + min;
+    }
+    function channelFor(name) {
+      let h = 0;
+      for (const c of String(name)) h = (h * 31 + c.codePointAt(0)) >>> 0;
+      return "var(--os-c" + (h % 12 + 1) + ")";
+    }
+    // Dragged times snap to the quarter hour. Nobody's class starts at 9:07, and a snap is
+    // what makes a rough gesture feel exact.
+    const SNAP = 15;
+    const snap = (m) => Math.round(m / SNAP) * SNAP;
+    // A duration in words. Used for the countdown and for a class's length, so "1h 30m"
+    // and "50 min" read the same way in both places.
+    function durText(mins) {
+      const m = Math.max(0, Math.round(mins));
+      if (m < 60) return m + " min";
+      const h = Math.floor(m / 60), r = m % 60;
+      return r ? h + "h " + r + "m" : h + "h";
+    }
+    // The grid stretches to fill the frame, within reason: below the floor an hour is too
+    // thin to read, above the ceiling a three-class day looks like a poster.
+    const HOUR_MIN_PX = 34, HOUR_MAX_PX = 110;
+    // Never draw fewer than this many hours, even for a single 9am class — the empty room
+    // is where you drag the next one in, and it is what makes the grid fill its frame.
+    const MIN_SPAN_HOURS = 9;
+
+    function App() {
+      const [me, setMe]     = useState(null);
+      const [rows, setRows] = useState(null);
+      const [view, setView] = useState("today");    // "today" | "week"
+      const [sheet, setSheet]     = useState(null); // the details escape hatch
+      const [draft, setDraft]     = useState(null); // a block you just drew, naming itself + the days it repeats on
+      const [ghost, setGhost]     = useState(null); // live preview under the pointer
+      const [editing, setEditing] = useState(null); // { id, title } — renaming in place
+      const [pending, setPending] = useState(null); // where a moved block sits until the push lands
+      const [hourPx, setHourPx]   = useState(46);
+      const [, setTick] = useState(0);
+      const wrapRef = useRef(null);
+      const nameRef = useRef(null);
+      const drag = useRef(null);
+      const spanRef = useRef(MIN_SPAN_HOURS);
+
+      async function refresh() {
+        const r = await frame.api("api/list").catch(() => null);
+        if (r && r.classes) setRows(r.classes);
+      }
+      const write = (path, body) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+          return Promise.resolve({});
+        }
+        return frame.api(path, body);
+      };
+      useEffect(() => {
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({ schedule_changed: refresh });
+      // The now-line and the countdown have to move on their own or they are a lie.
+      useEffect(() => {
+        const h = setInterval(() => setTick((n) => n + 1), 30000);
+        return () => clearInterval(h);
+      }, []);
+      // The optimistic position survives only until the real rows come back.
+      useEffect(() => { setPending(null); }, [rows]);
+      // The hour height is MEASURED, not fixed: the day spreads to fill whatever height the
+      // tile actually has, instead of leaving dead space under a stub of a grid. Runs after
+      // every render (cheap), and the observer covers a resize that renders nothing.
+      useLayoutEffect(() => {
+        const el = wrapRef.current;
+        if (!el) return;
+        const hd = el.querySelector(".dayhead");
+        const head = hd ? hd.getBoundingClientRect().height : 22;
+        const avail = el.clientHeight - head - 15;
+        if (avail <= 0) return;
+        const next = Math.min(HOUR_MAX_PX, Math.max(HOUR_MIN_PX, avail / spanRef.current));
+        setHourPx((prev) => (Math.abs(prev - next) > 0.5 ? next : prev));
+      });
+      useEffect(() => {
+        const el = wrapRef.current;
+        if (!el) return;
+        const ro = new ResizeObserver(() => setTick((n) => n + 1));
+        ro.observe(el);
+        return () => ro.disconnect();
+      }, [view, me, rows]);
+            // Whatever is naming itself takes the caret without you reaching for it.
+      useEffect(() => {
+        const el = nameRef.current;
+        if (el && document.activeElement !== el) { el.focus(); el.select(); }
+      }, [draft ? "d" + draft.day + "-" + draft.start : "", editing ? "e" + editing.id : ""]);
+
+      if (!me || rows === null) return html`<div></div>`;
+      const isEditor = !!me.is_sfi_editor;
+      const today = todayIdx();
+      const now = nowMin();
+
+      // What the screen shows is the stored row, unless a drag is moving it right now or a
+      // write is still in flight — either way the block stays under your finger.
+      const shown = rows.map((r) => {
+        if (ghost && ghost.id === r.id) return { ...r, day: ghost.day, start_min: ghost.start, end_min: ghost.end };
+        if (pending && pending.id === r.id) return { ...r, day: pending.day, start_min: pending.start, end_min: pending.end };
+        return r;
+      });
+
+      // Only the days that are used — but always through Friday, so a normal week keeps
+      // its familiar shape and doesn't reflow every time a Tuesday class is deleted.
+      const usedDays = new Set(shown.map((r) => r.day));
+      if (draft) usedDays.add(draft.day);
+      const lastDay = Math.max(4, ...(usedDays.size ? [...usedDays] : [4]));
+      const days = Array.from({ length: lastDay + 1 }, (_, i) => i);
+
+      // Only the hours that are used, padded either side, then widened to a workable day.
+      const marks = shown.flatMap((r) => [r.start_min, r.end_min]);
+      if (draft) marks.push(draft.start, draft.end);
+      let startHour = marks.length ? Math.max(0, Math.floor(Math.min(...marks) / 60) - 1) : 8;
+      let endHour   = marks.length ? Math.min(24, Math.ceil(Math.max(...marks) / 60) + 1) : 18;
+      while (endHour - startHour < MIN_SPAN_HOURS) {
+        if (endHour < 24) endHour++;
+        if (endHour - startHour < MIN_SPAN_HOURS && startHour > 0) startHour--;
+        if (startHour === 0 && endHour === 24) break;
+      }
+      const span = Math.max(1, endHour - startHour);
+      const topFor = (min) => ((min - startHour * 60) / 60) * hourPx;
+
+      spanRef.current = span;
+
+      // ---- dragging on the grid ---------------------------------------------------------
+      // Drawing a class is the primary way to make one: press, pull, let go, type its name.
+      // The same gesture on an existing block moves it; on its bottom edge, resizes it.
+      function startDrag(e, kind, row, day) {
+        if (!isEditor || e.button > 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const wrap = wrapRef.current;
+        if (!wrap) return;
+        const colEls = [...wrap.querySelectorAll(".col")];
+        if (!colEls.length) return;
+        const top = colEls[0].getBoundingClientRect().top;
+        const cols = colEls.map((c) => {
+          const b = c.getBoundingClientRect();
+          return { day: Number(c.dataset.day), left: b.left, right: b.right };
+        });
+        const at = (y) => Math.min(endHour * 60, Math.max(startHour * 60, startHour * 60 + ((y - top) / hourPx) * 60));
+        const grab = at(e.clientY);
+        drag.current = {
+          kind, cols, at, grab, moved: false, ghost: null, y0: e.clientY,
+          id: row ? row.id : null,
+          day: row ? row.day : day,
+          start: row ? row.start_min : snap(grab),
+          end: row ? row.end_min : snap(grab) + 60,
+        };
+        window.addEventListener("pointermove", onDragMove);
+        window.addEventListener("pointerup", onDragEnd, { once: true });
+      }
+      function onDragMove(e) {
+        const d = drag.current;
+        if (!d) return;
+        if (Math.abs(e.clientY - d.y0) > 3) d.moved = true;
+        const m = d.at(e.clientY);
+        if (Math.abs(m - d.grab) > 4) d.moved = true;
+        let g;
+        if (d.kind === "new") {
+          const a = snap(Math.min(d.grab, m));
+          const b = snap(Math.max(d.grab, m));
+          g = { kind: "new", day: d.day, start: a, end: Math.max(b, a + SNAP) };
+        } else if (d.kind === "resize") {
+          g = { kind: "row", id: d.id, day: d.day, start: d.start, end: Math.max(snap(m), d.start + SNAP) };
+        } else {
+          const dur = d.end - d.start;
+          let s = snap(d.start + (m - d.grab));
+          s = Math.max(startHour * 60, Math.min(endHour * 60 - dur, s));
+          let day = d.day;
+          for (const c of d.cols) if (e.clientX >= c.left && e.clientX < c.right) day = c.day;
+          if (day !== d.day) d.moved = true;
+          g = { kind: "row", id: d.id, day, start: s, end: s + dur };
+        }
+        d.ghost = g;
+        setGhost(g);
+      }
+      function onDragEnd() {
+        window.removeEventListener("pointermove", onDragMove);
+        const d = drag.current;
+        drag.current = null;
+        setGhost(null);
+        if (!d) return;
+        const g = d.ghost;
+        if (d.kind === "new") {
+          // A tap with no pull still means "a class here" — give it the usual hour.
+          const start = g ? g.start : snap(d.grab);
+          const end = g ? g.end : Math.min(endHour * 60, snap(d.grab) + 60);
+          setEditing(null);
+          setDraft({ day: d.day, start, end, title: "", days: [d.day] });
+          return;
+        }
+        if (!d.moved || !g) {
+          if (d.kind === "move") {
+            const r = shown.find((x) => x.id === d.id);
+            if (r) setEditing({ id: r.id, title: r.title, days: meetingDays(r), was: meetingDays(r) });
+          }
+          return;
+        }
+        setPending({ id: d.id, day: g.day, start: g.start, end: g.end });
+        write("api/class/" + d.id, { day: g.day, start_min: g.start, end_min: g.end });
+      }
+
+      // The same class, in the same slot, on its other days. A repeat is not a field on a
+      // row here — it IS the other rows, which is why one meeting can still move on its own.
+      function meetingDays(r) {
+        return shown.filter((x) => x.title === r.title && x.start_min === r.start_min && x.end_min === r.end_min)
+          .map((x) => x.day).sort((a, b) => a - b);
+      }
+      function commitDraft() {
+        const t = (draft.title || "").trim();
+        const days = draft.days.length ? draft.days : [draft.day];
+        if (t) write("api/class", { title: t, days, start_min: draft.start, end_min: draft.end });
+        setDraft(null);
+      }
+      async function commitRename() {
+        const e = editing;
+        setEditing(null);
+        const row = shown.find((r) => r.id === e.id);
+        if (!row) return;
+        const t = (e.title || "").trim();
+        const name = t || row.title;
+        const dropped = e.was.filter((d) => !e.days.includes(d));
+        // Turning off every day means the class does not meet at all any more, which is a
+        // removal — the one edit here worth a question before it happens.
+        if (!e.days.length && dropped.length) {
+          const sure = await frame.confirm(`Remove ${name}?`, { title: "Remove", okLabel: "Remove" });
+          if (!sure) return;
+        }
+        // Renaming applies to the whole class, not the one meeting you happened to click:
+        // leaving two Mondays called the old thing is never what anyone meant.
+        if (t && t !== row.title) write("api/class/" + e.id, { title: t, apply_all: true });
+        for (const d of e.days) {
+          if (e.was.includes(d)) continue;
+          write("api/class", { title: name, days: [d], start_min: row.start_min, end_min: row.end_min, place: row.place });
+        }
+        for (const d of dropped) {
+          const gone = shown.find((x) => x.day === d && x.title === row.title
+            && x.start_min === row.start_min && x.end_min === row.end_min);
+          if (gone) write("api/class/" + gone.id + "/delete");
+        }
+      }
+      // The touch and keyboard path to the same thing the drag does.
+      function quickAdd() {
+        const base = Math.min(endHour * 60 - 60, Math.max(startHour * 60, snap(now + SNAP)));
+        setView("week");
+        setEditing(null);
+        setDraft({ day: today, start: base, end: base + 60, title: "", days: [today] });
+      }
+      function openDetails(r) {
+        setEditing(null);
+        setSheet({ id: r.id, title: r.title, days: [r.day], from: hhmm(r.start_min), to: hhmm(r.end_min), place: r.place });
+      }
+      function save() {
+        const s = sheet;
+        const title = (s.title || "").trim();
+        if (!title || !s.days.length) return;
+        const start = parseTime(s.from, 540);
+        const end = parseTime(s.to, start + 60);
+        if (s.id) write("api/class/" + s.id, { title, day: s.days[0], start_min: start, end_min: end, place: (s.place || "").trim() });
+        else write("api/class", { title, days: s.days, start_min: start, end_min: end, place: (s.place || "").trim() });
+        setSheet(null);
+      }
+      async function removeIt() {
+        const s = sheet;
+        const same = shown.filter((r) => r.title === s.title).length;
+        const what = same > 1
+          ? await frame.choose(s.title, {
+              title: "Remove",
+              options: [
+                { id: "one", label: "Just this meeting", icon: "ph-calendar-x", detail: DAYS[s.days[0]] },
+                { id: "all", label: "Every meeting", icon: "ph-trash-simple", detail: `all ${same}` },
+              ],
+            })
+          : ((await frame.confirm(`Remove ${s.title}?`, { title: "Remove", okLabel: "Remove" })) ? "one" : null);
+        if (what === "one") write("api/class/" + s.id + "/delete");
+        else if (what === "all") write("api/class/" + s.id + "/delete_all");
+        if (what) setSheet(null);
+      }
+
+      // ---- today ------------------------------------------------------------------------
+      const todays = shown.filter((r) => r.day === today).sort((a, b) => a.start_min - b.start_min);
+      const live = todays.find((r) => now >= r.start_min && now < r.end_min);
+      const next = todays.find((r) => r.start_min > now);
+      const big = live ? durText(live.end_min - now)
+        : next ? durText(next.start_min - now)
+        : todays.length ? "done" : "clear";
+      const cap = live ? `left of ${live.title}${live.place ? ", " + live.place : ""}`
+        : next ? `until ${next.title}${next.place ? ", " + next.place : ""}`
+        : todays.length ? "nothing else today" : "nothing on today";
+      const verdict = shown.length === 0 ? null
+        : live ? html`<em>${live.title}</em> now${live.place ? ", " + live.place : ""}, until ${hhmm(live.end_min)}.`
+        : next ? html`Next: <em>${next.title}</em> at ${hhmm(next.start_min)}${next.place ? ", " + next.place : ""}.`
+        : todays.length ? html`Nothing else today.`
+        : html`Nothing today.`;
+
+      // Once today is spent, the honest next question is tomorrow's. Only shown when today
+      // has nothing left to say, so it never competes with the countdown.
+      let peek = null;
+      if (!live && !next && shown.length) {
+        for (let i = 1; i <= 7; i++) {
+          const d = (today + i) % 7;
+          const list = shown.filter((r) => r.day === d).sort((a, b) => a.start_min - b.start_min);
+          if (list.length) { peek = { day: d, when: i === 1 ? "tomorrow" : DAYS[d], list: list.slice(0, 4) }; break; }
+        }
+      }
+
+      const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
+      const cols = `var(--gutter) repeat(${days.length}, minmax(58px, 1fr))`;
+
+      const timeStrip = (a, b) => hhmm(a) + "–" + hhmm(b);
+      // Two letters, not one: m/t/w/t/f/s/s asks you to count, and you are counting under
+      // a caret you are already typing into.
+      const dayStrip = (sel, toggle) => html`
+        <div class="days-mini" onPointerDown=${(e) => e.stopPropagation()}>
+          ${DAYS.map((d, i) => html`
+            <button key=${d} type="button" title=${d} class=${sel.includes(i) ? "on" : ""}
+              onMouseDown=${(e) => e.preventDefault()}
+              onClick=${() => toggle(i)}>${d.slice(0, 2)}</button>`)}
+        </div>`;
+      const agRow = (r, k) => html`
+        <div class=${"ag" + (r === live ? " now" : r.day === today && now >= r.end_min ? " past" : "")} key=${k}
+          style=${"--bc: " + channelFor(r.title)}>
+          <span class="when">${hhmm(r.start_min)}</span>
+          <span class="who">
+            <span class="nm">${r.title}</span>
+            ${r.place ? html`<span class="pl">${r.place}</span>` : null}
+          </span>
+          <span class="dur">${durText(r.end_min - r.start_min)}</span>
+        </div>`;
+      const peekBlock = peek ? html`
+        <div class="peek">
+          <div class="lbl">${peek.when}</div>
+          ${peek.list.map((r) => agRow(r, "p" + r.id))}
+        </div>` : null;
+
+      return html`
+        <main class=${isEditor ? "" : "read-only"}>
+          <div class="header">
+            <i class="ph-light ph-calendar-blank"></i>
+            <h1>Class Schedule</h1>
+            <span class="mode">${mode}</span>
+          </div>
+
+          ${!isEditor ? html`
+            <div class="banner">
+              <i class="ph-light ph-eye"></i>
+              <span>${me.is_anon ? "You are looking at this timetable." : "You can see this timetable but not change it."}</span>
+            </div>` : null}
+
+          <div class="toolbar">
+            <div class="seg">
+              <button class=${view === "today" ? "active" : ""} onClick=${() => setView("today")}>today</button>
+              <button class=${view === "week" ? "active" : ""} onClick=${() => setView("week")}>week</button>
+            </div>
+            <span class="sp"></span>
+            ${isEditor && view === "week" ? html`<span class="tip">drag to block time</span>` : null}
+            ${isEditor ? html`
+              <button class="iconbtn" title="Add a class" onClick=${quickAdd}>
+                <i class="ph-light ph-plus"></i>
+              </button>` : null}
+          </div>
+
+          ${view === "today" ? html`
+            <div class="countdown" style=${"--ch: " + (live ? channelFor(live.title) : next ? channelFor(next.title) : "var(--os-c1)")}>
+              <span class=${"big" + (live ? " live" : "")}>${big}</span>
+              <span class="cap">${cap}</span>
+            </div>
+            ${todays.length ? html`
+              <div class="agenda">
+                ${todays.map((r) => agRow(r, r.id))}
+                ${peekBlock}
+              </div>`
+            : peekBlock ? html`<div class="agenda">${peekBlock}</div>`
+            : html`
+              <div class="empty">
+                <i class="ph-light ph-calendar-blank"></i>
+                <span>${shown.length ? "No classes today." : isEditor ? "Nothing here yet. Open the week and drag to block in your first class." : "Nothing here yet."}</span>
+              </div>`}`
+          : html`
+            ${verdict ? html`<div class="verdict">${verdict}</div>` : null}
+            <div class="weekwrap" ref=${wrapRef}>
+              <div class="week" style=${"grid-template-columns: " + cols}>
+                <div class="corner"></div>
+                ${days.map((d) => html`
+                  <div class=${"dayhead" + (d === today ? " today" : "")} key=${"h" + d}>${DAYS[d]}</div>`)}
+
+                <div class="gutter" style=${"height:" + span * hourPx + "px"}>
+                  ${Array.from({ length: span + 1 }, (_, i) => html`
+                    <span class="hourlabel" key=${i} style=${"top:" + i * hourPx + "px"}>${hourLabel(startHour + i)}</span>`)}
+                </div>
+
+                ${days.map((d) => html`
+                  <div class=${"col" + (d === today ? " today" : "") + (isEditor ? " drawable" : "")} key=${"c" + d}
+                    data-day=${d}
+                    style=${"height:" + span * hourPx + "px"}
+                    onPointerDown=${(e) => startDrag(e, "new", null, d)}>
+                    ${Array.from({ length: span }, (_, i) => html`
+                      <div class="hourline" key=${"l" + i} style=${"top:" + i * hourPx + "px"}></div>`)}
+                    ${Array.from({ length: span }, (_, i) => html`
+                      <div class="hourline half" key=${"hl" + i} style=${"top:" + (i + 0.5) * hourPx + "px"}></div>`)}
+
+                    ${shown.filter((r) => r.day === d).map((r) => {
+                      const top = topFor(r.start_min);
+                      const h = Math.max(16, topFor(r.end_min) - top);
+                      const isLive = d === today && now >= r.start_min && now < r.end_min;
+                      const isNaming = editing && editing.id === r.id;
+                      return html`
+                        <div class=${"block" + (isLive ? " live" : "") + (isNaming ? " renaming" + (d >= days.length - 2 ? " flip" : "") : "") + (ghost && ghost.id === r.id ? " lifted" : "")} key=${r.id}
+                          style=${`top:${top}px; height:${h}px; --bc: ${channelFor(r.title)}`}
+                          tabindex=${isEditor ? 0 : -1}
+                          title=${`${r.title} · ${timeStrip(r.start_min, r.end_min)}${r.place ? " · " + r.place : ""}`}
+                          onPointerDown=${isNaming ? null : (e) => startDrag(e, "move", r, d)}
+                          onKeyDown=${(e) => { if (isEditor && !isNaming && e.key === "Enter") setEditing({ id: r.id, title: r.title, days: meetingDays(r), was: meetingDays(r) }); }}>
+                          ${isNaming ? html`
+                            <input ref=${nameRef} maxlength="120" value=${editing.title}
+                              onInput=${(e) => setEditing({ ...editing, title: e.target.value })}
+                              onBlur=${commitRename}
+                              onKeyDown=${(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+                                if (e.key === "Escape") { e.preventDefault(); setEditing(null); }
+                              }} />
+                            <span class="t2">
+                              <span>${timeStrip(r.start_min, r.end_min)}</span>
+                              <button class="more" title="Details" onPointerDown=${(e) => e.stopPropagation()}
+                                onMouseDown=${(e) => e.preventDefault()}
+                                onClick=${() => openDetails(r)}>details</button>
+                            </span>
+                            ${dayStrip(editing.days, (i) => setEditing({
+                              ...editing,
+                              days: editing.days.includes(i) ? editing.days.filter((x) => x !== i) : [...editing.days, i],
+                            }))}`
+                          : html`
+                            <span class="t">${r.title}</span>
+                            ${h > 30 ? html`<span class="w">${hhmm(r.start_min)}${r.place ? " · " + r.place : ""}</span>` : null}`}
+                          ${isEditor && !isNaming ? html`
+                            <span class="grip" onPointerDown=${(e) => startDrag(e, "resize", r, d)}></span>` : null}
+                        </div>`;
+                    })}
+
+                    ${ghost && ghost.kind === "new" && ghost.day === d ? html`
+                      <div class="ghost" style=${`top:${topFor(ghost.start)}px; height:${Math.max(14, topFor(ghost.end) - topFor(ghost.start))}px`}>
+                        ${timeStrip(ghost.start, ghost.end)}
+                      </div>` : null}
+
+                    ${draft && draft.day === d ? html`
+                      <div class=${"naming-new" + (d >= days.length - 2 ? " flip" : "")} style=${`top:${topFor(draft.start)}px; height:${Math.max(30, topFor(draft.end) - topFor(draft.start))}px`}>
+                        <input ref=${nameRef} maxlength="120" placeholder="name it" value=${draft.title}
+                          onInput=${(e) => setDraft({ ...draft, title: e.target.value })}
+                          onBlur=${commitDraft}
+                          onKeyDown=${(e) => {
+                            if (e.key === "Enter") { e.preventDefault(); commitDraft(); }
+                            if (e.key === "Escape") { e.preventDefault(); setDraft(null); }
+                          }} />
+                        <span class="t2">${timeStrip(draft.start, draft.end)}</span>
+                        ${dayStrip(draft.days, (i) => setDraft({
+                          ...draft,
+                          days: draft.days.includes(i) ? draft.days.filter((x) => x !== i) : [...draft.days, i],
+                        }))}
+                      </div>` : null}
+
+                    ${d === today && now >= startHour * 60 && now <= endHour * 60
+                      ? html`<div class="nowline" style=${"top:" + topFor(now) + "px"}></div>` : null}
+                  </div>`)}
+              </div>
+            </div>`}
+
+          ${sheet ? html`
+            <div class="scrim" onClick=${() => setSheet(null)}>
+              <div class="sheet" onClick=${(e) => e.stopPropagation()}>
+                <h2>${sheet.id ? "Edit class" : "Add a class"}</h2>
+                <div class="field">
+                  <label>what</label>
+                  <input autofocus maxlength="120" placeholder="Linear Algebra" value=${sheet.title}
+                    onInput=${(e) => setSheet({ ...sheet, title: e.target.value })}
+                    onKeyDown=${(e) => { if (e.key === "Enter") save(); }} />
+                </div>
+                <div class="field">
+                  <label>${sheet.id ? "day" : "days"}</label>
+                  <div class="days">
+                    ${DAYS.map((d, i) => html`
+                      <button key=${d} class=${sheet.days.includes(i) ? "on" : ""}
+                        onClick=${() => setSheet({
+                          ...sheet,
+                          days: sheet.id ? [i]
+                            : sheet.days.includes(i) ? sheet.days.filter((x) => x !== i) : [...sheet.days, i],
+                        })}>${d}</button>`)}
+                  </div>
+                </div>
+                <div class="times">
+                  <div class="field">
+                    <label>from</label>
+                    <input value=${sheet.from} placeholder="9:00"
+                      onInput=${(e) => setSheet({ ...sheet, from: e.target.value })} />
+                  </div>
+                  <span class="dash">–</span>
+                  <div class="field">
+                    <label>to</label>
+                    <input value=${sheet.to} placeholder="10:00"
+                      onInput=${(e) => setSheet({ ...sheet, to: e.target.value })} />
+                  </div>
+                </div>
+                <div class="field">
+                  <label>where</label>
+                  <input maxlength="80" placeholder="Room 2.04" value=${sheet.place}
+                    onInput=${(e) => setSheet({ ...sheet, place: e.target.value })}
+                    onKeyDown=${(e) => { if (e.key === "Enter") save(); }} />
+                </div>
+                <div class="sheet-foot">
+                  ${sheet.id ? html`<button class="btn-quiet" onClick=${removeIt}>remove</button>` : null}
+                  <span class="sp"></span>
+                  <button class="btn-quiet" onClick=${() => setSheet(null)}>cancel</button>
+                  <button class="btn-primary" disabled=${!sheet.title.trim() || !sheet.days.length} onClick=${save}>
+                    ${sheet.id ? "save" : "add"}
+                  </button>
+                </div>
+              </div>
+            </div>` : null}
+        </main>`;
+    }
+
+    render(html`<${App} />`, document.getElementById("app"));
+  </script>
+</body>
+</html>

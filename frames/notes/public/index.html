@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notes</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    /* the render root carries the height too, or `main { height: 100% }` resolves
+       against an auto-height div and the frame stops driving its own layout */
+    html, body, #app { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      height: 100%; max-width: 620px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-xl));
+    }
+
+    /* ---- header rail --------------------------------------------------------------- */
+    .header { display: flex; align-items: center; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .header > i {
+      flex: 0 0 auto; width: 24px; height: 24px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 20px; line-height: 1; color: var(--ch);
+    }
+    .header h1 {
+      flex: 1 1 auto; min-width: 0; margin: 0;
+      font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); line-height: 24px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .header .mode {
+      flex: 0 0 auto; height: 24px; display: inline-flex; align-items: center;
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted); white-space: nowrap;
+    }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm);
+      color: var(--os-text-secondary); flex: 0 0 auto;
+    }
+
+    /* ---- the composer ----------------------------------------------------------------
+       Always open, always the first thing. There is no "new note" button because a button
+       is a decision, and the decision is the friction this frame exists to remove. */
+    .composer {
+      flex: 0 0 auto;
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-md); padding: var(--os-sp-sm) var(--os-sp-md);
+      transition: border-color 150ms, box-shadow 150ms;
+    }
+    .composer:focus-within { border-color: var(--os-text-subtle); box-shadow: var(--os-shadow-sm); }
+    .composer textarea {
+      display: block; width: 100%; border: 0; background: none; box-shadow: none; resize: none;
+      font: inherit; font-size: var(--os-fs-sm); line-height: 1.55; color: var(--os-text);
+      padding: var(--os-sp-xs) 0; min-height: 44px; max-height: 40vh; overflow-y: auto;
+    }
+    .composer textarea:focus { outline: none; background: none; box-shadow: none; }
+    .composer textarea::placeholder { color: var(--os-text-muted); }
+    .c-foot {
+      display: flex; align-items: center; gap: var(--os-sp-sm);
+      padding-top: var(--os-sp-xs); min-height: 0;
+    }
+    .c-hint {
+      flex: 1 1 auto; min-width: 0; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .c-hint code {
+      font-family: var(--os-font-mono); font-size: 10px;
+      background: var(--os-bg-inset); border-radius: var(--os-radius-sm); padding: 1px 4px;
+    }
+    .btn-primary {
+      background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); border: 0; cursor: pointer;
+      padding: var(--os-sp-xs) var(--os-sp-md); border-radius: var(--os-radius-md);
+      font: inherit; font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium);
+      white-space: nowrap; flex: 0 0 auto;
+      transition: filter 150ms, transform 80ms var(--os-ease-spring), opacity 150ms;
+    }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+    .btn-primary:active:not(:disabled) { transform: scale(0.97); }
+    .btn-primary:disabled { opacity: 0.4; cursor: default; }
+    .btn-primary:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .read-only .composer { display: none; }
+
+    /* ---- tag filter ------------------------------------------------------------------ */
+    .tagbar { display: flex; align-items: center; gap: var(--os-sp-xs); flex-wrap: wrap; flex: 0 0 auto; }
+    button.tag {
+      font: inherit; font-size: var(--os-fs-2xs); cursor: pointer;
+      background: var(--os-bg-inset); color: var(--os-text-muted); border: 0;
+      border-radius: var(--os-radius-full); padding: 2px var(--os-sp-sm); white-space: nowrap;
+      transition: color 150ms, background 150ms, box-shadow 150ms;
+    }
+    button.tag:hover:not(.active) { color: var(--os-text); background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color-subtle); }
+    button.tag.active { background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); }
+    button.tag:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    /* ---- the stream ------------------------------------------------------------------ */
+    .stream { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-bottom: var(--os-sp-sm); }
+    .day {
+      font-size: 11px; font-weight: var(--os-weight-semibold); text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--os-text-muted);
+      margin: var(--os-sp-lg) 0 var(--os-sp-sm);
+    }
+    .stream > .day:first-child { margin-top: 0; }
+
+    .note {
+      position: relative; padding: var(--os-sp-sm) var(--os-sp-md);
+      border-left: 2px solid var(--os-border-color-subtle);
+      margin-bottom: var(--os-sp-md);
+      transition: border-color 150ms;
+    }
+    .note:hover { border-color: var(--os-text-subtle); }
+    /* pinned is the one piece of state a note carries, so it gets the channel and says so */
+    .note.pinned { border-color: var(--ch); }
+    /* THE ONE FUN MOMENT: a new note settles into the stream rather than blinking into it,
+       so posting feels like putting something down. */
+    .note.fresh { animation: settle 260ms var(--os-ease-spring); }
+    @keyframes settle {
+      0%   { opacity: 0; transform: translateY(-6px) scale(0.985); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @media (prefers-reduced-motion: reduce) { .note.fresh { animation: none; } }
+
+    .n-body {
+      font-size: var(--os-fs-sm); line-height: 1.55; white-space: pre-wrap;
+      overflow-wrap: anywhere; color: var(--os-text);
+    }
+    .n-body .hash { color: var(--ch); }
+    .n-meta {
+      display: flex; align-items: center; gap: var(--os-sp-sm);
+      margin-top: var(--os-sp-xs); font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1;
+    }
+    .n-meta .who::before { content: "·"; margin-right: var(--os-sp-sm); }
+    .n-acts { margin-left: auto; display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 150ms; }
+    .note:hover .n-acts, .n-acts:focus-within { opacity: 1; }
+    .read-only .n-acts { display: none; }
+    .iconbtn {
+      flex: 0 0 auto; width: 22px; height: 22px; padding: 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-subtle); font-size: 14px; line-height: 1;
+      transition: color 150ms, background 150ms;
+    }
+    .iconbtn i { font-size: 14px; line-height: 1; color: inherit; width: auto; height: auto; }
+    .iconbtn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+    .iconbtn:active { transform: scale(0.92); }
+    .iconbtn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); opacity: 1; }
+    .iconbtn.on { color: var(--ch); }
+    .iconbtn.danger:hover { color: var(--os-cError); }
+    .iconbtn.armed { color: var(--os-cError); background: var(--os-cError-muted); opacity: 1; }
+
+    .edit-area {
+      width: 100%; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm);
+      background: var(--os-bg-surface); font: inherit; font-size: var(--os-fs-sm);
+      line-height: 1.55; color: var(--os-text); padding: var(--os-sp-sm); resize: vertical;
+      min-height: 70px;
+    }
+    .edit-area:focus { outline: none; border-color: var(--os-text-muted); box-shadow: none; }
+    .edit-foot { display: flex; gap: var(--os-sp-sm); margin-top: var(--os-sp-xs); }
+    .btn-quiet {
+      background: none; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-xs) var(--os-sp-md); cursor: pointer;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      transition: box-shadow 40ms ease, background 40ms ease, padding 40ms ease, color 150ms, border-color 150ms;
+    }
+    .btn-quiet:hover { color: var(--os-text); border-color: var(--os-text-subtle); background: var(--os-bg-subtle); }
+    .btn-quiet:active { padding: 5px var(--os-sp-md) 3px; background: var(--os-bg-inset); box-shadow: inset 0 2px 4px rgba(0,0,0,0.07); }
+    .btn-quiet:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-xl); }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+
+    const DAY = 86400000;
+    const dayKey = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+    function dayLabel(k) {
+      const today = dayKey(Date.now());
+      if (k === today) return "today";
+      if (k === today - DAY) return "yesterday";
+      const d = new Date(k);
+      const sameYear = d.getFullYear() === new Date().getFullYear();
+      return d.toLocaleDateString(undefined, sameYear
+        ? { weekday: "short", month: "short", day: "numeric" }
+        : { month: "short", day: "numeric", year: "numeric" });
+    }
+    const clock = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+    // Render #tags in the channel colour without ever putting user text through innerHTML.
+    function bodyParts(text) {
+      const out = [];
+      const re = /(^|\s)(#[\p{L}\p{N}][\p{L}\p{N}_-]{0,39})/gu;
+      let last = 0, m;
+      while ((m = re.exec(text)) !== null) {
+        const start = m.index + m[1].length;
+        if (start > last) out.push(text.slice(last, start));
+        out.push(html`<span class="hash">${m[2]}</span>`);
+        last = start + m[2].length;
+      }
+      if (last < text.length) out.push(text.slice(last));
+      return out;
+    }
+
+    function App() {
+      const [me, setMe]       = useState(null);
+      const [notes, setNotes] = useState(null);
+      const [draft, setDraft] = useState("");
+      const [tag, setTag]     = useState(null);
+      const [editing, setEditing] = useState(null);   // { id, body }
+      const [armed, setArmed] = useState(null);
+      const [freshId, setFreshId] = useState(null);
+      const taRef = useRef(null);
+      const armTimer = useRef(null);
+
+      async function refresh() {
+        const r = await frame.api("api/list").catch(() => null);
+        if (r && r.notes) setNotes(r.notes);
+      }
+      const write = (path, body) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+          return Promise.resolve({});
+        }
+        return frame.api(path, body);
+      };
+      useEffect(() => {
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({ notes_changed: refresh });
+
+      // The composer grows with what you type rather than scrolling inside a fixed box —
+      // a capture surface should never make you scroll to see your own sentence.
+      function grow(el) {
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = Math.min(el.scrollHeight, window.innerHeight * 0.4) + "px";
+      }
+
+      if (!me || notes === null) return html`<div></div>`;
+      const isEditor = !!me.is_sfi_editor;
+      const all = notes;
+
+      function post() {
+        const body = draft.trim();
+        if (!body) return;
+        write("api/note", { body }).catch(() => {});
+        setDraft("");
+        // Mark the newest existing id so the settle animation lands on the note that
+        // arrives next, not on whatever is currently at the top.
+        setFreshId("pending");
+        if (taRef.current) { taRef.current.style.height = "auto"; taRef.current.focus(); }
+      }
+      function saveEdit() {
+        if (!editing) return;
+        const body = editing.body.trim();
+        if (body) write("api/note/" + editing.id, { body }).catch(() => {});
+        setEditing(null);
+      }
+      function trash(n) {
+        if (armed !== n.id) {
+          setArmed(n.id);
+          if (armTimer.current) clearTimeout(armTimer.current);
+          armTimer.current = setTimeout(() => setArmed(null), 2500);
+          return;
+        }
+        setArmed(null);
+        if (armTimer.current) clearTimeout(armTimer.current);
+        setNotes((xs) => xs && xs.filter((x) => x.id !== n.id));
+        write("api/note/" + n.id + "/delete", {}).catch(() => {});
+      }
+
+      // Authorship only earns its space once more than one person has written here.
+      const authors = new Set(all.map((n) => n.author_id).filter(Boolean));
+      const showWho = authors.size > 1;
+
+      const allTags = [...new Set(all.flatMap((n) => n.tags))].sort();
+      const active = tag && allTags.includes(tag) ? tag : null;
+      const shown = active ? all.filter((n) => n.tags.includes(active)) : all;
+
+      const pinned = shown.filter((n) => n.pinned);
+      const rest = shown.filter((n) => !n.pinned);
+      const days = [];
+      for (const n of rest) {
+        const k = dayKey(n.created_ms);
+        if (!days.length || days[days.length - 1].k !== k) days.push({ k, rows: [] });
+        days[days.length - 1].rows.push(n);
+      }
+      const newest = all.length ? all[0].id : null;
+      const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
+
+      const noteView = (n) => editing && editing.id === n.id
+        ? html`
+          <div class="note" key=${n.id}>
+            <textarea class="edit-area" value=${editing.body} autofocus
+              onInput=${(e) => setEditing({ ...editing, body: e.target.value })}
+              onKeyDown=${(e) => {
+                if (e.key === "Escape") setEditing(null);
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveEdit();
+              }}></textarea>
+            <div class="edit-foot">
+              <button class="btn-primary" onClick=${saveEdit}>save</button>
+              <button class="btn-quiet" onClick=${() => setEditing(null)}>cancel</button>
+            </div>
+          </div>`
+        : html`
+          <div class=${"note" + (n.pinned ? " pinned" : "") + (freshId === "pending" && n.id === newest ? " fresh" : "")} key=${n.id}>
+            <div class="n-body">${bodyParts(String(n.body))}</div>
+            <div class="n-meta">
+              <span>${clock(n.created_ms)}</span>
+              ${n.edited_ms ? html`<span>edited</span>` : null}
+              ${showWho && n.author_name ? html`<span class="who">${n.author_name}</span>` : null}
+              ${isEditor ? html`
+                <span class="n-acts">
+                  <button class=${"iconbtn" + (n.pinned ? " on" : "")}
+                    title=${n.pinned ? "Unpin" : "Pin to the top"}
+                    onClick=${() => write("api/note/" + n.id + "/pin", { pinned: n.pinned ? 0 : 1 })}>
+                    <i class="ph-light ph-push-pin"></i>
+                  </button>
+                  <button class="iconbtn" title="Edit" onClick=${() => setEditing({ id: n.id, body: n.body })}>
+                    <i class="ph-light ph-pencil-simple"></i>
+                  </button>
+                  <button class=${"iconbtn danger" + (armed === n.id ? " armed" : "")}
+                    title=${armed === n.id ? "Press again to delete" : "Delete"}
+                    onClick=${() => trash(n)} onBlur=${() => setArmed(null)}>
+                    <i class=${"ph-light " + (armed === n.id ? "ph-trash" : "ph-trash-simple")}></i>
+                  </button>
+                </span>` : null}
+            </div>
+          </div>`;
+
+      return html`
+        <main class=${isEditor ? "" : "read-only"}>
+          <div class="header">
+            <i class="ph-light ph-note-pencil"></i>
+            <h1>Notes</h1>
+            <span class="mode">${mode}</span>
+          </div>
+
+          ${!isEditor ? html`
+            <div class="banner">
+              <i class="ph-light ph-eye"></i>
+              <span>${me.is_anon ? "You are reading these notes." : "You can read these notes but not add to them."}</span>
+            </div>` : null}
+
+          ${isEditor ? html`
+            <div class="composer">
+              <textarea ref=${taRef} rows="1" maxlength="4000" placeholder="What's on your mind?"
+                value=${draft}
+                onInput=${(e) => { setDraft(e.target.value); grow(e.target); }}
+                onKeyDown=${(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); } }}></textarea>
+              <div class="c-foot">
+                <span class="c-hint">start a word with <code>#</code> to tag it · <code>${navigator.platform.includes("Mac") ? "⌘" : "ctrl"}↵</code> to post</span>
+                <button class="btn-primary" disabled=${!draft.trim()} onClick=${post}>post</button>
+              </div>
+            </div>` : null}
+
+          ${allTags.length ? html`
+            <div class="tagbar">
+              ${allTags.map((t) => html`
+                <button class=${"tag" + (active === t ? " active" : "")} key=${t}
+                  onClick=${() => setTag(active === t ? null : t)}>#${t}</button>`)}
+            </div>` : null}
+
+          <div class="stream">
+            ${all.length === 0
+              ? html`<div class="empty">${isEditor ? "Nothing yet. The box above is waiting." : "Nothing here yet."}</div>`
+              : shown.length === 0
+                ? html`<div class="empty">Nothing tagged #${active}.</div>`
+                : html`
+                  ${pinned.length ? html`
+                    <div class="day">pinned</div>
+                    ${pinned.map(noteView)}` : null}
+                  ${days.map((d) => html`
+                    <div key=${d.k}>
+                      <div class="day">${dayLabel(d.k)}</div>
+                      ${d.rows.map(noteView)}
+                    </div>`)}
+                `}
+          </div>
+        </main>`;
+    }
+
+    render(html`<${App} />`, document.getElementById("app"));
+  </script>
+</body>
+</html>

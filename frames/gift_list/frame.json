@@ -1,0 +1,17 @@
+{
+    "name": "Gift List",
+    "description": "A wish list that can keep a secret. Everyone adds what they would like, and anyone else can quietly claim an item so two people don't buy the same thing — but the person the gift is for never sees the claims. They see their own list exactly as they wrote it, plus an honest note that something is being kept from them, which is the fun part. Works for a family Christmas, a birthday, or a baby shower, and the list can be shared publicly so relatives with no account can still see what is wanted and put their name on something. Wishes live in an encrypted LocalTable scoped to the placement; the owner can move them to a shared space table.",
+    "frame_type": "Tandem",
+    "tags": ["household", "family", "gifts"],
+    "permissions": {
+        "net": []
+    },
+    "default_width_px": 560,
+    "default_height_px": 560,
+    "created_at": "2026-08-07T20:45:00Z",
+    "modified_at": "2026-08-07T20:45:00Z",
+    "app_version_min": "0.2.5",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

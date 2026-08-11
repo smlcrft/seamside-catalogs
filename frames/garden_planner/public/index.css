@@ -1,0 +1,561 @@
+body {
+  padding: var(--os-sp-lg);
+  margin: 0;
+  background: var(--os-bg);
+}
+
+.hidden { display: none !important; }
+
+/* ----- Header ----- */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--os-sp-md);
+  margin-bottom: var(--os-sp-md);
+  flex-wrap: wrap;
+}
+.page-header .title {
+  display: flex;
+  align-items: center;
+  gap: var(--os-sp-sm);
+}
+.page-header h1 {
+  margin: 0;
+  font-size: var(--os-fs-lg);
+  font-weight: var(--os-weight-semibold);
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--os-sp-sm);
+  flex-wrap: wrap;
+}
+.badge {
+  font-size: var(--os-fs-xs);
+  color: var(--os-text-muted);
+  background: var(--os-bg-subtle);
+  padding: 2px var(--os-sp-sm);
+  border-radius: var(--os-radius-full);
+}
+.weather-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--os-sp-xs);
+  font-size: var(--os-fs-xs);
+  color: var(--os-text-secondary);
+  background: var(--os-bg-subtle);
+  padding: 2px var(--os-sp-sm);
+  border-radius: var(--os-radius-full);
+  border: 1px solid var(--os-border-color-subtle);
+  white-space: nowrap;
+}
+
+/* ----- Notes ----- */
+.readonly-note,
+.setup-note {
+  display: flex;
+  align-items: center;
+  gap: var(--os-sp-xs);
+  font-size: var(--os-fs-sm);
+  margin: 0 0 var(--os-sp-md);
+}
+.link {
+  background: none;
+  border: none;
+  color: var(--os-text-secondary);
+  text-decoration: underline;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* ----- Legend ----- */
+.legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--os-sp-sm);
+  margin-bottom: var(--os-sp-md);
+  font-size: var(--os-fs-xs);
+  color: var(--os-text-muted);
+}
+.legend-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--os-fs-2xs);
+}
+.stress-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--os-sp-xs);
+  font-size: var(--os-fs-xs);
+  padding: 2px var(--os-sp-sm);
+  border-radius: var(--os-radius-full);
+  border: 1px solid var(--os-border-color-subtle);
+  background: var(--os-bg-surface);
+  color: var(--os-text-secondary);
+}
+.stress-chip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--stress-low, #4ade80);
+}
+.stress-chip.stress-mid .dot { background: var(--stress-mid, #facc15); }
+.stress-chip.stress-high .dot { background: var(--stress-high, #ef4444); }
+.stress-chip.stress-unknown .dot { background: var(--os-text-subtle); }
+
+/* ----- Canvas ----- */
+.canvas-wrap {
+  /* hug the bed. The grid is a fixed pixel size, so a 100%-wide wrapper drew an empty
+     white apron beside the soil in any frame wider than the garden — the border should
+     be around the plot, not around the leftover room. */
+  width: fit-content;
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--os-border-color);
+  border-radius: var(--os-radius-md);
+  background: var(--os-bg-surface);
+}
+.canvas {
+  position: relative;
+  /* Soil-toned light brown ground with a subtle two-tone cross-hatch for depth. */
+  background-color: #d6b48a;
+  background-image:
+    linear-gradient(rgba(120, 80, 40, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 80, 40, 0.08) 1px, transparent 1px);
+  background-position: 0 0, 0 0;
+  /* size set inline via JS to match grid_px so lines align with snap grid */
+}
+.canvas.is-edit {
+  cursor: crosshair;
+  background-image:
+    linear-gradient(rgba(120, 80, 40, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 80, 40, 0.18) 1px, transparent 1px);
+}
+
+/* ----- Empty state ----- */
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--os-sp-sm);
+  color: var(--os-text-muted);
+  font-size: var(--os-fs-sm);
+  pointer-events: none;
+}
+.empty .icon-md {
+  font-size: 32px;
+  color: var(--os-text-subtle);
+}
+
+/* ----- Plot ----- */
+.plot {
+  position: absolute;
+  border-radius: var(--os-radius-lg);
+  border: 1px solid color-mix(in oklab, #6b4423 35%, transparent);
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: transform var(--os-transition-fast), box-shadow var(--os-transition-fast);
+  overflow: hidden;
+  /* Default fill (used when stress is unknown): muted soil with neutral wash */
+  background:
+    radial-gradient(circle at center,
+      color-mix(in oklab, #d6b48a 75%, var(--os-text-subtle)) 0%,
+      color-mix(in oklab, #d6b48a 90%, var(--os-text-subtle)) 100%);
+}
+.plot:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 2px 8px color-mix(in oklab, #6b4423 25%, transparent);
+}
+.plot.is-edit {
+  cursor: move;
+}
+.plot.is-selected {
+  outline: 2px solid var(--os-text);
+  outline-offset: 2px;
+}
+.plot-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  padding: var(--os-sp-xs);
+  text-align: center;
+  pointer-events: none;
+  /* Translucent backing so the label remains readable on any gradient */
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in oklab, var(--os-bg) 35%, transparent) 100%
+  );
+  color: var(--os-text);
+  overflow: hidden;
+}
+.plot-name {
+  font-size: var(--os-fs-sm);
+  font-weight: var(--os-weight-semibold);
+  text-shadow: 0 1px 2px color-mix(in oklab, var(--os-bg) 70%, transparent);
+  word-break: break-word;
+  max-width: 100%;
+}
+.plot-meta {
+  font-size: var(--os-fs-2xs);
+  color: var(--os-text-secondary);
+  text-shadow: 0 1px 2px color-mix(in oklab, var(--os-bg) 70%, transparent);
+  margin-top: 2px;
+}
+.plot-plants {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  width: 100%;
+  max-width: 100%;
+  font-size: 11px;
+  color: var(--os-text-secondary);
+  pointer-events: none;
+}
+.plot-plant {
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+.plot-plant > i { font-size: 11px; line-height: 1; }
+/* Mini stress bar — full-width green→yellow→red gradient with the right portion
+   covered by the plot's ground tone proportional to (100 - stress)%. */
+.plot-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, #4ade80 0%, #facc15 50%, #ef4444 100%);
+  overflow: hidden;
+  min-width: 0;
+}
+.plot-bar::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; right: 0;
+  width: calc(100% - var(--stress, 0%));
+  background: color-mix(in oklab, var(--os-bg) 60%, transparent);
+}
+.plot-bar.is-unknown {
+  background: var(--os-bg-inset);
+}
+.plot-bar.is-unknown::after { display: none; }
+
+/* Marquee ghost shown while drag-creating a new plot in edit mode */
+.plot.is-ghost {
+  background: color-mix(in oklab, var(--os-text) 8%, transparent);
+  border: 2px dashed color-mix(in oklab, var(--os-text) 40%, transparent);
+  pointer-events: none;
+  cursor: crosshair;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+/* Sun-exposure indicator in the top-left corner of each plot. Uses a translucent
+   backing so it stays readable on top of the stress gradient. */
+.plot-sun {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--os-radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklab, var(--os-bg) 70%, transparent);
+  color: var(--os-text-secondary);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+/* Resize grip in edit mode */
+.plot-grip {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--os-text) 25%, transparent);
+  cursor: nwse-resize;
+  pointer-events: auto;
+  display: none;
+}
+.plot.is-edit .plot-grip { display: block; }
+
+/* ----- Dialogs ----- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in oklab, var(--os-text) 35%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--os-sp-lg);
+  z-index: 50;
+}
+.dialog {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--os-sp-md);
+  padding: var(--os-sp-lg);
+  max-height: 90vh;
+  overflow: auto;
+  min-width: 0;
+}
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--os-sp-sm);
+}
+.dialog-header h2 {
+  margin: 0;
+  font-size: var(--os-fs-md);
+  font-weight: var(--os-weight-semibold);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--os-sp-xs);
+  font-size: var(--os-fs-sm);
+  color: var(--os-text-secondary);
+  min-width: 0;
+}
+.field input,
+.field select,
+.field textarea {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.field.row-field {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--os-sp-sm);
+  input[type='checkbox'] {
+    width: 14px;
+  }
+}
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--os-sp-sm);
+  min-width: 0;
+}
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--os-sp-sm);
+  margin-top: var(--os-sp-xs);
+}
+.dialog-actions .danger { color: var(--os-cError); margin-right: auto; }
+
+/* Segmented toggle for assignment mode and sun exposure */
+.seg-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--os-border-color);
+  border-radius: var(--os-radius-md);
+  overflow: hidden;
+  align-self: flex-start;
+  max-width: 100%;
+}
+.seg-toggle .seg-btn {
+  background: var(--os-bg-surface);
+  border: none;
+  padding: var(--os-sp-xs) var(--os-sp-md);
+  font-size: var(--os-fs-sm);
+  color: var(--os-text-secondary);
+  cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--os-sp-xs);
+  justify-content: center;
+}
+.seg-toggle .seg-btn.active {
+  background: var(--os-bg-inset);
+  color: var(--os-text);
+  font-weight: var(--os-weight-medium);
+}
+
+/* Tiny viewports (~250x250) — squeeze padding so the dialog actually fits. */
+@media (max-width: 360px) {
+  body { padding: var(--os-sp-sm); }
+  .overlay { padding: var(--os-sp-xs); }
+  .dialog {
+    padding: var(--os-sp-md);
+    gap: var(--os-sp-sm);
+    max-height: 95vh;
+  }
+  .seg-toggle .seg-btn { padding: var(--os-sp-xs) var(--os-sp-sm); font-size: var(--os-fs-xs); }
+  .field-row { grid-template-columns: 1fr 1fr; }
+}
+
+/* Plant type list with per-plant date/stage */
+.plant-field { border: 1px solid var(--os-border-color-subtle); border-radius: var(--os-radius-md); padding: var(--os-sp-sm); margin: 0; min-width: 0; }
+.plant-field legend { padding: 0 var(--os-sp-xs); font-size: var(--os-fs-sm); color: var(--os-text-secondary); }
+.plant-help { font-size: var(--os-fs-xs); margin-bottom: var(--os-sp-sm); }
+.plant-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--os-sp-xs);
+  min-width: 0;
+}
+/* Flex-wrap layout: row collapses gracefully from a single line down to fully-stacked
+   without grid columns going haywire. Both halves get min-width: 0 so number/date inputs
+   can shrink instead of overflowing the dialog. */
+.plant-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--os-sp-sm);
+  padding: var(--os-sp-xs);
+  border-radius: var(--os-radius-sm);
+  border: 1px solid transparent;
+  min-width: 0;
+}
+.plant-row:hover { background: var(--os-bg-subtle); }
+.plant-row.is-on { background: var(--os-bg-subtle); border-color: var(--os-border-color-subtle); }
+.plant-row .plant-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--os-sp-xs);
+  font-size: var(--os-fs-sm);
+  color: var(--os-text);
+  cursor: pointer;
+  user-select: none;
+  flex: 1 1 auto;
+  min-width: 100px;
+}
+.plant-row .plant-check input { margin: 0; flex: none; width: 14px; }
+.plant-row .plant-check i { flex: none; line-height: 1; }
+.plant-row .plant-check span { flex: 1 1 auto; min-width: 0; }
+.plant-row .plant-when {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--os-sp-xs);
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.plant-row .plant-when input,
+.plant-row .plant-when select {
+  font-size: var(--os-fs-xs);
+  min-width: 0;
+  flex: 1 1 80px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0;
+}
+.plant-row.is-off .plant-when { opacity: 0.4; pointer-events: none; }
+
+/* ----- Detail body ----- */
+.detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--os-sp-sm);
+  font-size: var(--os-fs-sm);
+}
+.detail-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--os-sp-sm);
+}
+.detail-row .label {
+  font-size: var(--os-fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--os-text-muted);
+  min-width: 92px;
+}
+.detail-row .val {
+  color: var(--os-text);
+}
+.detail-stress-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--os-sp-xs);
+  margin-top: var(--os-sp-xs);
+  border-top: 1px solid var(--os-border-color-subtle);
+  padding-top: var(--os-sp-sm);
+}
+.detail-stress-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--os-sp-sm);
+  font-size: var(--os-fs-xs);
+}
+.detail-stress-row .name {
+  display: flex;
+  align-items: center;
+  gap: var(--os-sp-xs);
+  color: var(--os-text);
+}
+.detail-stress-row .num {
+  color: var(--os-text-secondary);
+  white-space: nowrap; font-feature-settings: 'tnum' 1;}
+.detail-stress-row .bar {
+  position: relative;
+  height: 6px;
+  border-radius: var(--os-radius-full);
+  background: var(--os-bg-inset);
+  overflow: hidden;
+}
+.detail-stress-row .bar > .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+}
+
+/* ----- Responsive ----- */
+@media (max-width: 640px) {
+  .page-header { gap: var(--os-sp-sm); }
+  .header-actions { width: 100%; justify-content: flex-start; }
+}
+@media (max-width: 360px) {
+  .page-header h1 { font-size: var(--os-fs-md); }
+  /* The weather chip dominates at this width — hide it; the data is still computed
+     and the per-plot stress colors carry the same meaning. */
+  .weather-chip { display: none; }
+  /* Collapse the legend; per-plant bars on the tiles already convey the gradient. */
+  .legend { display: none; }
+  /* Buttons keep their icon, drop their label so the toolbar stays on one line. */
+  .header-actions .btn-label { display: none; }
+  #mode-btn { padding: var(--os-sp-xs); }
+  #add-btn { padding: var(--os-sp-xs); }
+}
+
+/* ----- Header rail: role → data → settings -------------------------------------------
+   One word, three outcomes (owner / editor / viewer). The compound labels the frame used
+   to carry duplicated what the read-only note already says in a sentence. */
+.role-label {
+  font-size: var(--os-fs-2xs);
+  color: var(--os-text-muted);
+  white-space: nowrap;
+}

@@ -1,0 +1,26 @@
+{
+    "name": "Trip Planner",
+    "description": "Plan a trip end to end, unique per placement. Space editors create trips and build each one out across three views: a day-by-day itinerary with times, activities, and places, a packing list grouped by category with live packed counts, and a running log of trip costs with a total. Places you name are looked up once and pinned on a map above the itinerary, so the whole trip reads at a glance. Everyone else, including anyone the frame is shared with publicly, sees a live read-only itinerary, so a share link doubles as the trip's printed handout. Trips live in encrypted LocalTables scoped to the placement, and every change is pushed live to all viewers.",
+    "frame_type": "Tandem",
+    "tags": [
+        "household",
+        "travel",
+        "planning"
+    ],
+    "permissions": {
+        "net": [
+            "nominatim.openstreetmap.org"
+        ],
+        "web": [
+            "https://tiles.openfreemap.org"
+        ]
+    },
+    "default_width_px": 760,
+    "default_height_px": 560,
+    "created_at": "2026-08-04T22:00:00Z",
+    "modified_at": "2026-08-06T22:00:00Z",
+    "app_version_min": "0.2.5",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

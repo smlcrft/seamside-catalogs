@@ -1,0 +1,364 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c2); --ch-fg: var(--os-c2-fg); }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--os-font-sans); background: var(--os-bg); color: var(--os-text); font-size: var(--os-fs-base); }
+    .app { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+    @media (min-width: 901px) { .app.with-reader { grid-template-columns: 260px 1fr 1.2fr; } }
+    .sidebar { border-right: 1px solid var(--os-border-color); background: var(--os-bg-surface); overflow-y: auto; padding: var(--os-sp-md); }
+    .brand { font-weight: var(--os-weight-semibold); letter-spacing: 0.04em; padding: var(--os-sp-sm) var(--os-sp-sm) var(--os-sp-md); }
+    .search { width: 100%; height: 34px; padding: 0 var(--os-sp-md); background: var(--os-bg-inset); border: 1px solid transparent; border-radius: var(--os-radius-md); color: var(--os-text); font: inherit; margin-bottom: var(--os-sp-md); }
+    .search:focus-visible { outline: none; background: var(--os-bg-surface); border-color: var(--ch); }
+    .nav { display: flex; flex-direction: column; gap: 2px; }
+    .navrow { display: flex; align-items: center; justify-content: space-between; gap: var(--os-sp-sm); padding: var(--os-sp-sm) var(--os-sp-md); border-radius: var(--os-radius-md); cursor: pointer; }
+    .navrow:hover { background: var(--os-bg-subtle); }
+    .navrow.active { background: color-mix(in srgb, var(--ch), transparent 82%); }
+    .navrow .n { font-size: var(--os-fs-xs); color: var(--os-text-muted); }
+    .label { font-size: var(--os-fs-xs); font-weight: var(--os-weight-semibold); letter-spacing: 0.06em; text-transform: uppercase; color: var(--os-text-subtle); display: flex; justify-content: space-between; align-items: center; margin: var(--os-sp-lg) var(--os-sp-sm) var(--os-sp-sm); }
+    .iconbtn { background: none; border: none; color: var(--os-text-muted); cursor: pointer; font-size: var(--os-fs-base); padding: 2px 6px; border-radius: var(--os-radius-sm); }
+    .iconbtn:hover { background: var(--os-bg-subtle); color: var(--os-text); }
+    .iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .main { overflow-y: auto; }
+    .empty { padding: var(--os-sp-2xl); text-align: center; color: var(--os-text-muted); }
+    .members-only { display: grid; place-items: center; height: 100vh; text-align: center; color: var(--os-text-muted); padding: var(--os-sp-2xl); }
+
+    .list { max-width: 720px; }
+    .toolbar { display: flex; align-items: center; gap: var(--os-sp-md); padding: var(--os-sp-md) var(--os-sp-xl); border-bottom: 1px solid var(--os-border-color); position: sticky; top: 0; background: var(--os-bg); z-index: 1; }
+    .item { display: grid; grid-template-columns: 10px 1fr auto; gap: var(--os-sp-md); align-items: baseline; padding: var(--os-sp-md) var(--os-sp-xl); border-bottom: 1px solid var(--os-border-color-subtle); cursor: pointer; }
+    .item:hover { background: var(--os-bg-subtle); }
+    .item.sel { background: color-mix(in srgb, var(--ch), transparent 88%); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ch); margin-top: 6px; }
+    .item.read .dot { background: transparent; border: 1px solid var(--os-text-subtle); }
+    .item.read .it-title { color: var(--os-text-muted); }
+    .it-title { font-weight: var(--os-weight-medium); }
+    .it-meta { font-size: var(--os-fs-2xs); color: var(--os-text-muted); display: flex; gap: var(--os-sp-sm); align-items: baseline; }
+    .badge {
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      display: inline-flex; align-items: center; gap: 3px;
+    }
+    .badge i { font-size: 12px; line-height: 1; }
+    .badge.on { color: var(--ch); }
+
+    .reader { background: var(--os-bg); border-left: 1px solid var(--os-border-color); overflow-y: auto; padding: var(--os-sp-xl); }
+    .backbtn { display: inline-flex; align-items: center; gap: 4px; background: none; border: none; color: var(--ch); cursor: pointer; font: inherit; font-size: var(--os-fs-sm); padding: 0; margin-bottom: var(--os-sp-lg); }
+    .reader h1 { font-size: var(--os-fs-xl); line-height: 1.25; margin: 0 0 var(--os-sp-sm); }
+    .reader .src { font-size: var(--os-fs-2xs); color: var(--os-text-muted); margin-bottom: var(--os-sp-lg); display: flex; gap: var(--os-sp-md); align-items: center; flex-wrap: wrap; }
+    .content { line-height: 1.6; color: var(--os-text-secondary); overflow-wrap: anywhere; }
+    .content img { max-width: 100%; height: auto; border-radius: var(--os-radius-md); }
+    .content a { color: var(--ch); }
+    .boostbtn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--os-radius-md); border: 1px solid var(--os-border-color); background: var(--os-bg-surface); color: var(--os-text); cursor: pointer; font: inherit; }
+    .boostbtn.on { background: var(--ch); color: var(--ch-fg); border-color: transparent; }
+    .linkbtn { background: none; border: none; color: var(--ch); cursor: pointer; font: inherit; padding: 0; }
+    .cmts { margin-top: var(--os-sp-2xl); border-top: 1px solid var(--os-border-color); padding-top: var(--os-sp-lg); }
+    .cmt { padding: var(--os-sp-sm) 0; }
+    .cmt .who { font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium); }
+    .cmt .when { font-size: var(--os-fs-2xs); color: var(--os-text-muted); margin-left: 6px; font-feature-settings: 'tnum' 1;}
+    .cmt .body { font-size: var(--os-fs-sm); color: var(--os-text-secondary); margin: 2px 0; overflow-wrap: anywhere; }
+    .cmt .acts { font-size: var(--os-fs-2xs); }
+    .cmt .acts button { background: none; border: none; color: var(--os-text-muted); cursor: pointer; padding: 0 6px 0 0; }
+    .cmt-children { margin-left: var(--os-sp-lg); border-left: 1px solid var(--os-border-color-subtle); padding-left: var(--os-sp-md); }
+    .cmt-form { display: flex; gap: var(--os-sp-sm); margin-top: var(--os-sp-md); }
+    .cmt-form input { flex: 1; height: 34px; padding: 0 var(--os-sp-md); background: var(--os-bg-inset); border: 1px solid transparent; border-radius: var(--os-radius-md); color: var(--os-text); font: inherit; }
+    .cmt-form input:focus-visible { outline: none; background: var(--os-bg-surface); border-color: var(--ch); }
+
+    @media (max-width: 900px) {
+      .app.mobile { grid-template-columns: 1fr; }
+      .app.mobile .sidebar {
+        position: fixed; top: 0; left: 0; bottom: 0; width: 82%; max-width: 300px;
+        transform: translateX(-100%); transition: transform var(--os-transition-fast); z-index: 20;
+      }
+      .app.mobile .sidebar.open { transform: none; box-shadow: 0 8px 40px color-mix(in srgb, black, transparent 80%); }
+      .drawer-backdrop { position: fixed; inset: 0; background: color-mix(in srgb, black, transparent 55%); z-index: 15; }
+      .list { max-width: none; }
+      .item { padding: var(--os-sp-md) var(--os-sp-lg); }
+      .toolbar { padding: var(--os-sp-md) var(--os-sp-lg); }
+      .reader { padding: var(--os-sp-lg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useCallback, applyChannel, useFramePush } from "./lib/js/framelib.js";
+
+    function relTime(ms) {
+      if (!ms) return "";
+      const s = Math.max(1, Math.floor((Date.now() - ms) / 1000));
+      if (s < 3600) return Math.floor(s / 60) + "m";
+      if (s < 86400) return Math.floor(s / 3600) + "h";
+      return Math.floor(s / 86400) + "d";
+    }
+
+    function Sidebar({ boot, sel, setSel, onAddFeed, onAddGroup, className, onPick }) {
+      const pick = (s) => { setSel(s); if (onPick) onPick(); };
+      const feedsByGroup = (gid) => boot.feeds.filter(f => (f.group_id ?? null) === gid);
+      const feedRow = (f) => html`
+        <div class="navrow ${sel.feedId === f.id ? 'active' : ''}" key=${f.id}
+          onClick=${() => pick({ view: 'all', groupId: null, feedId: f.id, query: sel.query })}>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.title}</span>
+          <span class="n">${f.unread || ''}</span>
+        </div>`;
+      const smart = (view, name) => html`
+        <div class="navrow ${sel.view === view && !sel.feedId && !sel.groupId ? 'active' : ''}"
+             onClick=${() => pick({ view, groupId: null, feedId: null, query: sel.query })}>
+          <span>${name}</span><span class="n">${boot.counts?.[view] ?? ''}</span>
+        </div>`;
+      const groups = boot.groups.slice().sort((a, b) => a.sort - b.sort);
+      return html`
+        <div class="sidebar ${className || ''}">
+          <div class="brand">RSS Reader</div>
+          <input class="search" placeholder="Search…" value=${sel.query}
+            onInput=${e => setSel({ ...sel, query: e.target.value })} />
+          <div class="nav">
+            ${smart('all', 'All')} ${smart('unread', 'Unread')} ${smart('boosted', 'Boosted')}
+          </div>
+          <div class="label">
+            <span>Feeds</span>
+            ${boot.isEditor ? html`<span>
+              <button class="iconbtn" title="Add group" onClick=${onAddGroup}>⊞</button>
+              <button class="iconbtn" title="Add feed" onClick=${onAddFeed}>+</button>
+            </span>` : null}
+          </div>
+          ${feedsByGroup(null).map(feedRow)}
+          ${groups.map(g => html`
+            <div key=${g.id}>
+              <div class="label" style="margin-top:var(--os-sp-md);cursor:pointer;color:${sel.groupId === g.id ? 'var(--ch)' : ''}"
+                   title="Filter to this group"
+                   onClick=${() => pick({ view: 'all', groupId: g.id, feedId: null, query: sel.query })}>
+                <span>${g.name}</span></div>
+              ${feedsByGroup(g.id).map(feedRow)}
+            </div>`)}
+        </div>`;
+    }
+
+    function ItemList({ boot, sel, onOpen, selectedItemId, onChanged, onMenu }) {
+      const [items, setItems] = useState([]);
+      const [refreshing, setRefreshing] = useState(false);
+      const load = useCallback(() => {
+        const p = new URLSearchParams({ view: sel.view });
+        if (sel.groupId) p.set("group", sel.groupId);
+        if (sel.feedId) p.set("feed", sel.feedId);
+        if (sel.query.trim()) p.set("q", sel.query.trim());
+        return frame.api("api/items?" + p.toString()).then(r => setItems(r.items || []));
+      }, [sel.view, sel.groupId, sel.feedId, sel.query]);
+      useEffect(() => { const t = setTimeout(load, sel.query ? 180 : 0); return () => clearTimeout(t); }, [load]);
+      useFramePush({ feeds_changed: load, "synctable-change": load });   // the backend
+      // pushes feeds_changed on every shared mutation; the synctable key is kept so a
+      // placement whose data was moved to a shared table still refreshes.
+
+      const open = (it) => {
+        onOpen(it.id); // open the reader immediately — never gate it on a side-effect
+        if (!it.read) write(`items/${it.id}/read`, { read: true }).then(onChanged).catch(() => {});
+      };
+      const refresh = async () => {
+        setRefreshing(true);
+        try { await frame.api("api/refresh", {}); } finally { setRefreshing(false); load(); onChanged(); }
+      };
+
+      // keyboard: react to App's global key dispatch
+      useEffect(() => {
+        function onKey(e) {
+          const k = e.detail; if (!items.length) return;
+          const rawIdx = items.findIndex(x => x.id === selectedItemId);
+          const cur = rawIdx < 0 ? null : items[rawIdx];
+          if (k === "j") { const n = items[rawIdx < 0 ? 0 : Math.min(items.length - 1, rawIdx + 1)]; onOpen(n.id); if (!n.read) write(`items/${n.id}/read`, { read: true }).then(onChanged); }
+          if (k === "k") { const n = items[rawIdx < 0 ? 0 : Math.max(0, rawIdx - 1)]; onOpen(n.id); }
+          if (k === "o") { if (cur && cur.link) frame.openExternalUrl(cur.link); }
+          if (k === "m") { if (cur) write(`items/${cur.id}/read`, { read: !cur.read }).then(() => { load(); onChanged(); }); }
+          if (k === "b") { if (cur) write(`items/${cur.id}/boost`, { on: !cur.boosted }).then(() => { load(); onChanged(); }); }
+        }
+        window.addEventListener("rss-key", onKey);
+        return () => window.removeEventListener("rss-key", onKey);
+      }, [items, selectedItemId]);
+
+      const title = sel.feedId
+        ? (boot.feeds.find(f => f.id === sel.feedId)?.title ?? "Feed")
+        : sel.groupId
+        ? (boot.groups.find(g => g.id === sel.groupId)?.name ?? "Group")
+        : sel.view;
+      const header = html`<div class="toolbar">
+        ${onMenu ? html`<button class="iconbtn" title="Menu" onClick=${onMenu}>☰</button>` : null}
+        <strong style="text-transform:capitalize">${title}</strong>
+        <span style="flex:1"></span>
+        ${boot.isEditor ? html`<button class="iconbtn" title="Refresh (r)" disabled=${refreshing} onClick=${refresh}>${refreshing ? '…' : '↻'}</button>` : null}
+      </div>`;
+
+      const body = !items.length
+        ? html`<div class="empty">${sel.view === 'unread' ? "No unread items — you're all caught up." : "No items here yet."}</div>`
+        : html`<div class="list">${items.map(it => html`
+            <div class="item ${it.read ? 'read' : ''} ${selectedItemId === it.id ? 'sel' : ''}" key=${it.id} onClick=${() => open(it)}>
+              <span class="dot"></span>
+              <div>
+                <div class="it-title">${it.title}</div>
+                <div class="it-meta"><span>${it.feed_title}</span><span>·</span><span>${relTime(it.published_at)}</span></div>
+              </div>
+              <div class="it-meta">
+                ${it.boost_count ? html`<span class="badge on">↑ ${it.boost_count}</span>` : null}
+                ${it.comment_count ? html`<span class="badge"><i class="ph-light ph-chat-circle"></i>${it.comment_count}</span>` : null}
+              </div>
+            </div>`)}</div>`;
+
+      return html`<div>${header}${body}</div>`;
+    }
+
+    function CommentTree({ nodes, parentId, boot, onReply, onDelete }) {
+      const kids = nodes.filter(c => (c.parent_id ?? null) === (parentId ?? null));
+      if (!kids.length) return null;
+      return html`${kids.map(c => html`
+        <div class="cmt" key=${c.id}>
+          <div><span class="who">${c.user_name || "someone"}</span><span class="when">${relTime(c.created_at)}</span></div>
+          <div class="body">${c.body}</div>
+          <div class="acts">
+            <button onClick=${() => onReply(c.id)}>Reply</button>
+            ${(c.user_id === boot.userId || boot.isEditor) ? html`<button onClick=${() => onDelete(c.id)}>Delete</button>` : null}
+          </div>
+          <div class="cmt-children"><${CommentTree} nodes=${nodes} parentId=${c.id} boot=${boot} onReply=${onReply} onDelete=${onDelete} /></div>
+        </div>`)}`;
+    }
+
+    function Reader({ itemId, boot, onChanged, onBack }) {
+      const [data, setData] = useState(null);
+      const [replyTo, setReplyTo] = useState(null);
+      const [draft, setDraft] = useState("");
+      const load = useCallback(() => frame.api(`api/items/${itemId}`).then(setData), [itemId]);
+      useEffect(() => { setData(null); setReplyTo(null); setDraft(""); load(); }, [itemId]);
+      useFramePush({ feeds_changed: load, "synctable-change": load });   // the backend
+      // pushes feeds_changed on every shared mutation; the synctable key is kept so a
+      // placement whose data was moved to a shared table still refreshes.
+      const backBtn = onBack ? html`<button class="backbtn" onClick=${onBack}>← Back to list</button>` : null;
+      if (!data) return html`<div class="reader">${backBtn}<div class="empty">Loading…</div></div>`;
+      const iBoosted = data.boosts.some(f => f.user_id === boot.userId);
+      const toggleBoost = async () => { await write(`items/${itemId}/boost`, { on: !iBoosted }); load(); onChanged(); };
+      const submit = async () => {
+        if (!draft.trim()) return;
+        await write(`items/${itemId}/comments`, { body: draft, parent_id: replyTo });
+        setDraft(""); setReplyTo(null); load(); onChanged();
+      };
+      const del = async (id) => {
+        if (await frame.confirm("Delete this comment?", { danger: true })) { await write(`comments/${id}/delete`); load(); onChanged(); }
+      };
+      const boosters = data.boosts.map(f => f.user_name || "someone").join(", ");
+      return html`<div class="reader">
+        ${backBtn}
+        <h1>${data.item.title}</h1>
+        <div class="src">
+          ${data.item.author ? html`<span>${data.item.author}</span>` : null}
+          <span>${relTime(data.item.published_at)}</span>
+          ${data.item.link ? html`<button class="linkbtn" onClick=${() => frame.openExternalUrl(data.item.link)}>open original ↗</button>` : null}
+        </div>
+        <button class="boostbtn ${iBoosted ? 'on' : ''}" onClick=${toggleBoost}>↑ ${data.boosts.length || 'Boost'}</button>
+        ${boosters ? html`<div class="src" style="margin-top:6px">boosted by ${boosters}</div>` : null}
+        <div class="content" dangerouslySetInnerHTML=${{ __html: data.item.content || "" }}></div>
+        <div class="cmts">
+          <div class="label" style="margin-left:0">Discussion</div>
+          <${CommentTree} nodes=${data.comments} parentId=${null} boot=${boot} onReply=${setReplyTo} onDelete=${del} />
+          <div class="cmt-form">
+            <input placeholder=${replyTo ? "Reply…" : "Add a comment…"} value=${draft}
+              onInput=${e => setDraft(e.target.value)} onKeyDown=${e => e.key === 'Enter' && submit()} />
+            ${replyTo ? html`<button class="iconbtn" title="Cancel reply" onClick=${() => setReplyTo(null)}>✕</button>` : null}
+          </div>
+        </div>
+      </div>`;
+    }
+
+    // Writes go over the tether (frame.busSend), not HTTP: Android's webview drops HTTP
+    // request bodies, so a POST silently becomes an empty write there (#750). Fire-and-
+    // forget — the view reloads from the matching push. The two calls whose RESULT the
+    // caller needs (adding a feed, which can fail with "no feed found", and refresh,
+    // which reports what it pulled) deliberately stay on frame.api.
+    function write(op, payload) {
+      if (typeof frame.busSend === "function") {
+        frame.busSend({ op, ...(payload || {}) });
+        return Promise.resolve({});
+      }
+      const method = op.endsWith("/delete") ? "DELETE" : "POST";
+      const path = "api/" + (method === "DELETE" ? op.slice(0, -"/delete".length) : op);
+      return frame.api(path, payload || {}, method);
+    }
+
+    function App() {
+      const [boot, setBoot] = useState(null);
+      const [sel, setSel] = useState({ view: 'all', groupId: null, feedId: null, query: '' });
+      const [openId, setOpenId] = useState(null);
+      const [narrow, setNarrow] = useState(false);
+      const [drawerOpen, setDrawerOpen] = useState(false);
+      const reloadBootstrap = useCallback(() => frame.api("api/bootstrap").then(setBoot), []);
+      const onChanged = useCallback(() => reloadBootstrap(), [reloadBootstrap]);
+
+      useEffect(() => { applyChannel(document.documentElement); reloadBootstrap(); }, []);
+      useFramePush({ "synctable-change": reloadBootstrap });
+
+      useEffect(() => {
+        const mq = window.matchMedia("(max-width: 900px)");
+        const on = () => setNarrow(mq.matches); on(); mq.addEventListener("change", on);
+        return () => mq.removeEventListener("change", on);
+      }, []);
+
+      // stale auto-refresh once on load (editor only)
+      useEffect(() => {
+        if (!boot || !boot.isEditor) return;
+        const stale = boot.feeds.some(f => !f.last_fetched || (Date.now() - f.last_fetched) > 15 * 60 * 1000);
+        if (stale) frame.api("api/refresh", {}).then(reloadBootstrap);
+      }, [boot && boot.isEditor]);
+
+      // global keyboard shortcuts
+      useEffect(() => {
+        function onKey(e) {
+          const tag = (e.target.tagName || "").toLowerCase();
+          if (tag === "input" || tag === "textarea") { if (e.key === "Escape") e.target.blur(); return; }
+          if (e.key === "/") { e.preventDefault(); document.querySelector(".search")?.focus(); return; }
+          if (e.key === "Escape") { setOpenId(null); return; }
+          if (e.key === "r" && boot && boot.isEditor) { frame.api("api/refresh", {}).then(reloadBootstrap); return; }
+          if (["j", "k", "o", "m", "b"].includes(e.key)) window.dispatchEvent(new CustomEvent("rss-key", { detail: e.key }));
+        }
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+      }, [boot && boot.isEditor]);
+
+      const onAddFeed = async () => {
+        const url = await frame.prompt("Feed or site URL", { title: "Add feed", placeholder: "https://…" });
+        if (!url) return;
+        const r = await frame.api("api/feeds", { url });
+        if (r.error) await frame.alert(r.error, { title: "Could not add" });
+        else if (r.warning) await frame.alert("Added, but the first fetch failed: " + r.warning, { title: "Heads up" });
+        reloadBootstrap();
+      };
+      const onAddGroup = async () => {
+        const name = await frame.prompt("Group name", { title: "Add group" });
+        if (!name) return;
+        await frame.api("api/groups", { name }); reloadBootstrap();
+      };
+
+      if (!boot) return html`<div class="empty">Loading…</div>`;
+      if (!boot.isMember) return html`<div class="members-only">This reader is shared with this space's members.<br/>Ask the owner for access.</div>`;
+
+      const reader = openId ? html`<${Reader} itemId=${openId} boot=${boot} onChanged=${onChanged} onBack=${narrow ? () => setOpenId(null) : null} />` : null;
+      const list = html`<${ItemList} boot=${boot} sel=${sel} selectedItemId=${openId} onOpen=${setOpenId} onChanged=${onChanged} onMenu=${narrow ? () => setDrawerOpen(true) : null} />`;
+
+      // Narrow / mobile: one pane at a time; sidebar is a slide-in drawer behind ☰.
+      if (narrow) {
+        return html`
+          <div class="app mobile">
+            ${drawerOpen ? html`<div class="drawer-backdrop" onClick=${() => setDrawerOpen(false)}></div>` : null}
+            <${Sidebar} className=${drawerOpen ? 'open' : ''} onPick=${() => setDrawerOpen(false)}
+              boot=${boot} sel=${sel} setSel=${setSel} onAddFeed=${onAddFeed} onAddGroup=${onAddGroup} />
+            <div class="main">${openId ? reader : list}</div>
+          </div>`;
+      }
+      // Wide: list stays, article opens as the right-hand pane.
+      return html`
+        <div class="app ${openId ? 'with-reader' : ''}">
+          <${Sidebar} boot=${boot} sel=${sel} setSel=${setSel} onAddFeed=${onAddFeed} onAddGroup=${onAddGroup} />
+          <div class="main">${list}</div>
+          ${reader}
+        </div>`;
+    }
+    render(html`<${App}/>`, document.body);
+  </script>
+</body>
+</html>

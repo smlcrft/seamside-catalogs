@@ -1,0 +1,17 @@
+{
+    "name": "Chore Chart",
+    "description": "Who does what, and how it's going. Space editors add recurring chores, give each one to a person and a rhythm (daily, weekly, monthly, or just once), and tick them off as they get done. Every person gets their own card in their own colour, showing what's still open, what's already handled, and how long a streak they're on. A chore comes back by itself when its next turn arrives, so the chart is always about this week rather than a list that grows forever. Everyone else, including anyone the chart is shared with publicly, sees the same board live and read-only. Chores live in an encrypted LocalTable scoped to the placement; the owner can move them to a shared space table so other frames can work with the same rows.",
+    "frame_type": "Tandem",
+    "tags": ["household", "family"],
+    "permissions": {
+        "net": []
+    },
+    "default_width_px": 640,
+    "default_height_px": 560,
+    "created_at": "2026-08-07T19:00:00Z",
+    "modified_at": "2026-08-07T19:00:00Z",
+    "app_version_min": "0.2.5",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}
