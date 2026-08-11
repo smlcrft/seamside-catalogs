@@ -1,0 +1,17 @@
+{
+    "name": "Cafe Orders",
+    "description": "Let people order from their phone. Share the frame's link and anyone can open the menu, build an order, leave a name and send it — no account, no app. Behind the counter the same frame is an order board: new orders arrive live, and staff move each one through making, ready and collected. The menu is yours to edit, items can be marked sold out mid-rush, and you can close ordering with one switch when the kitchen is under water. Payment is optional: by default people pay when they collect, and if you connect a Stripe capability the frame will take card payment on Stripe's own hosted checkout instead — card details never touch this frame or your devices. Orders live in an encrypted LocalTable scoped to the placement; the owner can move them to a shared space table.",
+    "frame_type": "Tandem",
+    "tags": ["smallbiz", "cafe", "orders", "public-share"],
+    "permissions": {
+        "net": []
+    },
+    "default_width_px": 520,
+    "default_height_px": 640,
+    "created_at": "2026-08-08T00:00:00Z",
+    "modified_at": "2026-08-08T00:00:00Z",
+    "app_version_min": "0.2.5",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}
