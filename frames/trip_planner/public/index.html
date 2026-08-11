@@ -1,0 +1,1128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trip Planner</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="./vendor/maplibre-gl.css">
+  <style>
+    :root { --ch: var(--os-c1); }   /* follows the space channel at runtime */
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      height: 100%; max-width: 720px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-xl));
+    }
+    /* Only the mapped itinerary earns the extra width — packing and costs stay lists and
+       keep their measure. Past this point the frame holds a plan column and a map column
+       side by side. */
+    @media (min-width: 940px) { main.wide { max-width: 1200px; } }
+
+    /* ---- header rail (24px first line; see PRECISION §6) --------------------------- */
+    .header { display: flex; align-items: flex-start; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .header .brand {
+      font-size: 20px; color: var(--ch);
+      display: inline-flex; width: 24px; height: 24px;
+      align-items: center; justify-content: center; line-height: 1; flex: 0 0 auto;
+    }
+    .titles { flex: 1 1 auto; min-width: 0; }
+    h1.t-title {
+      margin: 0; font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold);
+      line-height: 24px; letter-spacing: -0.01em;
+    }
+    h1.t-title .static { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    h1.t-title input {
+      display: block; width: 100%; margin: 0 0 0 -4px; padding: 0 4px;
+      font: inherit; line-height: 24px; height: 24px; color: var(--os-text);
+      background: transparent; border: 1px solid transparent; border-radius: var(--os-radius-sm);
+      transition: background 150ms, border-color 150ms;
+    }
+    h1.t-title input:hover { background: var(--os-bg-subtle); }
+    h1.t-title input:focus { outline: none; background: var(--os-bg-surface); border-color: var(--os-border-color); box-shadow: none; }
+    .subline {
+      margin-top: 2px; font-size: var(--os-fs-sm); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .header .mode {
+      flex: 0 0 auto; height: 24px; display: flex; align-items: center;
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; text-transform: lowercase; white-space: nowrap;
+    }
+    .iconbtn {
+      flex: 0 0 auto; width: 28px; height: 28px; margin: -2px 0; padding: 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-muted); font-size: 18px; line-height: 1;
+      transition: color 150ms, background 150ms;
+    }
+    .iconbtn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+    .iconbtn:active { transform: scale(0.92); }
+    .iconbtn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs); flex: 0 0 auto;
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+    }
+
+    /* ---- trip list ----------------------------------------------------------------- */
+    .triplist { display: flex; flex-direction: column; gap: var(--os-sp-sm); overflow-y: auto; min-height: 0; }
+    .trip {
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-md); padding: var(--os-sp-md) var(--os-sp-lg);
+      display: flex; align-items: center; gap: var(--os-sp-md); cursor: pointer;
+      transition: border-color 150ms, box-shadow 150ms;
+    }
+    .trip:hover { border-color: var(--os-text-subtle); box-shadow: var(--os-shadow-sm); }
+    .trip .t-info { flex: 1 1 auto; min-width: 0; }
+    .trip .t-name { font-weight: var(--os-weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .trip .t-sub {
+      margin-top: 1px; font-size: var(--os-fs-sm); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .trip .t-stats {
+      flex: 0 0 auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; white-space: nowrap;
+    }
+
+    button.new-trip {
+      display: flex; align-items: center; gap: var(--os-sp-sm); width: 100%; flex: 0 0 auto;
+      background: none; border: 1px solid var(--os-border-color-subtle); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); cursor: pointer;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-muted);
+      transition: border-color 150ms, color 150ms;
+    }
+    button.new-trip i { font-size: 16px; line-height: 0; }
+    button.new-trip:hover { border-color: var(--os-text-subtle); color: var(--os-text); }
+    button.new-trip:active { transform: none; background: var(--os-bg-inset); }
+    button.new-trip:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    /* create form (also the editor's first-trip empty state) */
+    .tform {
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-lg); padding: var(--os-sp-lg);
+      display: flex; flex-direction: column; gap: var(--os-sp-md); flex: 0 0 auto;
+    }
+    .field { display: flex; flex-direction: column; gap: var(--os-sp-xs); }
+    .field > label {
+      margin: 0; font-size: 11px; font-weight: var(--os-weight-semibold);
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
+    }
+    .cols { display: flex; gap: var(--os-sp-md); }
+    .cols .field { flex: 1; min-width: 0; }
+    .form-actions { display: flex; justify-content: flex-end; gap: var(--os-sp-sm); }
+    .btn-primary {
+      background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); border: 0; cursor: pointer;
+      padding: var(--os-sp-sm) var(--os-sp-lg); border-radius: var(--os-radius-md);
+      font: inherit; font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium);
+      display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+      transition: filter 150ms, transform 80ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+    .btn-primary:active:not(:disabled) { transform: scale(0.97); }
+    .btn-primary:disabled { opacity: 0.5; cursor: default; }
+    .btn-primary:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    .notice {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: var(--os-sp-sm); text-align: center; padding: var(--os-sp-xl) var(--os-sp-xl) var(--os-sp-sm);
+    }
+    .notice i { font-size: 28px; color: var(--os-text-subtle); }
+    .notice h2 { margin: 0; font-size: var(--os-fs-md); font-weight: var(--os-weight-semibold); }
+    .notice p { margin: 0; font-size: var(--os-fs-sm); color: var(--os-text-secondary); max-width: 380px; }
+
+    .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-lg); flex: 1; }
+
+    /* ---- tabs + the trip's own action ------------------------------------------------
+       The header rail is frame chrome (role, data, settings). Editing the open trip is
+       an action on the record, so it lives a row down beside the tabs, worded — a bare
+       pencil next to an already-editable title would read as "rename", which the title
+       itself already does. */
+    .tabrow { display: flex; align-items: center; gap: var(--os-sp-md); flex: 0 0 auto; }
+    button.trip-edit {
+      display: inline-flex; align-items: center; gap: var(--os-sp-xs); flex: 0 0 auto; margin-left: auto;
+      /* it shares a line with the segmented control, so it is built to the same weight —
+         a subtle border here would read as a ghost sitting next to a real instrument */
+      background: none; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); cursor: pointer;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      transition: border-color 150ms, color 150ms, background 150ms; white-space: nowrap;
+    }
+    button.trip-edit i { font-size: 16px; line-height: 0; }
+    button.trip-edit:hover { border-color: var(--os-text-subtle); color: var(--os-text); background: var(--os-bg-subtle); }
+    button.trip-edit:active { transform: none; background: var(--os-bg-inset); }
+    button.trip-edit:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    /* a narrow frame keeps the tabs at full width; the action drops to its own line */
+    @media (max-width: 520px) {
+      .tabrow { flex-wrap: wrap; }
+      button.trip-edit { margin-left: 0; }
+    }
+
+    .seg {
+      display: flex; flex: 0 0 auto; width: min(340px, 100%);
+      border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md); overflow: hidden;
+    }
+    .seg button {
+      border-radius: 0; flex: 1; min-width: 0; background: var(--os-bg); border: 0; cursor: pointer;
+      padding: var(--os-sp-sm); font: inherit; font-size: var(--os-fs-sm);
+      color: var(--os-text-secondary);
+      display: inline-flex; align-items: center; justify-content: center; gap: var(--os-sp-xs);
+      transition: background 150ms, color 150ms;
+    }
+    .seg button + button { border-left: 1px solid var(--os-border-color); }
+    .seg button:hover:not(.active) { background: var(--os-bg-subtle); }
+    .seg button:active { transform: none; background: var(--os-bg-inset); transition-duration: 40ms; }
+    .seg button.active { background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); font-weight: var(--os-weight-medium); }
+    .seg button.active:active { background: color-mix(in srgb, var(--ch), var(--os-text) 10%); }
+    .seg button:focus-visible { outline: none; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ch, var(--os-c1)), transparent 50%); }
+
+    .tabbody { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+    /* ---- the trip map ---------------------------------------------------------------
+       Sits above the days, showing every stop we managed to place. It only exists when
+       at least one stop has coordinates, so a trip of unnamed places never carries an
+       empty box. Height follows the frame like the rest of the responsive work. */
+    .tmap {
+      flex: 0 0 auto; position: relative; width: 100%;
+      height: clamp(150px, 26vh, 300px);
+      border-radius: var(--os-radius-lg); overflow: hidden;
+      border: 1px solid var(--os-border-color-subtle); background: var(--os-bg-subtle);
+    }
+    .tmap .maplibregl-map { border-radius: var(--os-radius-lg); }
+    /* Given room, the map stops being a letterbox above the plan and becomes its
+       companion: the days read on the left, the map stands full height beside them.
+       The plan keeps a row's measure; the map takes the width that's left. */
+    @media (min-width: 940px) {
+      .tabbody.withmap {
+        display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 480px);
+        gap: var(--os-sp-lg); align-items: stretch;
+      }
+      .tabbody.withmap .tmap { order: 2; height: auto; align-self: stretch; }
+      .tabbody.withmap .days { order: 1; }
+    }
+    /* the OSM/OpenFreeMap credit is required; keep it legible but quiet */
+    .tmap .maplibregl-ctrl-attrib {
+      font-size: 9px; background: color-mix(in srgb, var(--os-bg-surface), transparent 15%);
+    }
+    .tmap .maplibregl-ctrl-attrib a { color: var(--os-text-muted); }
+
+    /* a stop pin: the itinerary's own numbering, in the space channel */
+    .pin {
+      width: 22px; height: 22px; border-radius: var(--os-radius-full);
+      background: var(--ch); color: var(--ch-fg, #fff);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--os-font-sans); font-size: 11px; font-weight: var(--os-weight-semibold);
+      font-feature-settings: 'tnum' 1; line-height: 1;
+      border: 2px solid var(--os-bg-surface); box-shadow: var(--os-shadow-sm);
+      cursor: pointer; transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .pin:hover { transform: scale(1.15); }
+    .pin.sel { transform: scale(1.2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ch), transparent 65%); }
+
+    /* the entry a pin points at, while it is pointed at. Selection is a soft channel
+       fill, never an edge rail — same idiom as every other selected row in the app. */
+    .it-row.sel { background: color-mix(in srgb, var(--ch), transparent 88%); }
+
+    /* ---- itinerary ----------------------------------------------------------------- */
+    .days { display: flex; flex-direction: column; gap: var(--os-sp-xl); overflow-y: auto; min-height: 0; padding-bottom: var(--os-sp-sm); }
+    .day { display: flex; flex-direction: column; gap: var(--os-sp-sm); }
+    .day-head { display: flex; align-items: baseline; gap: var(--os-sp-sm); }
+    .day-head .wd { font-size: var(--os-fs-sm); font-weight: var(--os-weight-semibold); }
+    .day-head .dt { font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-feature-settings: 'tnum' 1; }
+    .day-head .rule { flex: 1; align-self: center; border-top: 1px solid var(--os-border-color-subtle); }
+    .day-rows { display: flex; flex-direction: column; }
+
+    .it-row {
+      display: flex; align-items: center; gap: var(--os-sp-sm); min-width: 0;
+      padding: var(--os-sp-sm) var(--os-sp-xs); border-radius: var(--os-radius-sm);
+      transition: background 150ms;
+    }
+    main:not(.read-only) .it-row { cursor: pointer; }
+    main:not(.read-only) .it-row:hover { background: var(--os-bg-subtle); }
+    .it-row.dragging { opacity: 0.4; }
+    .it-row.drop-target { box-shadow: inset 0 2px 0 var(--ch); }
+    .it-grip {
+      flex: 0 0 auto; cursor: grab; color: var(--os-text-subtle);
+      opacity: 0; transition: opacity 150ms; font-size: 14px; line-height: 0;
+      display: flex; align-items: center; touch-action: none;
+    }
+    .it-row:hover .it-grip { opacity: 1; }
+    .it-grip:active { cursor: grabbing; }
+    .read-only .it-grip { display: none; }
+    .it-time {
+      flex: 0 0 64px; font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      font-feature-settings: 'tnum' 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .it-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: var(--os-sp-sm); flex-wrap: wrap; }
+    .it-act { font-weight: var(--os-weight-medium); word-break: break-word; }
+    .it-loc { font-size: var(--os-fs-sm); color: var(--os-text-muted); word-break: break-word; }
+
+    /* One recessed well (the add-strip recipe): rest = bg-inset, focus-within lifts the
+       whole strip to surface with a hairline ring; fields never paint their own boxes.
+       Segments separate with hairlines. */
+    .it-add {
+      display: flex; align-items: center; margin-top: 2px;
+      /* keep a row's measure: let the strip span a wide column and "Where" ends up far
+         from the activity it belongs to, which is not how the finished row reads */
+      width: 100%; max-width: 560px;
+      background: var(--os-bg-inset); border: 0; border-radius: var(--os-radius-md);
+      padding: 2px var(--os-sp-xs);
+      transition: background 150ms, box-shadow 150ms;
+    }
+    .it-add:focus-within { background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color); }
+    .it-add i { color: var(--os-text-subtle); font-size: 14px; line-height: 0; flex: 0 0 auto; margin: 0 var(--os-sp-xs); }
+    .it-add input {
+      display: block; border: 0; background: transparent; box-shadow: none; font: inherit;
+      font-size: var(--os-fs-sm); color: var(--os-text); padding: 6px var(--os-sp-sm); width: 100%;
+    }
+    .it-add input:focus { outline: none; background: transparent; box-shadow: none; }
+    .it-add input.f-time { flex: 0 0 64px; width: 64px; font-feature-settings: 'tnum' 1; }
+    .it-add input.f-act { flex: 1 1 auto; width: auto; border-left: 1px solid var(--os-border-color-subtle); }
+    .it-add input.f-loc { flex: 0 1 140px; width: auto; border-left: 1px solid var(--os-border-color-subtle); }
+    .read-only .it-add { display: none; }
+
+    /* ---- packing ------------------------------------------------------------------- */
+    .packbody { display: flex; flex-direction: column; gap: var(--os-sp-lg); overflow-y: auto; min-height: 0; padding-bottom: var(--os-sp-sm); }
+    .pack-progress {
+      display: flex; align-items: center; gap: var(--os-sp-md); flex: 0 0 auto;
+      font-size: var(--os-fs-sm); color: var(--os-text-secondary); font-feature-settings: 'tnum' 1;
+    }
+    .meter { flex: 1; height: 3px; background: var(--os-bg-inset); border-radius: var(--os-radius-full); overflow: hidden; }
+    .meter div { height: 100%; background: var(--ch); border-radius: var(--os-radius-full); transition: width var(--os-transition-normal); }
+    .pack-cat { display: flex; flex-direction: column; gap: var(--os-sp-xs); }
+    .pack-cat-head {
+      display: flex; align-items: baseline; gap: var(--os-sp-sm);
+      font-size: 11px; font-weight: var(--os-weight-semibold);
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
+    }
+    .pack-cat-head .count {
+      font-size: var(--os-fs-2xs); font-weight: var(--os-weight-normal);
+      letter-spacing: 0; text-transform: none; font-feature-settings: 'tnum' 1;
+    }
+    .pack-row {
+      display: flex; align-items: center; gap: var(--os-sp-sm);
+      padding: var(--os-sp-xs); border-radius: var(--os-radius-sm); transition: background 150ms;
+    }
+    .pack-row:hover { background: var(--os-bg-subtle); }
+    .pack-row .pi { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+    main:not(.read-only) .pack-row .pi { cursor: pointer; }
+    .pack-row.packed .pi { color: var(--os-text-muted); text-decoration: line-through; }
+    /* viewers keep the binary read (fill = packed): legible, just not interactive */
+    .read-only .pack-row input[type="checkbox"]:disabled { opacity: 1; cursor: default; }
+
+    .pack-add, .exp-add {
+      display: flex; align-items: center; flex: 0 0 auto;
+      background: var(--os-bg-inset); border: 0; border-radius: var(--os-radius-md);
+      padding: 2px var(--os-sp-xs);
+      transition: background 150ms, box-shadow 150ms;
+    }
+    .pack-add:focus-within, .exp-add:focus-within { background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color); }
+    .pack-add i, .exp-add i { color: var(--os-text-subtle); font-size: 14px; line-height: 0; flex: 0 0 auto; margin: 0 var(--os-sp-xs); }
+    .pack-add input, .exp-add input {
+      display: block; border: 0; background: transparent; box-shadow: none; font: inherit;
+      font-size: var(--os-fs-sm); color: var(--os-text); padding: 6px var(--os-sp-sm); width: 100%;
+    }
+    .pack-add input:focus, .exp-add input:focus { outline: none; background: transparent; box-shadow: none; }
+    .pack-add input.f-item { flex: 1 1 auto; width: auto; }
+    .pack-add input.f-cat { flex: 0 1 140px; width: auto; border-left: 1px solid var(--os-border-color-subtle); }
+    .exp-add input.f-desc { flex: 1 1 auto; width: auto; }
+    .exp-add input.f-amt { flex: 0 0 84px; width: 84px; text-align: right; font-feature-settings: 'tnum' 1; border-left: 1px solid var(--os-border-color-subtle); }
+    .exp-add input.f-cat { flex: 0 1 110px; width: auto; border-left: 1px solid var(--os-border-color-subtle); }
+    .exp-add input.f-date { flex: 0 0 132px; width: 132px; font-feature-settings: 'tnum' 1; border-left: 1px solid var(--os-border-color-subtle); }
+    .read-only .pack-add, .read-only .exp-add { display: none; }
+
+    /* hover-reveal armed delete (bare ghost, binary reveal) */
+    .trash {
+      flex: 0 0 auto; background: none; border: 0; cursor: pointer; padding: 4px;
+      font-size: 16px; line-height: 0; color: var(--os-text-subtle);
+      opacity: 0; transition: opacity 150ms, color 150ms; display: flex; align-items: center;
+      border-radius: var(--os-radius-sm);
+    }
+    .pack-row:hover .trash, .exp-row:hover .trash { opacity: 1; }
+    .trash:hover { color: var(--os-cError); }
+    .trash:active { transform: scale(0.92); }
+    .trash.armed { opacity: 1; color: var(--os-cError); background: var(--os-cError-muted); }
+    .trash:focus-visible { outline: none; box-shadow: var(--os-focus-ring); opacity: 1; }
+    .read-only .trash { display: none; }
+
+    /* ---- costs --------------------------------------------------------------------- */
+    .expbody { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: var(--os-sp-sm); }
+    /* the list does not stretch: "what for…" sits directly under the last expense
+       instead of being pushed to the floor of a tall frame. Only the total, which
+       summarises the whole ledger, keeps the bottom. */
+    .exp-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+    .exp-row {
+      display: flex; align-items: center; gap: var(--os-sp-md);
+      padding: var(--os-sp-sm) var(--os-sp-xs); border-bottom: 1px solid var(--os-border-color-subtle);
+    }
+    .exp-date {
+      flex: 0 0 72px; font-size: var(--os-fs-sm); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; white-space: nowrap;
+    }
+    .exp-desc { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+    .exp-chip {
+      flex: 0 0 auto; background: var(--os-bg-inset); border-radius: var(--os-radius-full);
+      padding: 1px var(--os-sp-sm); font-size: var(--os-fs-2xs); color: var(--os-text-muted); white-space: nowrap;
+    }
+    .exp-amt { flex: 0 0 auto; min-width: 72px; text-align: right; font-feature-settings: 'tnum' 1; }
+    .exp-total {
+      display: flex; align-items: baseline; justify-content: flex-end; gap: var(--os-sp-md);
+      padding: var(--os-sp-sm) var(--os-sp-xs) 0; border-top: 1px solid var(--os-border-color);
+      flex: 0 0 auto; margin-top: auto;   /* the bottom line keeps the bottom */
+    }
+    /* editor rows end in a 24px trash + 8px gap; keep the total's figure on the amount column */
+    main:not(.read-only) .exp-total { padding-right: calc(24px + var(--os-sp-sm) + var(--os-sp-xs)); }
+    .read-only .exp-total { padding-right: var(--os-sp-xs); }
+    .exp-total .lbl {
+      font-size: 11px; font-weight: var(--os-weight-semibold);
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
+    }
+    .exp-total .amt {
+      min-width: 72px; text-align: right; font-size: var(--os-fs-md);
+      font-weight: var(--os-weight-semibold); font-feature-settings: 'tnum' 1;
+    }
+
+    /* ---- edit modals (kanban's .ed idiom) ------------------------------------------ */
+    .ed { display: flex; flex-direction: column; gap: var(--os-sp-md); min-width: min(380px, 78vw); }
+    .ed label {
+      display: block; font-size: 11px; font-weight: var(--os-weight-semibold);
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
+      margin-bottom: var(--os-sp-sm);
+    }
+    .ed input, .ed textarea {
+      width: 100%; font: inherit; color: var(--os-text);
+      background: var(--os-bg-inset); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-sm); padding: var(--os-sp-sm) var(--os-sp-md); outline: none;
+      transition: border-color 150ms, background 150ms;
+    }
+    .ed input:focus, .ed textarea:focus { border-color: var(--os-text-muted); background: var(--os-bg-surface); box-shadow: none; }
+    .ed textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
+    .ed .cols > div { flex: 1; min-width: 0; }
+    .ed-del {
+      font: inherit; font-size: var(--os-fs-sm); cursor: pointer; margin-right: auto;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-subtle); border-radius: var(--os-radius-sm);
+      padding: calc(var(--os-sp-xs) + 1px) var(--os-sp-md); transition: color 150ms, border-color 150ms;
+    }
+    .ed-del:hover { color: var(--os-cError); border-color: var(--os-cError); }
+    .ed-del.armed { color: var(--os-cError); border-color: var(--os-cError); background: var(--os-cError-muted); }
+  </style>
+</head>
+<body>
+  <!-- MapLibre GL (CSP build) as a classic script so the global `maplibregl` exists before
+       the module below runs. Vendored under public/vendor: external <script> is blocked for
+       frames by design, and this needs no CDN and no API key. -->
+  <script src="./vendor/maplibre-gl-csp.js"></script>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel, Modal } from "./lib/js/framelib.js";
+
+    // ---- the trip map ------------------------------------------------------------------
+    // MapLibre is imperative and owns its own DOM, so it lives behind a ref and is told
+    // about changes rather than re-rendered. Vendored (no CDN, no API key) and pointed at
+    // OpenFreeMap, whose tiles are free and unmetered — OSM's own raster tiles explicitly
+    // ask apps like this one not to use them.
+    const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
+
+    function TripMap({ stops, selected, onSelect }) {
+      const host = useRef(null);
+      const map = useRef(null);
+      const markers = useRef([]);
+      const fitted = useRef("");
+      const refit = useRef(null);   // latest framing fn, so the resize observer can re-run it
+
+      // Create once, destroy on unmount. maplibregl is a global from the classic script.
+      useEffect(() => {
+        if (!host.current || !window.maplibregl) return;
+        maplibregl.setWorkerUrl("./vendor/maplibre-gl-csp-worker.js");
+        map.current = new maplibregl.Map({
+          container: host.current,
+          style: MAP_STYLE,
+          center: [stops[0].lon, stops[0].lat],
+          zoom: 9,
+          attributionControl: { compact: true },
+        });
+        map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+        // The map is measured at construction, but the frame is still laying out then —
+        // and the frame gets resized constantly (it's a tile in a space). Without this the
+        // first fitBounds is computed against the wrong viewport and the trip sits half
+        // off-screen. Re-measure whenever the box changes, and re-frame the stops.
+        const ro = new ResizeObserver(() => {
+          if (!map.current) return;
+          map.current.resize();
+          fitted.current = "";        // the framing was computed for a different box
+          refit.current && refit.current();
+        });
+        ro.observe(host.current);
+        return () => { ro.disconnect(); map.current && map.current.remove(); map.current = null; };
+      }, []);
+
+      // Re-pin whenever the stops change. Cheap: a trip has a handful of them.
+      useEffect(() => {
+        const m = map.current;
+        if (!m) return;
+        markers.current.forEach((mk) => mk.remove());
+        markers.current = stops.map((s, i) => {
+          const el = document.createElement("div");
+          el.className = "pin" + (selected === s.id ? " sel" : "");
+          el.textContent = String(i + 1);
+          el.title = s.activity + (s.location ? " · " + s.location : "");
+          el.onclick = (e) => { e.stopPropagation(); onSelect(selected === s.id ? null : s.id); };
+          return new maplibregl.Marker({ element: el }).setLngLat([s.lon, s.lat]).addTo(m);
+        });
+        // Frame the whole trip, but only when the set of places actually changed —
+        // otherwise selecting a pin would yank the map back and fight the user.
+        const key = stops.map((s) => s.lat.toFixed(4) + "," + s.lon.toFixed(4)).join("|");
+        const doFit = () => {
+          if (!map.current) return;
+          if (stops.length === 1) {
+            map.current.easeTo({ center: [stops[0].lon, stops[0].lat], zoom: 11 });
+          } else {
+            const b = new maplibregl.LngLatBounds();
+            stops.forEach((s) => b.extend([s.lon, s.lat]));
+            map.current.fitBounds(b, { padding: 44, maxZoom: 13, duration: 400 });
+          }
+        };
+        refit.current = doFit;
+        if (key !== fitted.current) { fitted.current = key; doFit(); }
+      }, [stops, selected]);
+
+      return html`<div class="tmap" ref=${host}></div>`;
+    }
+
+    // Selection survives remounts; touched stops the single-trip auto-open after a
+    // deliberate "back to the list".
+    const NAV = { tripId: null, touched: false };
+
+    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+    const dayObj = (s) => (typeof s === "string" && DATE_RE.test(s)) ? new Date(s + "T00:00:00") : null;
+    const isoDay = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    const today = () => isoDay(new Date());
+    function fmtDay(s) {
+      const d = dayObj(s);
+      if (!d) return "";
+      const opts = { month: "short", day: "numeric" };
+      if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+      return d.toLocaleDateString(undefined, opts).toLowerCase();
+    }
+    const fmtWeekday = (s) => { const d = dayObj(s); return d ? d.toLocaleDateString(undefined, { weekday: "long" }).toLowerCase() : ""; };
+    const fmtRange = (a, b) => {
+      const fa = fmtDay(a), fb = fmtDay(b);
+      return fa && fb ? fa + " → " + fb : (fa || fb || "");
+    };
+    // No currency symbol anywhere, deliberately: plain tnum figures + a "total" label
+    // keep the frame locale-neutral.
+    const fmtAmt = (n) => Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    function tripStats(t) {
+      const parts = [];
+      if (t.days) parts.push(t.days === 1 ? "1 day" : t.days + " days");
+      if (t.pack_total) parts.push(t.packed + "/" + t.pack_total + " packed");
+      if (t.expense_total) parts.push(fmtAmt(t.expense_total));
+      return parts.join(" · ") || "nothing planned yet";
+    }
+
+    // Find the row the cursor is hovering above inside one day, for drop positioning.
+    function dragAfter(list, y) {
+      const rows = [...list.querySelectorAll(".it-row:not(.dragging)")];
+      let closest = null, closestOffset = Number.NEGATIVE_INFINITY;
+      for (const row of rows) {
+        const box = row.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closestOffset) { closestOffset = offset; closest = row; }
+      }
+      return closest;
+    }
+
+    function App() {
+      const [me, setMe]           = useState(null);
+      const [trips, setTrips]     = useState(null);   // null until the first load lands
+      const [tripId, setTripId]   = useState(NAV.tripId);
+      const [trip, setTrip]       = useState(null);   // detail payload for the open trip
+      const [tab, setTab]         = useState("itinerary");
+      const [pinned, setPinned]   = useState(null);   // entry id a map pin is pointing at
+      const [creating, setCreating] = useState(false);
+      const [tripDraft, setTripDraft] = useState({ name: "", destination: "", start: "", end: "" });
+      const [drafts, setDrafts]   = useState({});     // day_date -> itinerary add-row draft
+      const [packDraft, setPackDraft] = useState({ item: "", category: "" });
+      const [expDraft, setExpDraft]   = useState({ description: "", amount: "", category: "", date: today() });
+      const [editTrip, setEditTrip]   = useState(false);
+      const [tripArmed, setTripArmed] = useState(false);
+      const [editIt, setEditIt]   = useState(null);   // itinerary entry copy being edited
+      const [itArmed, setItArmed] = useState(false);
+      const [armed, setArmed]     = useState(null);   // id of the delete-armed pack/exp row
+      const armTimer = useRef(null);
+      const dragIt = useRef(null);                    // { id, day } while dragging
+
+      // Writes go over the tether (frame.busSend) — fire-and-forget; the UI refreshes
+      // from the trip_changed push, sender included. Feature-detect: an older viewer's
+      // framelib has no busSend, so fall back to the HTTP write it was using before.
+      const write = (path, body) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+          return Promise.resolve({});
+        }
+        return frame.api(path, body);
+      };
+
+      async function loadTrip(id) {
+        const d = await frame.api("api/trip?id=" + encodeURIComponent(id)).catch(() => null);
+        if (NAV.tripId !== id) return;
+        if (d && d.trip) setTrip(d);
+        else { NAV.tripId = null; setTripId(null); setTrip(null); }   // trip deleted under us
+      }
+      function openTrip(id) {
+        NAV.tripId = id;
+        setTripId(id); setTrip(null); setTab("itinerary");
+        loadTrip(id);
+      }
+      function back() {
+        NAV.touched = true; NAV.tripId = null;
+        setTripId(null); setTrip(null);
+      }
+      async function refresh() {
+        const r = await frame.api("api/trips").catch(() => null);
+        if (r && r.trips) {
+          setTrips(r.trips);
+          // A placement with exactly one trip opens straight into it (until the user
+          // deliberately backs out to the list).
+          if (NAV.tripId == null && !NAV.touched && r.trips.length === 1) { openTrip(r.trips[0].id); return; }
+        }
+        if (NAV.tripId) loadTrip(NAV.tripId);
+      }
+      useEffect(() => {
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({ trip_changed: refresh });
+
+      if (!me) return html`<div></div>`;
+      const isEditor = !!me.is_sfi_editor;
+
+      // ---- mutations -------------------------------------------------------------------
+      function createTrip() {
+        const name = tripDraft.name.trim();
+        if (!name) return;
+        write("api/trip", {
+          name, destination: tripDraft.destination.trim(),
+          start_date: tripDraft.start, end_date: tripDraft.end,
+        }).catch(() => {});
+        setTripDraft({ name: "", destination: "", start: "", end: "" });
+        setCreating(false);
+      }
+      function saveTrip(patch) {
+        if (!trip) return;
+        setTrip((t) => t && ({ ...t, trip: { ...t.trip, ...patch } }));
+        write("api/trip/" + trip.trip.id, patch).catch(() => {});
+      }
+      function deleteTrip() {
+        if (!tripArmed) { setTripArmed(true); return; }
+        const id = trip.trip.id;
+        setTripArmed(false); setEditTrip(false);
+        setTrips((ts) => (ts || []).filter((x) => x.id !== id));
+        back();
+        write("api/trip/" + id + "/delete", {}).catch(() => {});
+      }
+
+      const draftFor = (day) => drafts[day] || { time: "", activity: "", location: "" };
+      function addIt(day) {
+        const dr = draftFor(day);
+        const activity = dr.activity.trim();
+        if (!activity) return;
+        setDrafts({ ...drafts, [day]: { time: "", activity: "", location: "" } });
+        write("api/it", {
+          trip_id: trip.trip.id, day_date: day,
+          time: dr.time.trim(), activity, location: dr.location.trim(),
+        }).catch(() => {});
+      }
+      function saveIt(entry, patch) {
+        setTrip((t) => t && ({ ...t, itinerary: t.itinerary.map((x) => x.id === entry.id ? { ...x, ...patch } : x) }));
+        setEditIt((e) => e && e.id === entry.id ? { ...e, ...patch } : e);
+        write("api/it/" + entry.id, patch).catch(() => {});
+      }
+      function deleteIt(entry) {
+        if (!itArmed) { setItArmed(true); return; }
+        setItArmed(false); setEditIt(null);
+        setTrip((t) => t && ({ ...t, itinerary: t.itinerary.filter((x) => x.id !== entry.id) }));
+        write("api/it/" + entry.id + "/delete", {}).catch(() => {});
+      }
+
+      function addPack() {
+        const item = packDraft.item.trim();
+        if (!item) return;
+        write("api/pack", { trip_id: trip.trip.id, item, category: packDraft.category.trim() }).catch(() => {});
+        setPackDraft({ item: "", category: packDraft.category });   // keep the category for a run of adds
+      }
+      // Optimistic: flip locally, reconcile from the push.
+      function togglePack(p) {
+        if (!isEditor) return;
+        const packed = p.packed ? 0 : 1;
+        setTrip((t) => t && ({ ...t, packing: t.packing.map((x) => x.id === p.id ? { ...x, packed } : x) }));
+        write("api/pack/" + p.id, { packed }).catch(() => {});
+      }
+
+      function addExp() {
+        const description = expDraft.description.trim();
+        const amount = Number(expDraft.amount);
+        if (!description || !Number.isFinite(amount) || amount <= 0) return;
+        write("api/exp", {
+          trip_id: trip.trip.id, description, amount,
+          category: expDraft.category.trim(), date: expDraft.date,
+        }).catch(() => {});
+        setExpDraft({ description: "", amount: "", category: expDraft.category, date: expDraft.date });
+      }
+
+      function disarm() { setArmed(null); if (armTimer.current) clearTimeout(armTimer.current); }
+      function trash(kind, id) {
+        if (armed !== id) {
+          setArmed(id);
+          if (armTimer.current) clearTimeout(armTimer.current);
+          armTimer.current = setTimeout(() => setArmed(null), 2500);
+          return;
+        }
+        disarm();
+        if (kind === "pack") setTrip((t) => t && ({ ...t, packing: t.packing.filter((x) => x.id !== id) }));
+        else setTrip((t) => t && ({ ...t, expenses: t.expenses.filter((x) => x.id !== id) }));
+        write("api/" + kind + "/" + id + "/delete", {}).catch(() => {});
+      }
+
+      // ---- drag: itinerary rows within one day -----------------------------------------
+      function onItDragOver(e, day) {
+        if (!dragIt.current || dragIt.current.day !== day) return;
+        e.preventDefault();
+        const list = e.currentTarget;
+        list.querySelectorAll(".drop-target").forEach((n) => n.classList.remove("drop-target"));
+        const after = dragAfter(list, e.clientY);
+        if (after) after.classList.add("drop-target");
+      }
+      function onItDrop(e, day, entries) {
+        if (!dragIt.current || dragIt.current.day !== day) return;
+        e.preventDefault();
+        const list = e.currentTarget;
+        const after = dragAfter(list, e.clientY);
+        list.querySelectorAll(".drop-target").forEach((n) => n.classList.remove("drop-target"));
+        const id = dragIt.current.id; dragIt.current = null;
+        const ids = entries.map((x) => x.id).filter((x) => x !== id);
+        const to = after ? ids.indexOf(after.dataset.id) : ids.length;
+        ids.splice(to < 0 ? ids.length : to, 0, id);
+        const pos = new Map(ids.map((x, i) => [x, i]));
+        setTrip((t) => t && ({
+          ...t,
+          itinerary: t.itinerary
+            .map((x) => pos.has(x.id) ? { ...x, sort_order: pos.get(x.id) } : x)
+            .sort((a, b) => a.day_date < b.day_date ? -1 : a.day_date > b.day_date ? 1 : a.sort_order - b.sort_order),
+        }));
+        write("api/it/reorder", { trip_id: trip.trip.id, day_date: day, ids }).catch(() => {});
+      }
+
+      const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
+
+      // ---- shared chrome ---------------------------------------------------------------
+      const banner = !isEditor ? html`
+        <div class="banner">
+          <i class="ph-light ph-eye"></i>
+          ${me.is_sfi_member
+            ? html`You have viewer-only access. Ask the owner to raise your role to edit these trips.`
+            : html`You're viewing this trip plan publicly. Join this space to edit it.`}
+        </div>` : null;
+
+      const form = html`
+        <div class="tform">
+          <div class="field">
+            <label for="tf-name">Name</label>
+            <input id="tf-name" maxlength="120" placeholder="Summer in Lisbon" value=${tripDraft.name}
+              onInput=${(e) => setTripDraft({ ...tripDraft, name: e.target.value })}
+              onKeyDown=${(e) => { if (e.key === "Enter") createTrip(); }} />
+          </div>
+          <div class="cols">
+            <div class="field">
+              <label for="tf-dest">Destination</label>
+              <input id="tf-dest" maxlength="120" placeholder="Optional" value=${tripDraft.destination}
+                onInput=${(e) => setTripDraft({ ...tripDraft, destination: e.target.value })}
+                onKeyDown=${(e) => { if (e.key === "Enter") createTrip(); }} />
+            </div>
+            <div class="field">
+              <label for="tf-start">First day</label>
+              <input id="tf-start" type="date" value=${tripDraft.start}
+                onInput=${(e) => setTripDraft({ ...tripDraft, start: e.target.value })} />
+            </div>
+            <div class="field">
+              <label for="tf-end">Last day</label>
+              <input id="tf-end" type="date" value=${tripDraft.end}
+                onInput=${(e) => setTripDraft({ ...tripDraft, end: e.target.value })} />
+            </div>
+          </div>
+          <div class="form-actions">
+            ${trips && trips.length > 0 ? html`
+              <button class="ghost" onClick=${() => { setCreating(false); setTripDraft({ name: "", destination: "", start: "", end: "" }); }}>Cancel</button>` : null}
+            <button class="btn-primary" disabled=${!tripDraft.name.trim()} onClick=${createTrip}>Create trip</button>
+          </div>
+        </div>`;
+
+      // ---- level 1: the trip list ------------------------------------------------------
+      if (!tripId) {
+        return html`
+          <main class=${isEditor ? "" : "read-only"}>
+            <div class="header">
+              <i class="ph-light ph-airplane-tilt brand"></i>
+              <div class="titles"><h1 class="t-title"><span class="static">Trip Planner</span></h1></div>
+              <span class="mode">${mode}</span>
+            </div>
+            ${banner}
+            ${trips === null ? null
+            : trips.length === 0
+              ? (isEditor ? html`
+                  <div class="notice">
+                    <i class="ph-light ph-airplane-tilt"></i>
+                    <h2>Plan your first trip</h2>
+                    <p>Name it, set the dates, then build out the itinerary, packing list, and costs.</p>
+                  </div>
+                  ${form}`
+                : html`<div class="empty">Nothing here yet.</div>`)
+              : html`
+                <div class="triplist">
+                  ${trips.map((t) => html`
+                    <div class="trip" key=${t.id} onClick=${() => openTrip(t.id)}>
+                      <div class="t-info">
+                        <div class="t-name">${t.name}</div>
+                        <div class="t-sub">${[t.destination, fmtRange(t.start_date, t.end_date)].filter(Boolean).join(" · ")}</div>
+                      </div>
+                      <div class="t-stats">${tripStats(t)}</div>
+                    </div>
+                  `)}
+                </div>
+                ${isEditor ? (creating ? form : html`
+                  <button class="new-trip" onClick=${() => setCreating(true)}>
+                    <i class="ph-light ph-plus"></i>New trip
+                  </button>`) : null}`}
+          </main>`;
+      }
+
+      // ---- level 2: trip detail --------------------------------------------------------
+      if (!trip) return html`<main></main>`;
+      const t = trip.trip;
+
+      // Days shown: every day carrying entries, plus (editors only) the trip's own date
+      // range so empty days are add targets. Undated entries group under "anytime".
+      const byDay = {};
+      for (const e of trip.itinerary) (byDay[e.day_date || ""] ||= []).push(e);
+      const dayKeys = new Set(Object.keys(byDay).filter(Boolean));
+      if (isEditor) {
+        const a = dayObj(t.start_date), b = dayObj(t.end_date);
+        if (a && b && b >= a) {
+          const d = new Date(a);
+          for (let i = 0; d <= b && i < 60; i++) { dayKeys.add(isoDay(d)); d.setDate(d.getDate() + 1); }
+        } else if (a) dayKeys.add(t.start_date);
+      }
+      const days = [...dayKeys].sort().map((k) => ({ key: k, entries: byDay[k] || [] }));
+      const anytime = byDay[""] || [];
+      const showAnytime = anytime.length > 0 || (isEditor && days.length === 0);
+
+      // Stops we managed to place, in itinerary order — the pins are numbered by this, so
+      // pin 3 is the third thing you do on the trip. Coordinates arrive asynchronously
+      // after a lookup, so this simply grows as they land.
+      const mapStops = [...days.flatMap((d) => d.entries), ...anytime]
+        .filter((en) => en.lat || en.lon);
+
+      // Clicking a pin points at its entry and brings it into view; clicking it again
+      // lets go. The row highlight is the whole feedback — no popup covering the map.
+      function selectPin(id) {
+        setPinned(id);
+        if (!id) return;
+        const row = document.querySelector(`.it-row[data-id="${id}"]`);
+        if (row) row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+
+      const packedCount = trip.packing.filter((p) => p.packed).length;
+      const byCat = {};
+      for (const p of trip.packing) (byCat[p.category || "general"] ||= []).push(p);
+      const catNames = Object.keys(byCat).sort();
+      const expCats = [...new Set(trip.expenses.map((x) => x.category).filter(Boolean))].sort();
+
+      const itAddRow = (day) => html`
+        <div class="it-add">
+          <i class="ph-light ph-plus"></i>
+          <input class="f-time" maxlength="24" placeholder="10:00" value=${draftFor(day).time}
+            onInput=${(e) => setDrafts({ ...drafts, [day]: { ...draftFor(day), time: e.target.value } })}
+            onKeyDown=${(e) => { if (e.key === "Enter") addIt(day); }} />
+          <input class="f-act" maxlength="200" placeholder="Add an activity…" value=${draftFor(day).activity}
+            onInput=${(e) => setDrafts({ ...drafts, [day]: { ...draftFor(day), activity: e.target.value } })}
+            onKeyDown=${(e) => { if (e.key === "Enter") addIt(day); }} />
+          <input class="f-loc" maxlength="120" placeholder="Where" value=${draftFor(day).location}
+            onInput=${(e) => setDrafts({ ...drafts, [day]: { ...draftFor(day), location: e.target.value } })}
+            onKeyDown=${(e) => { if (e.key === "Enter") addIt(day); }} />
+        </div>`;
+
+      const dayGroup = (label, sub, day, entries) => html`
+        <div class="day" key=${"d" + day}>
+          <div class="day-head">
+            <span class="wd">${label}</span>
+            ${sub ? html`<span class="dt">${sub}</span>` : null}
+            <span class="rule"></span>
+          </div>
+          <div class="day-rows"
+            onDragOver=${isEditor ? (e) => onItDragOver(e, day) : null}
+            onDrop=${isEditor ? (e) => onItDrop(e, day, entries) : null}>
+            ${entries.map((en) => html`
+              <div class=${"it-row" + (pinned === en.id ? " sel" : "")} key=${en.id} data-id=${en.id}
+                onClick=${isEditor ? () => { setEditIt({ ...en }); setItArmed(false); } : null}>
+                ${isEditor ? html`
+                  <span class="it-grip" draggable="true"
+                    onClick=${(e) => e.stopPropagation()}
+                    onDragStart=${(e) => {
+                      dragIt.current = { id: en.id, day };
+                      const row = e.currentTarget.closest(".it-row");
+                      const r = row.getBoundingClientRect();
+                      e.dataTransfer.setDragImage(row, e.clientX - r.left, e.clientY - r.top);
+                      e.dataTransfer.effectAllowed = "move";
+                      setTimeout(() => row.classList.add("dragging"), 0);
+                    }}
+                    onDragEnd=${(e) => {
+                      dragIt.current = null;
+                      e.currentTarget.closest(".it-row").classList.remove("dragging");
+                      document.querySelectorAll(".it-row.drop-target").forEach((n) => n.classList.remove("drop-target"));
+                    }}>
+                    <i class="ph-light ph-dots-six-vertical"></i>
+                  </span>` : null}
+                <span class="it-time">${en.time}</span>
+                <span class="it-main">
+                  <span class="it-act">${en.activity}</span>
+                  ${en.location ? html`<span class="it-loc">${en.location}</span>` : null}
+                </span>
+              </div>
+            `)}
+            ${isEditor ? itAddRow(day) : null}
+          </div>
+        </div>`;
+
+      const wideItin = tab === "itinerary" && mapStops.length > 0;
+
+      return html`
+        <main class=${(wideItin ? "wide" : "") + (isEditor ? "" : " read-only")}>
+          <div class="header">
+            <button class="iconbtn" title="All trips" onClick=${back}>
+              <i class="ph-light ph-arrow-left"></i>
+            </button>
+            <i class="ph-light ph-airplane-tilt brand"></i>
+            <div class="titles">
+              <h1 class="t-title">
+                ${isEditor
+                  ? html`<input value=${t.name} maxlength="120"
+                      onBlur=${(e) => { const v = e.target.value.trim(); if (v && v !== t.name) saveTrip({ name: v }); }}
+                      onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />`
+                  : html`<span class="static">${t.name}</span>`}
+              </h1>
+              <div class="subline">${[t.destination, fmtRange(t.start_date, t.end_date)].filter(Boolean).join(" · ")}</div>
+            </div>
+            <span class="mode">${mode}</span>
+          </div>
+
+          ${banner}
+
+          <div class="tabrow">
+            <div class="seg" role="tablist">
+              ${["itinerary", "packing", "costs"].map((k) => html`
+                <button key=${k} role="tab" aria-selected=${tab === k} class=${tab === k ? "active" : ""}
+                  onClick=${() => setTab(k)}><span>${k}</span></button>
+              `)}
+            </div>
+            ${isEditor ? html`
+              <button class="trip-edit" onClick=${() => { setEditTrip(true); setTripArmed(false); }}>
+                <i class="ph-light ph-pencil-simple"></i>trip details
+              </button>` : null}
+          </div>
+
+          ${tab === "itinerary" ? html`
+            <div class=${"tabbody" + (mapStops.length > 0 ? " withmap" : "")}>
+              ${mapStops.length > 0 ? html`
+                <${TripMap} stops=${mapStops} selected=${pinned} onSelect=${selectPin} />` : null}
+              ${days.length === 0 && !showAnytime
+                ? html`<div class="empty">Nothing here yet.</div>`
+                : html`
+                  <div class="days">
+                    ${days.map((d) => dayGroup(fmtWeekday(d.key), fmtDay(d.key), d.key, d.entries))}
+                    ${showAnytime ? dayGroup("anytime", "", "", anytime) : null}
+                  </div>`}
+            </div>` : null}
+
+          ${tab === "packing" ? html`
+            <div class="tabbody">
+              <div class="packbody">
+                ${trip.packing.length > 0 ? html`
+                  <div class="pack-progress">
+                    <span>${packedCount} of ${trip.packing.length} packed</span>
+                    <div class="meter"><div style=${"width:" + (trip.packing.length ? Math.round(packedCount / trip.packing.length * 100) : 0) + "%"}></div></div>
+                  </div>` : (!isEditor ? html`<div class="empty">Nothing here yet.</div>` : null)}
+                ${catNames.map((cat) => html`
+                  <div class="pack-cat" key=${cat}>
+                    <div class="pack-cat-head">
+                      <span>${cat}</span>
+                      <span class="count">${byCat[cat].filter((p) => p.packed).length}/${byCat[cat].length}</span>
+                    </div>
+                    ${byCat[cat].map((p) => html`
+                      <div class=${"pack-row" + (p.packed ? " packed" : "")} key=${p.id}>
+                        <input type="checkbox" checked=${!!p.packed} disabled=${!isEditor}
+                          onChange=${() => togglePack(p)} />
+                        <span class="pi" onClick=${() => togglePack(p)}>${p.item}</span>
+                        ${isEditor ? html`
+                          <button class=${"trash" + (armed === p.id ? " armed" : "")}
+                            title=${armed === p.id ? "Click again to delete" : "Delete"}
+                            onClick=${() => trash("pack", p.id)} onBlur=${disarm}>
+                            <i class=${"ph-light " + (armed === p.id ? "ph-trash" : "ph-trash-simple")}></i>
+                          </button>` : null}
+                      </div>
+                    `)}
+                  </div>
+                `)}
+                ${isEditor ? html`
+                  <div class="pack-add">
+                    <i class="ph-light ph-plus"></i>
+                    <input class="f-item" maxlength="120" placeholder="Add an item…" value=${packDraft.item}
+                      onInput=${(e) => setPackDraft({ ...packDraft, item: e.target.value })}
+                      onKeyDown=${(e) => { if (e.key === "Enter") addPack(); }} />
+                    <input class="f-cat" maxlength="40" placeholder="Category" list="pack-cats" value=${packDraft.category}
+                      onInput=${(e) => setPackDraft({ ...packDraft, category: e.target.value })}
+                      onKeyDown=${(e) => { if (e.key === "Enter") addPack(); }} />
+                    <datalist id="pack-cats">
+                      ${catNames.map((c) => html`<option key=${c} value=${c}></option>`)}
+                    </datalist>
+                  </div>` : null}
+              </div>
+            </div>` : null}
+
+          ${tab === "costs" ? html`
+            <div class="tabbody">
+              <div class="expbody">
+                ${trip.expenses.length === 0 && !isEditor
+                  ? html`<div class="empty">Nothing here yet.</div>`
+                  : html`
+                    <div class="exp-list">
+                      ${trip.expenses.map((x) => html`
+                        <div class="exp-row" key=${x.id}>
+                          <span class="exp-date">${fmtDay(x.date)}</span>
+                          <span class="exp-desc">${x.description}</span>
+                          ${x.category ? html`<span class="exp-chip">${x.category}</span>` : null}
+                          <span class="exp-amt">${fmtAmt(x.amount)}</span>
+                          ${isEditor ? html`
+                            <button class=${"trash" + (armed === x.id ? " armed" : "")}
+                              title=${armed === x.id ? "Click again to delete" : "Delete"}
+                              onClick=${() => trash("exp", x.id)} onBlur=${disarm}>
+                              <i class=${"ph-light " + (armed === x.id ? "ph-trash" : "ph-trash-simple")}></i>
+                            </button>` : null}
+                        </div>
+                      `)}
+                    </div>`}
+                ${isEditor ? html`
+                  <div class="exp-add">
+                    <i class="ph-light ph-plus"></i>
+                    <input class="f-desc" maxlength="200" placeholder="What for…" value=${expDraft.description}
+                      onInput=${(e) => setExpDraft({ ...expDraft, description: e.target.value })}
+                      onKeyDown=${(e) => { if (e.key === "Enter") addExp(); }} />
+                    <input class="f-amt" inputmode="decimal" placeholder="0.00" value=${expDraft.amount}
+                      onInput=${(e) => setExpDraft({ ...expDraft, amount: e.target.value })}
+                      onKeyDown=${(e) => { if (e.key === "Enter") addExp(); }} />
+                    <input class="f-cat" maxlength="40" placeholder="Category" list="exp-cats" value=${expDraft.category}
+                      onInput=${(e) => setExpDraft({ ...expDraft, category: e.target.value })}
+                      onKeyDown=${(e) => { if (e.key === "Enter") addExp(); }} />
+                    <input class="f-date" type="date" value=${expDraft.date}
+                      onInput=${(e) => setExpDraft({ ...expDraft, date: e.target.value })} />
+                    <datalist id="exp-cats">
+                      ${expCats.map((c) => html`<option key=${c} value=${c}></option>`)}
+                    </datalist>
+                  </div>` : null}
+                ${trip.expenses.length > 0 ? html`
+                  <div class="exp-total">
+                    <span class="lbl">total</span>
+                    <span class="amt">${fmtAmt(trip.total)}</span>
+                  </div>` : null}
+              </div>
+            </div>` : null}
+
+          ${editTrip ? html`
+            <${Modal} title="Trip details" onClose=${() => { setEditTrip(false); setTripArmed(false); }}
+              actions=${html`
+                <button class=${"ed-del" + (tripArmed ? " armed" : "")} onClick=${deleteTrip}>
+                  ${tripArmed ? "Click again to delete" : "Delete trip"}
+                </button>
+                <button onClick=${() => { setEditTrip(false); setTripArmed(false); }}>Done</button>
+              `}>
+              <div class="ed">
+                <div>
+                  <label>Destination</label>
+                  <input value=${t.destination} maxlength="120" placeholder="Where to…"
+                    onBlur=${(e) => { const v = e.target.value.trim(); if (v !== t.destination) saveTrip({ destination: v }); }}
+                    onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                </div>
+                <div class="cols">
+                  <div>
+                    <label>First day</label>
+                    <input type="date" value=${t.start_date}
+                      onInput=${(e) => saveTrip({ start_date: e.target.value })} />
+                  </div>
+                  <div>
+                    <label>Last day</label>
+                    <input type="date" value=${t.end_date}
+                      onInput=${(e) => saveTrip({ end_date: e.target.value })} />
+                  </div>
+                </div>
+                <div>
+                  <label>Notes</label>
+                  <textarea maxlength="2000" placeholder="Optional details…"
+                    onBlur=${(e) => { if (e.target.value !== t.notes) saveTrip({ notes: e.target.value }); }}>${t.notes}</textarea>
+                </div>
+              </div>
+            </${Modal}>` : null}
+
+          ${editIt ? html`
+            <${Modal} title="Edit entry" onClose=${() => { setEditIt(null); setItArmed(false); }}
+              actions=${html`
+                <button class=${"ed-del" + (itArmed ? " armed" : "")} onClick=${() => deleteIt(editIt)}>
+                  ${itArmed ? "Click again to delete" : "Delete entry"}
+                </button>
+                <button onClick=${() => { setEditIt(null); setItArmed(false); }}>Done</button>
+              `}>
+              <div class="ed">
+                <div>
+                  <label>Activity</label>
+                  <input value=${editIt.activity} maxlength="200"
+                    onBlur=${(e) => { const v = e.target.value.trim(); if (v && v !== editIt.activity) saveIt(editIt, { activity: v }); }}
+                    onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                </div>
+                <div class="cols">
+                  <div>
+                    <label>Day</label>
+                    <input type="date" value=${editIt.day_date}
+                      onInput=${(e) => saveIt(editIt, { day_date: e.target.value })} />
+                  </div>
+                  <div>
+                    <label>Time</label>
+                    <input value=${editIt.time} maxlength="24" placeholder="10:00 or all day"
+                      onBlur=${(e) => { const v = e.target.value.trim(); if (v !== editIt.time) saveIt(editIt, { time: v }); }}
+                      onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                  </div>
+                </div>
+                <div>
+                  <label>Location</label>
+                  <input value=${editIt.location} maxlength="120" placeholder="Optional"
+                    onBlur=${(e) => { const v = e.target.value.trim(); if (v !== editIt.location) saveIt(editIt, { location: v }); }}
+                    onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                </div>
+              </div>
+            </${Modal}>` : null}
+        </main>
+      `;
+    }
+
+    render(html`<${App}/>`, document.body);
+  </script>
+</body>
+</html>

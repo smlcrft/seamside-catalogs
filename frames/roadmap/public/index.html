@@ -655,9 +655,7 @@
 
       if (!me || !loaded) return html`<div></div>`;
 
-      const mode = isEditor ? (me.is_owner ? "editor · owner" : "editor")
-        : me.is_sfi_member ? "viewer · read-only"
-        : (me.is_anon ? "anonymous · read-only" : "read-only");
+      const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
 
       // ---- milestone / bucket card ------------------------------------------------------
       function MilestoneCard(m, opts = {}) {

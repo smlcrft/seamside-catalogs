@@ -1,0 +1,852 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Meal Planner</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); }   /* follows the space channel at runtime */
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      height: 100%; max-width: 1560px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-xl));
+    }
+
+    /* ---- header rail (24px first line; PRECISION §6) ------------------------------- */
+    .header { display: flex; align-items: center; gap: var(--os-sp-sm); flex: 0 0 auto; flex-wrap: wrap; row-gap: var(--os-sp-xs); }
+    .header .brand {
+      font-size: 20px; color: var(--ch);
+      display: inline-flex; width: 24px; height: 24px;
+      align-items: center; justify-content: center; line-height: 1; flex: 0 0 auto;
+    }
+    .header h1 { margin: 0; font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); line-height: 24px; letter-spacing: -0.01em; }
+    .header .chips { margin-left: auto; display: inline-flex; align-items: center; gap: var(--os-sp-sm); }
+    .header .mode {
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; text-transform: lowercase; white-space: nowrap;
+    }
+
+    /* the data drawer — ONE quiet button for a configuration most people never touch.
+       Owner-only (nobody else sees it), no state text at rest: where the rows live is
+       not news, it's a setting. This frame has THREE data units (its own plan, plus the
+       recipes and grocery links); they all live behind this one button, listed with
+       their state, instead of three chips shouting in the header. The glyph is the
+       platform's Tables icon (ph-dresser, the pivot-nav rail) so the frame and the OS
+       say "tables" the same way. See docs/table-graduation.md. */
+    .drawer {
+      flex: 0 0 auto; position: relative;
+      width: 24px; height: 24px; padding: 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-subtle); font-size: 16px; line-height: 1;
+      transition: color 150ms, background 150ms;
+    }
+    .drawer:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+    .drawer:active { transform: scale(0.92); }
+    .drawer:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    /* the ONE ambient signal, and it is rare: a channel dot while a move is unfinished */
+    .drawer.pending::after {
+      content: ""; position: absolute; top: 0; right: 0;
+      width: 5px; height: 5px; border-radius: var(--os-radius-full); background: var(--ch);
+      animation: drawer-breathe 2s ease-in-out infinite;
+    }
+    @keyframes drawer-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    @media (prefers-reduced-motion: reduce) { .drawer.pending::after { animation: none; } }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs); flex: 0 0 auto;
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+    }
+
+    /* ---- week strip ---------------------------------------------------------------- */
+    .wk { display: flex; align-items: center; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .wk-label {
+      font-size: var(--os-fs-md); font-weight: var(--os-weight-medium);
+      font-feature-settings: 'tnum' 1; white-space: nowrap; min-width: 116px; text-align: center;
+    }
+    .iconbtn {
+      flex: 0 0 auto; width: 24px; height: 24px; padding: 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-muted); font-size: 16px; line-height: 1;
+      transition: color 150ms, background 150ms;
+    }
+    .iconbtn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+    .iconbtn:active { transform: scale(0.92); }
+    .iconbtn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .wk-btn {
+      font: inherit; font-size: var(--os-fs-2xs); cursor: pointer;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-secondary); border-radius: var(--os-radius-sm);
+      padding: 3px var(--os-sp-sm); white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: color 150ms, border-color 150ms;
+    }
+    .wk-btn i { font-size: 12px; line-height: 1; }
+    .wk-btn:hover { color: var(--os-text); border-color: var(--os-text-subtle); }
+    .wk-btn:active { transform: none; background: var(--os-bg-inset); }
+    .wk-btn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .wk .tail { margin-left: auto; display: inline-flex; align-items: center; gap: var(--os-sp-sm); min-width: 0; }
+    .sent-note {
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* ---- the week board: days as cells, meals as cards, slot as a color --------------
+       The kanban shape for a family week. Slots are function-coded channels (the OP-1
+       principle: color communicates what a thing IS) — breakfast/lunch/dinner/snack
+       each own a channel, fixed across placements, carried by an 8px dot on the card. */
+    .slot-breakfast { --slot: var(--os-c4); }
+    .slot-lunch     { --slot: var(--os-c1); }
+    .slot-dinner    { --slot: var(--os-c2); }
+    .slot-snack     { --slot: var(--os-c3); }
+    .slot-other     { --slot: var(--os-c6); }
+
+    .wgrid {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto;
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: var(--os-sp-md); align-content: start; padding-bottom: var(--os-sp-sm);
+    }
+    /* the column ladder follows the frame: 2 (narrow) → 3 → 4 → a full week row (wide) */
+    @media (max-width: 600px) { .wgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (min-width: 601px) and (max-width: 980px) { .wgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (min-width: 1360px) { .wgrid { grid-template-columns: repeat(8, minmax(0, 1fr)); gap: var(--os-sp-lg); } }
+    @media (max-width: 400px) { .mcard .photo { display: none; } }   /* tiny cells: the words win */
+    .dcell {
+      background: var(--os-bg-subtle); border-radius: var(--os-radius-lg);
+      padding: var(--os-sp-sm); min-height: 158px;
+      display: flex; flex-direction: column; gap: var(--os-sp-sm);
+      transition: box-shadow 120ms ease;
+    }
+    .dcell.drop { box-shadow: inset 0 0 0 1.5px var(--ch); }   /* the whole cell makes room */
+    .dcell-head { display: flex; align-items: baseline; gap: var(--os-sp-sm); padding: 0 2px; flex: 0 0 auto; }
+    .dcell-head .wd { font-size: var(--os-fs-sm); font-weight: var(--os-weight-semibold); }
+    .dcell.today .wd { color: var(--ch); }   /* today carries the channel */
+    .dcell-head .dt { font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-feature-settings: 'tnum' 1; }
+
+    .mcards { display: flex; flex-direction: column; gap: var(--os-sp-sm); }
+    /* a meal card wears its recipe's photo as a cover band; the slot is a dot AND a word */
+    .mcard {
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-md); overflow: hidden;
+      display: flex; flex-direction: column; min-width: 0;
+      transition: border-color 150ms, box-shadow 150ms, transform 150ms;
+    }
+    main:not(.read-only) .mcard { cursor: pointer; }
+    .mcard:hover { border-color: var(--os-text-subtle); box-shadow: var(--os-shadow-sm); }
+    main:not(.read-only) .mcard:hover { transform: translateY(-1px); }
+    .mcard.dragging { opacity: 0.4; }
+    .mcard .photo { width: 100%; height: clamp(48px, 6vw, 72px); object-fit: cover; display: block; }
+    .mcard .body { display: flex; flex-direction: column; gap: 2px; padding: var(--os-sp-sm); min-width: 0; }
+    .mcard .toprow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .mcard .tr-right { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+    .slot-dot { flex: 0 0 8px; width: 8px; height: 8px; border-radius: var(--os-radius-full); background: var(--slot, var(--os-c6)); }
+    .mc-slot { font-size: var(--os-fs-2xs); color: var(--os-text-muted); text-transform: lowercase; white-space: nowrap; }
+    .mc-title { min-width: 0; font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium); overflow-wrap: anywhere; }
+    .mc-serv { font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-feature-settings: 'tnum' 1; }
+    .mc-recipe { font-size: 13px; line-height: 1; color: var(--ch); }
+
+    /* kanban's add-zone: a quiet ghost + pinned at the cell foot, revealed on cell hover.
+       In an EMPTY day it stretches to fill the cell and stays visible at rest — the whole
+       empty cell is the button, since there is no content for the chrome to outweigh. */
+    .addzone {
+      margin-top: auto; display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
+      min-height: 28px; padding: var(--os-sp-sm); background: none; border: 0; border-radius: var(--os-radius-md);
+      cursor: pointer; color: var(--os-text-subtle); font-size: 16px; line-height: 0;
+      opacity: 0; transition: opacity 150ms, color 150ms, background 150ms;
+    }
+    .dcell.bare .addzone { flex: 1 1 auto; margin-top: 0; opacity: 1; }
+    .dcell:hover .addzone, .addzone:focus-visible { opacity: 1; }
+    .addzone:hover { color: var(--os-text); background: var(--os-bg-surface); }
+    .addzone:active { transform: scale(0.92); }
+    .addzone:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .read-only .addzone { display: none; }
+
+    /* in-cell draft card (kanban's card-draft, with the slot picked as four dots:
+       fill = chosen, stroke = not — binary status doing the work of a select) */
+    .mdraft {
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color);
+      border-radius: var(--os-radius-md); padding: var(--os-sp-sm);
+      display: flex; flex-direction: column; gap: var(--os-sp-sm); flex: 0 0 auto;
+    }
+    /* labeled slot chips: the dot AND its word, fill = chosen, stroke = not —
+       binary status doing the work of a select. One row in the add modal, 2x2 when narrow. */
+    .slot-chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--os-sp-xs); }
+    @media (max-width: 560px) { .slot-chips { grid-template-columns: 1fr 1fr; } }
+    .slot-chips button {
+      display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+      font: inherit; font-size: var(--os-fs-2xs); text-transform: lowercase;
+      color: var(--os-text-secondary); background: none; border: 0; cursor: pointer;
+      border-radius: var(--os-radius-sm); padding: 3px var(--os-sp-sm);
+      box-shadow: inset 0 0 0 1px var(--os-border-color-subtle);
+      transition: background 120ms, color 120ms, box-shadow 120ms;
+    }
+    .slot-chips button::before {
+      content: ""; width: 8px; height: 8px; border-radius: var(--os-radius-full);
+      box-shadow: inset 0 0 0 1.5px var(--slot); flex: 0 0 auto;
+      transition: background 120ms, box-shadow 120ms;
+    }
+    .slot-chips button.sel {
+      color: var(--os-text); background: color-mix(in srgb, var(--slot), transparent 88%);
+      box-shadow: none;
+    }
+    .slot-chips button.sel::before { background: var(--slot); box-shadow: none; }
+    .slot-chips button:active { transform: scale(0.97); }
+    .slot-chips button:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    /* the recipe hook in the draft + edit modal: a recessed row that opens the picker */
+    .pickbtn {
+      display: flex; align-items: center; gap: var(--os-sp-sm); width: 100%; min-width: 0;
+      font: inherit; font-size: var(--os-fs-sm); text-align: left; cursor: pointer;
+      background: var(--os-bg-inset); border: 0; border-radius: var(--os-radius-sm);
+      color: var(--os-text-secondary); padding: 5px var(--os-sp-sm);
+      transition: background 150ms, color 150ms, box-shadow 150ms;
+    }
+    .pickbtn:hover { background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color-subtle); color: var(--os-text); }
+    .pickbtn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .pickbtn > i { font-size: 14px; line-height: 1; color: var(--ch); flex: 0 0 auto; }
+    .pickbtn .pb-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .pickbtn .pb-thumb { flex: 0 0 20px; width: 20px; height: 20px; border-radius: 4px; object-fit: cover; }
+    .pickbtn .pb-x { margin-left: auto; color: var(--os-text-subtle); font-size: 12px; line-height: 1; padding: 2px; border-radius: var(--os-radius-sm); }
+    .pickbtn .pb-x:hover { color: var(--os-cError); }
+
+    /* ---- the recipe book: search + card grid, shared by the add modal and the
+       edit modal's picker. Not a dropdown. */
+    .pick { display: flex; flex-direction: column; gap: var(--os-sp-md); width: min(640px, 78vw); max-width: 100%; }
+    .book { display: flex; flex-direction: column; gap: var(--os-sp-sm); }
+    .psearch {
+      display: flex; align-items: center; flex: 0 0 auto;
+      background: var(--os-bg-inset); border: 0; border-radius: var(--os-radius-md);
+      padding: 2px var(--os-sp-sm);
+      transition: background 150ms, box-shadow 150ms;
+    }
+    .psearch:focus-within { background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color); }
+    .psearch i { color: var(--os-text-subtle); font-size: 14px; line-height: 0; flex: 0 0 auto; }
+    .psearch input {
+      flex: 1 1 auto; min-width: 0; border: 0; background: transparent; box-shadow: none;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text); padding: 6px var(--os-sp-sm);
+    }
+    .psearch input:focus { outline: none; background: transparent; box-shadow: none; }
+    .pgrid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--os-sp-md);
+      max-height: 320px; overflow-y: auto; padding: 2px;
+    }
+    .pcard {
+      display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden;
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-md); cursor: pointer; font: inherit; color: var(--os-text); min-width: 0;
+      transition: border-color 150ms, box-shadow 150ms, transform 150ms;
+    }
+    .pcard:hover { border-color: var(--os-text-subtle); box-shadow: var(--os-shadow-sm); transform: translateY(-1px); }
+    .pcard:active { transform: scale(0.97); }
+    .pcard:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    /* chosen = ink border (the selection grammar), not a channel ring */
+    .pcard.sel { border-color: var(--os-text); box-shadow: var(--os-shadow-sm); }
+    .pcard .pimg { width: 100%; height: 84px; object-fit: cover; display: block; }
+    .pcard .pph {
+      width: 100%; height: 84px; display: flex; align-items: center; justify-content: center;
+      background: color-mix(in srgb, var(--ch), transparent 90%); color: var(--ch); font-size: 26px;
+    }
+    .pcard .pbody { padding: var(--os-sp-sm); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .pcard .pt { font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium); overflow-wrap: anywhere; }
+    .pcard .ps { font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-feature-settings: 'tnum' 1; }
+    .pempty { text-align: center; color: var(--os-text-muted); font-size: var(--os-fs-sm); padding: var(--os-sp-lg); }
+    .btn-primary {
+      background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); border: 0; cursor: pointer;
+      padding: var(--os-sp-sm) var(--os-sp-lg); border-radius: var(--os-radius-md);
+      font: inherit; font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium);
+      display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+      transition: filter 150ms, transform 80ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+    .btn-primary:active:not(:disabled) { transform: scale(0.97); }
+    .btn-primary:disabled { opacity: 0.5; cursor: default; }
+    .btn-primary:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .mdraft input, .mdraft select {
+      width: 100%; border: 0; background: var(--os-bg-inset); box-shadow: none;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text);
+      padding: 5px var(--os-sp-sm); border-radius: var(--os-radius-sm);
+    }
+    .mdraft input:focus, .mdraft select:focus { outline: none; background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color); }
+    .mdraft select { padding-right: 24px; background-position: right 8px center; }
+
+    /* the eighth cell: the week's quiet control tile (stroke, not a day) */
+    .wk-cell { background: none; box-shadow: inset 0 0 0 1px var(--os-border-color-subtle); }
+    .wk-cell .label {
+      font-size: 11px; font-weight: var(--os-weight-semibold); text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--os-text-muted); padding: 0 2px;
+    }
+    .wk-cell .stat { font-size: var(--os-fs-sm); color: var(--os-text-secondary); font-feature-settings: 'tnum' 1; padding: 0 2px; }
+    .wk-cell .send {
+      margin-top: auto; font: inherit; font-size: var(--os-fs-2xs); cursor: pointer;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-secondary); border-radius: var(--os-radius-sm);
+      padding: 3px var(--os-sp-sm); display: inline-flex; align-items: center; gap: 6px;
+      align-self: flex-start; transition: color 150ms, border-color 150ms;
+    }
+    .wk-cell .send i { font-size: 12px; line-height: 1; }
+    .wk-cell .send:hover { color: var(--os-text); border-color: var(--os-text-subtle); }
+    .wk-cell .send:active { transform: none; background: var(--os-bg-inset); }
+    .wk-cell .send:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-lg); flex: 1; }
+
+    /* waiting-for-binding notice (graduated plan, binding not resolved yet) */
+    .notice {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: var(--os-sp-sm); text-align: center; padding: var(--os-sp-xl);
+    }
+    .notice i { font-size: 28px; color: var(--os-text-subtle); }
+    .notice h2 { margin: 0; font-size: var(--os-fs-md); font-weight: var(--os-weight-semibold); }
+    .notice p { margin: 0; font-size: var(--os-fs-sm); color: var(--os-text-secondary); max-width: 380px; }
+    .data-ghost {
+      font: inherit; font-size: var(--os-fs-sm); cursor: pointer;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-secondary); border-radius: var(--os-radius-sm);
+      padding: calc(var(--os-sp-xs) + 1px) var(--os-sp-md);
+      transition: color 150ms, border-color 150ms;
+    }
+    .data-ghost:hover { color: var(--os-text); border-color: var(--os-text-subtle); }
+
+    /* ---- meal editor modal (kanban's .ed idiom) ------------------------------------ */
+    .ed { display: flex; flex-direction: column; gap: var(--os-sp-md); min-width: min(380px, 78vw); }
+    .ed label {
+      display: block; font-size: 11px; font-weight: var(--os-weight-semibold);
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
+      margin-bottom: var(--os-sp-sm);
+    }
+    .ed input, .ed textarea, .ed select {
+      width: 100%; font: inherit; color: var(--os-text);
+      background: var(--os-bg-inset); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-sm); padding: var(--os-sp-sm) var(--os-sp-md); outline: none;
+      transition: border-color 150ms, background 150ms;
+    }
+    .ed input:focus, .ed textarea:focus, .ed select:focus { border-color: var(--os-text-muted); background: var(--os-bg-surface); box-shadow: none; }
+    .ed textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
+    .ed .cols { display: flex; gap: var(--os-sp-md); }
+    .ed .cols > div { flex: 1; min-width: 0; }
+    .ed .static-body { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+    .ed-del {
+      font: inherit; font-size: var(--os-fs-sm); cursor: pointer; margin-right: auto;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-subtle); border-radius: var(--os-radius-sm);
+      padding: calc(var(--os-sp-xs) + 1px) var(--os-sp-md); transition: color 150ms, border-color 150ms;
+    }
+    .ed-del:hover { color: var(--os-cError); border-color: var(--os-cError); }
+    .ed-del.armed { color: var(--os-cError); border-color: var(--os-cError); background: var(--os-cError-muted); }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel, Modal } from "./lib/js/framelib.js";
+
+    const SLOTS = ["breakfast", "lunch", "dinner", "snack"];
+    const SLOT_RANK = { breakfast: 0, lunch: 1, dinner: 2, snack: 3 };
+    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+    const isoDay = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    const todayIso = () => isoDay(new Date());
+    function mondayOf(s) {
+      const d = DATE_RE.test(s || "") ? new Date(s + "T00:00:00") : new Date();
+      d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+      return isoDay(d);
+    }
+    function addDays(s, n) {
+      const d = new Date(s + "T00:00:00");
+      d.setDate(d.getDate() + n);
+      return isoDay(d);
+    }
+    function fmtDay(s) {
+      const d = new Date(s + "T00:00:00");
+      const opts = { month: "short", day: "numeric" };
+      if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+      return d.toLocaleDateString(undefined, opts).toLowerCase();
+    }
+    const fmtWd = (s) => new Date(s + "T00:00:00").toLocaleDateString(undefined, { weekday: "short" }).toLowerCase();
+    const slotRank = (s) => SLOT_RANK[s] !== undefined ? SLOT_RANK[s] : 4;
+    const slotCls = (s) => SLOT_RANK[s] !== undefined ? "slot-" + s : "slot-other";
+
+    function App() {
+      const [me, setMe]       = useState(null);
+      const [week, setWeek]   = useState(null);          // the api/week payload
+      const [start, setStart] = useState(mondayOf());    // the shown week's Monday
+      const [addFor, setAddFor] = useState(null);        // day_date the add modal is open for
+      const [addDraft, setAddDraft] = useState({ slot: "dinner", recipe_id: "", title: "" });
+      const [dropDay, setDropDay] = useState(null);      // day cell a dragged meal hovers
+      const [picker, setPicker] = useState(null);        // { day } or { meal: true } — the recipe book is open
+      const [pq, setPq] = useState("");                  // picker search query
+      const dragMeal = useRef(null);                     // the meal being dragged
+      const [edit, setEdit]   = useState(null);          // meal copy being edited/viewed
+      const [edArmed, setEdArmed] = useState(false);
+      const [sentNote, setSentNote] = useState(null);    // "sent n items…" text, transient
+      const startRef = useRef(start);
+      const awaitingSent = useRef(false);                // this window clicked send
+      const sentTimer = useRef(null);
+      startRef.current = start;
+
+      async function load(s) {
+        const r = await frame.api("api/week?start=" + encodeURIComponent(s)).catch(() => null);
+        if (!r || startRef.current !== s) return;
+        setWeek(r);
+      }
+      const refresh = () => load(startRef.current);
+      // Writes go over the tether (frame.busSend) — fire-and-forget; the week refreshes
+      // from the plan_changed push, sender included. Feature-detect: an older viewer's
+      // framelib has no busSend, so fall back to the HTTP write it was using before.
+      const write = (path, body) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+          return Promise.resolve({});
+        }
+        return frame.api(path, body);
+      };
+      useEffect(() => {
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({
+        plan_changed: (d) => {
+          // The push carries `sent` after a send_to_grocery; only the window that asked
+          // shows the note (every window receives the broadcast).
+          if (d && typeof d.sent === "number" && awaitingSent.current) {
+            awaitingSent.current = false;
+            setSentNote("sent " + d.sent + (d.sent === 1 ? " item" : " items") + " to the grocery list");
+            if (sentTimer.current) clearTimeout(sentTimer.current);
+            sentTimer.current = setTimeout(() => setSentNote(null), 5000);
+          }
+          refresh();
+        },
+      });
+
+      function goWeek(s) { setStart(s); startRef.current = s; setWeek(null); load(s); }
+
+      if (!me) return html`<div></div>`;
+      const isEditor = !!me.is_sfi_editor;
+      const isOwner  = !!me.is_owner;
+      const w = week;
+      const recipesLinked = !!(w && w.links && w.links.recipes);
+      const groceryLinked = !!(w && w.links && w.links.grocery);
+      const recipeIndex = (w && w.recipes) || [];
+      const recipeTitle = (id) => { const r = recipeIndex.find((x) => x.id === id); return r ? r.title : ""; };
+      const recipePhoto = (id) => { const r = recipeIndex.find((x) => x.id === id); return (r && r.photo) || ""; };
+      const openPicker = (target) => { setPq(""); setPicker(target); };
+      function pickRecipe(r) {
+        if (picker && picker.meal && edit) {
+          saveMeal(edit, { recipe_id: r.id, recipe_ok: true, title: r.title });
+        }
+        setPicker(null);
+      }
+      const pickShown = recipeIndex.filter((r) => {
+        const q = pq.trim().toLowerCase();
+        if (!q) return true;
+        return r.title.toLowerCase().includes(q) || String(r.tags || "").toLowerCase().includes(q);
+      });
+      // The recipe book (search + card grid), shared by the add modal (select-toggle with
+      // a confirm step) and the edit modal's picker (immediate pick).
+      const recipeBook = (onPick, onEscape, selectedId) => html`
+        <div class="book">
+          <div class="psearch">
+            <i class="ph-light ph-magnifying-glass"></i>
+            <input placeholder="Search the recipe box…" value=${pq} maxlength="120"
+              ref=${(el) => el && el.dataset.f !== "1" && (el.dataset.f = "1", el.focus())}
+              onInput=${(e) => setPq(e.target.value)}
+              onKeyDown=${(e) => {
+                if (e.key === "Escape" && onEscape) onEscape();
+                if (e.key === "Enter" && pickShown.length === 1) onPick(pickShown[0]);
+              }} />
+          </div>
+          ${recipeIndex.length === 0
+            ? html`<div class="pempty">The recipe box is empty. Add recipes there first.</div>`
+            : pickShown.length === 0
+              ? html`<div class="pempty">No recipes match.</div>`
+              : html`
+                <div class="pgrid">
+                  ${pickShown.map((r) => html`
+                    <button class=${"pcard" + (selectedId === r.id ? " sel" : "")} key=${r.id} onClick=${() => onPick(r)}>
+                      ${r.photo
+                        ? html`<img class="pimg" src=${r.photo} alt="" />`
+                        : html`<span class="pph"><i class="ph-light ph-cooking-pot"></i></span>`}
+                      <span class="pbody">
+                        <span class="pt">${r.title}</span>
+                        ${r.servings ? html`<span class="ps">serves ${r.servings}</span>` : null}
+                      </span>
+                    </button>
+                  `)}
+                </div>`}
+        </div>`;
+
+      // ---- mutations -------------------------------------------------------------------
+      // The + opens ONE comfortable step: the add modal (slot, the recipe book, a title).
+      function openAddModal(day) {
+        setAddDraft({ slot: "dinner", recipe_id: "", title: "" });
+        setPq("");
+        setAddFor(day);
+      }
+      // Selecting a card toggles it and adopts its title; a custom title typed afterwards
+      // sticks (the snapshot rule: title is the display, the recipe id is the link).
+      function toggleAddRecipe(r) {
+        setAddDraft((d) => d.recipe_id === r.id
+          ? { ...d, recipe_id: "" }
+          : { ...d, recipe_id: r.id, title: r.title });
+      }
+      function addMealFromModal() {
+        const title = addDraft.title.trim() || (addDraft.recipe_id ? recipeTitle(addDraft.recipe_id) : "");
+        if (!title || !addFor) return;
+        write("api/meal", { day_date: addFor, slot: addDraft.slot, title, recipe_id: addDraft.recipe_id }).catch(() => {});
+        setAddFor(null);
+      }
+      function saveMeal(meal, patch) {
+        setWeek((wk) => wk && ({ ...wk, meals: wk.meals.map((m) => m.id === meal.id ? { ...m, ...patch } : m) }));
+        setEdit((e) => e && e.id === meal.id ? { ...e, ...patch } : e);
+        write("api/meal/" + meal.id, patch).catch(() => {});
+      }
+      function deleteMeal(meal) {
+        if (!edArmed) { setEdArmed(true); return; }
+        setEdArmed(false); setEdit(null);
+        setWeek((wk) => wk && ({ ...wk, meals: wk.meals.filter((m) => m.id !== meal.id) }));
+        write("api/meal/" + meal.id + "/delete", {}).catch(() => {});
+      }
+      function sendWeek() {
+        awaitingSent.current = true;
+        write("api/send_to_grocery", { week_start: start }).catch(() => {});
+      }
+      // Drag a meal card into another day cell: the drop just re-dates the meal
+      // (ordering inside a day is slot rank, so there is nothing else to author).
+      function onDropMeal(e, day) {
+        e.preventDefault();
+        setDropDay(null);
+        const m = dragMeal.current; dragMeal.current = null;
+        if (!m || m.day_date === day) return;
+        setWeek((wk) => wk && ({ ...wk, meals: wk.meals.map((x) => x.id === m.id ? { ...x, day_date: day } : x) }));
+        write("api/meal/" + m.id, { day_date: day }).catch(() => {});
+      }
+
+      // ---- the data drawer (owner-only) -------------------------------------------------
+      // One button, one surface. This frame has three data units — the plan it owns, plus
+      // the recipes and grocery links — and all three live behind the drawer, listed with
+      // their current state, rather than as three chips in the header. Picking a unit opens
+      // that unit's actions. See docs/table-graduation.md and docs/schema-contracts.md.
+      const linkPending = (unit) => !!(w.link_pending && w.link_pending[unit]);
+      const anyPending = () => !!w.storage.pending || linkPending("recipes") || linkPending("grocery");
+
+      async function onDrawer() {
+        if (!frame.choose) return onPlanData();   // older chassis: the plan is the only surface
+        const planState = w.storage.pending ? "finishing a move to a shared table"
+                        : w.storage.backend === "shared" ? "in a shared table"
+                        : "on this device";
+        const linkState = (unit, linked) => linkPending(unit) ? "waiting for the table picker"
+                        : linked ? "linked to a shared table" : "not linked";
+        const unit = await frame.choose("Where this planner keeps things, and what it borrows from other frames.", {
+          title: "Data",
+          options: [
+            { id: "plan", label: "Planned meals", icon: "ph-dresser", detail: planState },
+            { id: "recipes", label: "Recipes", icon: "ph-plugs-connected", detail: linkState("recipes", recipesLinked) },
+            { id: "grocery", label: "Grocery list", icon: "ph-plugs-connected", detail: linkState("grocery", groceryLinked) },
+          ],
+        });
+        if (unit === "plan") return onPlanData();
+        if (unit === "recipes") return onLinkUnit("recipes", "recipes", recipesLinked);
+        if (unit === "grocery") return onLinkUnit("grocery", "grocery list", groceryLinked);
+      }
+
+      // The plan unit: this frame's own meals, convert or adopt like any owning frame.
+      async function onPlanData() {
+        if (w.storage.pending) {
+          const stop = await frame.confirm("Stop the move to a shared table?", {
+            title: "Planned meals", okLabel: "Stop", cancelLabel: "Keep going",
+          });
+          if (stop) { await write("api/data/cancel_graduate", { unit: "plan" }).catch(() => null); refresh(); }
+          return;
+        }
+        if (w.storage.backend === "shared") {
+          await frame.alert("These planned meals live in a shared table, so other frames in this space can work with the same rows.", { title: "Planned meals" });
+          return;
+        }
+        const mode = frame.choose
+          ? await frame.choose("These planned meals live on this device.", {
+              title: "Planned meals",
+              options: [
+                { id: "convert", label: "Move to a shared table", icon: "ph-dresser",
+                  detail: "Copies this plan so other frames can use it" },
+                { id: "adopt", label: "Use an existing shared table", icon: "ph-plugs-connected",
+                  detail: "Point this plan at a table you already have" },
+              ],
+            })
+          : ((await frame.confirm("Move this plan's meals to a shared table?", { title: "Planned meals", okLabel: "Move" })) ? "convert" : null);
+        if (mode) { await write("api/data/graduate", { unit: "plan", mode }).catch(() => null); refresh(); }
+      }
+
+      // Link units (recipes, grocery) are adopt-only: bind another frame's shared table
+      // or nothing. Unlinking returns the planner to its standalone behavior.
+      async function onLinkUnit(unit, label, linked) {
+        if (linkPending(unit)) {
+          const stop = await frame.confirm("Stop linking the shared " + label + " table?", {
+            title: label, okLabel: "Stop", cancelLabel: "Keep going",
+          });
+          if (stop) { await write("api/data/cancel_graduate", { unit }).catch(() => null); refresh(); }
+          return;
+        }
+        if (linked) {
+          const un = await frame.confirm("Unlink the shared " + label + " table? This planner keeps working without it.", {
+            title: label, okLabel: "Unlink",
+          });
+          if (un) { await write("api/data/unlink", { unit }).catch(() => null); refresh(); }
+          return;
+        }
+        const yes = await frame.confirm("Link a shared " + label + " table? Pick the table the " + label + " frame already uses.", {
+          title: label, okLabel: "Link",
+        });
+        if (yes) { await write("api/data/graduate", { unit, mode: "adopt" }).catch(() => null); refresh(); }
+      }
+
+      const mode = isOwner ? "owner" : isEditor ? "editor" : "viewer";
+
+      const days = w && w.days ? w.days : Array.from({ length: 7 }, (_, i) => addDays(start, i));
+      const byDay = {};
+      if (w && w.meals) {
+        for (const m of w.meals) (byDay[m.day_date] ||= []).push(m);
+        for (const k of Object.keys(byDay)) {
+          byDay[k].sort((a, b) => slotRank(a.slot) - slotRank(b.slot) || (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0));
+        }
+      }
+      const weekEmpty = !w || !w.meals || w.meals.length === 0;
+      const mealCount = w && w.meals ? w.meals.length : 0;
+      const recipeCount = w && w.meals ? w.meals.filter((m) => m.recipe_ok).length : 0;
+      const thisMonday = mondayOf();
+      const today = todayIso();
+
+      return html`
+        <main class=${isEditor ? "" : "read-only"}>
+          <div class="header">
+            <i class="ph-light ph-fork-knife brand"></i>
+            <h1>Meal Planner</h1>
+            <div class="chips">
+              <span class="mode">${mode}</span>
+              ${w && w.storage && w.storage.can_manage ? html`
+                <button class=${"drawer" + (anyPending() ? " pending" : "")}
+                  title=${anyPending() ? "Finishing a table setup" : "Data"}
+                  onClick=${onDrawer}>
+                  <i class="ph-light ph-dresser"></i>
+                </button>` : null}
+            </div>
+          </div>
+
+          ${!isEditor ? html`
+            <div class="banner">
+              <i class="ph-light ph-eye"></i>
+              ${me.is_sfi_member
+                ? html`You have viewer-only access. Ask the owner to raise your role to edit this plan.`
+                : html`You're viewing this meal plan publicly. Join this space to edit it.`}
+            </div>` : null}
+
+          ${w && w.waiting_for_binding ? html`
+            <div class="notice">
+              <i class="ph-light ph-table"></i>
+              <h2>Almost there</h2>
+              <p>${isOwner
+                ? html`Pick the meal plan table to finish.`
+                : html`The owner is finishing this plan's move to shared tables.`}</p>
+              ${isOwner ? html`<button class="data-ghost" onClick=${refresh}>Open the picker again</button>` : null}
+            </div>` : html`
+            <div class="wk">
+              <button class="iconbtn" title="Previous week" onClick=${() => goWeek(addDays(start, -7))}>
+                <i class="ph-light ph-caret-left"></i>
+              </button>
+              <span class="wk-label">week of ${fmtDay(start)}</span>
+              <button class="iconbtn" title="Next week" onClick=${() => goWeek(addDays(start, 7))}>
+                <i class="ph-light ph-caret-right"></i>
+              </button>
+              ${start !== thisMonday ? html`
+                <button class="wk-btn" onClick=${() => goWeek(thisMonday)}>this week</button>` : null}
+            </div>
+
+            ${!w ? null
+            : weekEmpty && !isEditor
+              ? html`<div class="empty">Nothing planned this week.</div>`
+              : html`
+                <div class="wgrid">
+                  ${days.map((day) => html`
+                    <div class=${"dcell" + (day === today ? " today" : "") + (dropDay === day ? " drop" : "")
+                        + (isEditor && (byDay[day] || []).length === 0 ? " bare" : "")} key=${day}
+                      onDragOver=${isEditor ? (e) => { if (dragMeal.current) { e.preventDefault(); if (dropDay !== day) setDropDay(day); } } : null}
+                      onDragLeave=${isEditor ? (e) => { if (dropDay === day && !e.currentTarget.contains(e.relatedTarget)) setDropDay(null); } : null}
+                      onDrop=${isEditor ? (e) => onDropMeal(e, day) : null}>
+                      <div class="dcell-head">
+                        <span class="wd">${fmtWd(day)}</span>
+                        <span class="dt">${fmtDay(day)}</span>
+                      </div>
+                      <div class="mcards">
+                        ${(byDay[day] || []).map((m) => html`
+                          <div class=${"mcard " + slotCls(m.slot)} key=${m.id}
+                            draggable=${isEditor ? "true" : "false"}
+                            onClick=${() => { setEdit({ ...m }); setEdArmed(false); }}
+                            onDragStart=${isEditor ? (e) => {
+                              dragMeal.current = m;
+                              e.currentTarget.classList.add("dragging");
+                              e.dataTransfer.effectAllowed = "move";
+                            } : null}
+                            onDragEnd=${isEditor ? (e) => {
+                              dragMeal.current = null;
+                              e.currentTarget.classList.remove("dragging");
+                              setDropDay(null);
+                            } : null}>
+                            ${m.photo ? html`<img class="photo" src=${m.photo} alt="" draggable="false" />` : null}
+                            <div class="body">
+                              <div class="toprow">
+                                <span class="slot-dot"></span>
+                                <span class="mc-slot">${m.slot}</span>
+                                <span class="tr-right">
+                                  ${Number(m.servings) > 0 ? html`<span class="mc-serv">×${m.servings}</span>` : null}
+                                  ${m.recipe_ok ? html`<i class="ph-light ph-cooking-pot mc-recipe" title=${recipeTitle(m.recipe_id)}></i>` : null}
+                                </span>
+                              </div>
+                              <span class="mc-title">${m.title}</span>
+                            </div>
+                          </div>
+                        `)}
+                      </div>
+                      ${isEditor ? html`
+                        <button class="addzone" title="Add a meal" onClick=${() => openAddModal(day)}>
+                          <i class="ph-light ph-plus"></i>
+                        </button>` : null}
+                    </div>
+                  `)}
+                  <div class="dcell wk-cell">
+                    <span class="label">this week</span>
+                    <span class="stat">${mealCount === 1 ? "1 meal" : mealCount + " meals"}${recipeCount > 0 ? " · " + recipeCount + (recipeCount === 1 ? " recipe" : " recipes") : ""}</span>
+                    ${sentNote ? html`<span class="stat">${sentNote}</span>` : null}
+                    ${isEditor && groceryLinked ? html`
+                      <button class="send" title="Insert this week's recipe ingredients into the linked grocery list" onClick=${sendWeek}>
+                        <i class="ph-light ph-basket"></i>send to grocery list
+                      </button>` : null}
+                  </div>
+                </div>`}`}
+
+          ${edit ? html`
+            <${Modal} title=${isEditor ? "Edit meal" : "Meal"} onClose=${() => { setEdit(null); setEdArmed(false); }}
+              actions=${isEditor ? html`
+                <button class=${"ed-del" + (edArmed ? " armed" : "")} onClick=${() => deleteMeal(edit)}>
+                  ${edArmed ? "Click again to delete" : "Delete meal"}
+                </button>
+                <button onClick=${() => { setEdit(null); setEdArmed(false); }}>Done</button>
+              ` : null}>
+              <div class="ed">
+                ${isEditor ? html`
+                  <div class="cols">
+                    <div>
+                      <label>Slot</label>
+                      <select value=${SLOT_RANK[edit.slot] !== undefined ? edit.slot : "__other"}
+                        onChange=${(e) => { if (e.target.value !== "__other") saveMeal(edit, { slot: e.target.value }); }}>
+                        ${SLOT_RANK[edit.slot] === undefined ? html`<option value="__other">${edit.slot}</option>` : null}
+                        ${SLOTS.map((s) => html`<option key=${s} value=${s}>${s}</option>`)}
+                      </select>
+                    </div>
+                    <div>
+                      <label>Servings</label>
+                      <input type="number" min="0" inputmode="numeric" value=${Number(edit.servings) > 0 ? edit.servings : ""}
+                        placeholder="Optional"
+                        onBlur=${(e) => { const n = Math.max(0, Math.trunc(Number(e.target.value) || 0)); if (n !== Number(edit.servings)) saveMeal(edit, { servings: n }); }}
+                        onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                    </div>
+                  </div>
+                  ${recipesLinked ? html`
+                    <div>
+                      <label>Recipe</label>
+                      ${edit.recipe_ok ? html`
+                        <button class="pickbtn" title="Pick a different recipe" onClick=${() => openPicker({ meal: true })}>
+                          ${recipePhoto(edit.recipe_id)
+                            ? html`<img class="pb-thumb" src=${recipePhoto(edit.recipe_id)} alt="" />`
+                            : html`<i class="ph-light ph-cooking-pot"></i>`}
+                          <span class="pb-name">${recipeTitle(edit.recipe_id) || "recipe"}</span>
+                          <i class="ph-light ph-x pb-x" title="Just text instead"
+                            onClick=${(e) => { e.stopPropagation(); saveMeal(edit, { recipe_id: "", recipe_ok: false }); }}></i>
+                        </button>` : html`
+                        <button class="pickbtn" onClick=${() => openPicker({ meal: true })}>
+                          <i class="ph-light ph-cooking-pot"></i>
+                          <span class="pb-name">pick from the recipe box</span>
+                        </button>`}
+                    </div>` : null}
+                  <div>
+                    <label>Title</label>
+                    <input value=${edit.title} maxlength="200"
+                      onBlur=${(e) => { const v = e.target.value.trim(); if (v && v !== edit.title) saveMeal(edit, { title: v }); }}
+                      onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                  </div>
+                  <div>
+                    <label>Notes</label>
+                    <textarea maxlength="2000" placeholder="Optional details…"
+                      onBlur=${(e) => { if (e.target.value !== edit.notes) saveMeal(edit, { notes: e.target.value }); }}>${edit.notes}</textarea>
+                  </div>
+                ` : html`
+                  <div>
+                    <label>Title</label>
+                    <div class="static-body">${edit.title}</div>
+                  </div>
+                  <div class="cols">
+                    <div><label>Slot</label><div class="static-body">${edit.slot}</div></div>
+                    ${Number(edit.servings) > 0 ? html`<div><label>Servings</label><div class="static-body">${edit.servings}</div></div>` : null}
+                  </div>
+                  ${edit.recipe_ok ? html`<div><label>Recipe</label><div class="static-body">${recipeTitle(edit.recipe_id)}</div></div>` : null}
+                  ${edit.notes ? html`<div><label>Notes</label><div class="static-body">${edit.notes}</div></div>` : null}
+                `}
+              </div>
+            </${Modal}>` : null}
+
+          ${picker ? html`
+            <${Modal} title="Pick a recipe" onClose=${() => setPicker(null)}>
+              <div class="pick">
+                ${recipeBook((r) => pickRecipe(r), () => setPicker(null), null)}
+              </div>
+            </${Modal}>` : null}
+
+          ${addFor ? html`
+            <${Modal} title=${"Add a meal · " + fmtWd(addFor) + " " + fmtDay(addFor)}
+              onClose=${() => setAddFor(null)}
+              actions=${html`
+                <button onClick=${() => setAddFor(null)}>Cancel</button>
+                <button class="btn-primary"
+                  disabled=${!addDraft.title.trim() && !addDraft.recipe_id}
+                  onClick=${addMealFromModal}>Add meal</button>
+              `}>
+              <div class="pick">
+                <div class="slot-chips">
+                  ${SLOTS.map((s) => html`
+                    <button key=${s} class=${slotCls(s) + (addDraft.slot === s ? " sel" : "")}
+                      onClick=${() => setAddDraft({ ...addDraft, slot: s })}>${s}</button>
+                  `)}
+                </div>
+                ${recipesLinked && recipeIndex.length > 0
+                  ? recipeBook((r) => toggleAddRecipe(r), null, addDraft.recipe_id)
+                  : null}
+                <div class="mdraft">
+                  <input maxlength="200"
+                    placeholder=${addDraft.recipe_id ? "Rename it for the week (optional)…" : "Or just type a meal…"}
+                    value=${addDraft.title}
+                    ref=${(el) => el && !recipesLinked && el.dataset.f !== "1" && (el.dataset.f = "1", el.focus())}
+                    onInput=${(e) => setAddDraft({ ...addDraft, title: e.target.value })}
+                    onKeyDown=${(e) => {
+                      if (e.key === "Enter") addMealFromModal();
+                      if (e.key === "Escape") setAddFor(null);
+                    }} />
+                </div>
+              </div>
+            </${Modal}>` : null}
+        </main>
+      `;
+    }
+
+    render(html`<${App}/>`, document.body);
+  </script>
+</body>
+</html>

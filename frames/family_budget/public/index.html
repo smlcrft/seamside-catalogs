@@ -1,0 +1,754 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Family Budget</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); }   /* follows the space channel at runtime; categories re-scope --ch locally */
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      height: 100%; display: flex; flex-direction: column; gap: var(--os-sp-md);
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-xl));
+    }
+
+    .header { display: flex; align-items: center; gap: var(--os-sp-sm); }
+    .header i {
+      font-size: 20px; color: var(--ch);
+      display: inline-flex; width: 24px; height: 24px;
+      align-items: center; justify-content: center; line-height: 1;
+    }
+    .header h1 { margin: 0; font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); line-height: 24px; }
+    .header .mode {
+      margin-left: auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1; text-transform: lowercase; white-space: nowrap;
+    }
+
+    /* the data drawer — ONE quiet button for a configuration most people never touch.
+       Owner-only (nobody else sees it), no state text at rest: where the rows live is
+       not news, it's a setting. Everything (storage state, graduation) lives behind it.
+       The glyph is the platform's Tables icon (ph-dresser, the pivot-nav rail) so the
+       frame and the OS say "tables" the same way. See docs/table-graduation.md. */
+    .drawer {
+      flex: 0 0 auto; position: relative;
+      width: 24px; height: 24px; padding: 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-subtle); font-size: 16px; line-height: 1;
+      transition: color 150ms, background 150ms;
+    }
+    /* the glyph must outrank the .header i channel-tint rule above, exactly as the
+       old storage chip's icon did: this button is neutral chrome, never channel. */
+    .drawer i { font-size: 16px; line-height: 1; color: inherit; width: auto; height: auto; }
+    .drawer:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+    .drawer:active { transform: scale(0.92); }
+    .drawer:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    /* the ONE ambient signal, and it is rare: a channel dot while a move is unfinished */
+    .drawer.pending::after {
+      content: ""; position: absolute; top: 0; right: 0;
+      width: 5px; height: 5px; border-radius: var(--os-radius-full); background: var(--ch);
+      animation: drawer-breathe 2s ease-in-out infinite;
+    }
+    @keyframes drawer-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    @media (prefers-reduced-motion: reduce) { .drawer.pending::after { animation: none; } }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      flex: 0 0 auto;
+    }
+
+    /* ---- month strip --------------------------------------------------------------- */
+    .monthbar { flex: 0 0 auto; display: flex; align-items: center; gap: var(--os-sp-xs); }
+    .mnav {
+      width: 24px; height: 24px; padding: 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-muted); font-size: 14px; line-height: 0;
+      transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms, background 150ms;
+    }
+    .mnav:hover { color: var(--os-text); background: var(--os-bg-surface); opacity: 1; }
+    .mnav:active { transform: scale(0.92); }
+    .mnav:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .mlabel {
+      min-width: 122px; text-align: center;
+      font-size: var(--os-fs-md); font-weight: var(--os-weight-medium);
+      font-feature-settings: 'tnum' 1; text-transform: lowercase;
+    }
+    .mtoday {
+      margin-left: var(--os-sp-xs);
+      font: inherit; font-size: var(--os-fs-2xs); cursor: pointer;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-muted); border-radius: var(--os-radius-full);
+      padding: 2px var(--os-sp-sm); text-transform: lowercase;
+      transition: color 150ms, border-color 150ms, transform 80ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .mtoday:hover { color: var(--os-text); border-color: var(--os-text-subtle); background: transparent; opacity: 1; }
+    .mtoday:active { transform: scale(0.97); }
+    .mtoday:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    /* ---- summary band --------------------------------------------------------------- */
+    .summary {
+      flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: var(--os-sp-sm) var(--os-sp-xl);
+      background: var(--os-bg-subtle); border-radius: var(--os-radius-lg);
+      padding: var(--os-sp-sm) var(--os-sp-lg);
+    }
+    .sum { display: flex; flex-direction: column; gap: 2px; }
+    .sum-label { font-size: var(--os-fs-2xs); color: var(--os-text-muted); text-transform: lowercase; }
+    .sum-val {
+      font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold);
+      font-feature-settings: 'tnum' 1; letter-spacing: -0.01em; line-height: 1.2;
+    }
+    .sum.balance { margin-left: auto; align-items: flex-end; }
+    .sum-val.neg { color: var(--os-cError); }
+
+    /* ---- two columns ---------------------------------------------------------------- */
+    /* Envelopes are a fixed rail (they hold short figures); the ledger takes the rest but
+       keeps a measure — a transaction row whose amount sits 800px from its note is
+       unreadable, and money lists are exactly where the eye must connect the two. Extra
+       width past that goes to margin, not to stretching the rows. */
+    .cols {
+      flex: 1; min-height: 0;
+      display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--os-sp-lg);
+    }
+    @media (min-width: 1100px) { .cols { grid-template-columns: 320px minmax(0, 1fr); } }
+    .txs { min-width: 0; display: flex; flex-direction: column; gap: var(--os-sp-md); }
+    .txs > * { width: 100%; max-width: 720px; }
+
+    /* ---- envelopes ------------------------------------------------------------------ */
+    .env {
+      min-height: 0; overflow-y: auto;
+      background: var(--os-bg-subtle); border-radius: var(--os-radius-lg);
+      padding: var(--os-sp-sm);
+    }
+    .grp + .grp { margin-top: var(--os-sp-xl); }
+    .grp-label {
+      font-size: 11px; font-weight: var(--os-weight-semibold);
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
+      padding: 0 var(--os-sp-sm); margin-bottom: var(--os-sp-sm);
+    }
+    .cat {
+      display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
+      column-gap: var(--os-sp-sm); row-gap: 5px;
+      padding: 6px var(--os-sp-sm); border-radius: var(--os-radius-sm);
+      transition: background 150ms;
+    }
+    main:not(.read-only) .cat { cursor: pointer; }
+    main:not(.read-only) .cat:hover { background: color-mix(in srgb, var(--os-bg-subtle), var(--os-bg-surface) 55%); }
+    .cat-dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: var(--os-radius-full); background: var(--ch); }
+    .cat-name {
+      font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .cat-fig {
+      font-size: var(--os-fs-2xs); color: var(--os-text-secondary);
+      font-feature-settings: 'tnum' 1; white-space: nowrap;
+    }
+    .cat-fig .of { color: var(--os-text-muted); }
+    .cat-bar {
+      grid-column: 2 / -1; height: 3px; border-radius: var(--os-radius-full);
+      background: var(--os-bg-inset); overflow: hidden;
+    }
+    .cat-fill { height: 100%; border-radius: var(--os-radius-full); background: var(--ch); }
+    .cat-fill.over { background: var(--os-cError); }
+
+    /* new category ghost (the new-col idiom, one per group) */
+    .cat-new {
+      display: flex; align-items: center; gap: var(--os-sp-sm);
+      border: 1px solid var(--os-border-color); border-radius: var(--os-radius-sm);
+      padding: 4px var(--os-sp-sm); margin: var(--os-sp-xs) var(--os-sp-sm) 0;
+      transition: border-color 150ms;
+    }
+    .cat-new:focus-within { border-color: var(--os-text-subtle); }
+    .cat-new i { color: var(--os-text-subtle); font-size: 14px; line-height: 0; }
+    .cat-new input {
+      flex: 1; min-width: 0; width: auto; display: inline-block;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text);
+      background: transparent; border: 0; outline: none; padding: 2px 0; box-shadow: none;
+    }
+    .cat-new input:focus { background-color: transparent; border: 0; box-shadow: none; }
+    .cat-new input::placeholder { color: var(--os-text-muted); }
+
+    /* ---- transactions ---------------------------------------------------------------- */
+    .txs { min-height: 0; display: flex; flex-direction: column; }
+    /* One recessed well (the add-strip recipe): rest = bg-inset (a place to type,
+       sitting below the content), focus-within lifts the WHOLE strip to surface with
+       a hairline ring; fields never paint their own boxes. Segments separate with
+       hairlines. A raised bordered card at rest read as content, not as an input. */
+    .tx-add {
+      flex: 0 0 auto; display: flex; align-items: center;
+      background: var(--os-bg-inset); border: 0; border-radius: var(--os-radius-md);
+      padding: 2px var(--os-sp-xs);
+      margin-bottom: var(--os-sp-md);
+      transition: background 150ms, box-shadow 150ms;
+    }
+    .tx-add:focus-within { background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color); }
+    .tx-add select {
+      width: auto; display: inline-block; flex: 0 1 auto; max-width: 140px;
+      border: 0; background-color: transparent; box-shadow: none; border-radius: 0;
+      font-size: var(--os-fs-sm); padding: 6px 24px 6px var(--os-sp-sm); background-position: right 8px center;
+    }
+    .tx-add select:focus { border: 0; background-color: transparent; box-shadow: none; }
+    .tx-add input {
+      display: inline-block; border: 0; background: transparent; box-shadow: none;
+      font-size: var(--os-fs-sm); padding: 6px var(--os-sp-sm); border-radius: 0;
+    }
+    .tx-add input:focus { border: 0; background-color: transparent; box-shadow: none; }
+    .tx-add .amt { flex: 0 0 auto; width: 84px; font-feature-settings: 'tnum' 1; border-left: 1px solid var(--os-border-color-subtle); }
+    .tx-add .note { flex: 1 1 auto; min-width: 0; width: auto; border-left: 1px solid var(--os-border-color-subtle); }
+    .tx-add .go { margin-left: var(--os-sp-xs); }
+    .tx-add .go {
+      flex: 0 0 auto; width: 26px; height: 26px; padding: 0;
+      border: 0; border-radius: var(--os-radius-sm);
+      background: var(--ch); color: var(--ch-fg);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 14px; line-height: 0; cursor: pointer;
+      transition: transform 80ms cubic-bezier(0.34, 1.56, 0.64, 1), filter 150ms;
+    }
+    .tx-add .go:hover { filter: brightness(1.08); opacity: 1; }
+    .tx-add .go:active { transform: scale(0.92); }
+    .tx-add .go:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    .txlist { flex: 1; min-height: 0; overflow-y: auto; }
+    .txdate {
+      font-size: var(--os-fs-2xs); font-weight: var(--os-weight-semibold);
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
+      font-feature-settings: 'tnum' 1;
+      padding: 0 var(--os-sp-sm); margin: var(--os-sp-md) 0 var(--os-sp-xs);
+    }
+    .tgrp:first-child .txdate { margin-top: 0; }
+    .trow {
+      display: flex; align-items: center; gap: var(--os-sp-sm);
+      padding: 7px var(--os-sp-sm); border-radius: var(--os-radius-sm);
+      border-bottom: 1px solid var(--os-border-color-subtle);
+      transition: background 150ms;
+    }
+    main:not(.read-only) .trow { cursor: pointer; }
+    main:not(.read-only) .trow:hover { background: color-mix(in srgb, var(--os-bg), var(--os-bg-surface) 55%); }
+    .t-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: var(--os-sp-sm); }
+    .t-note { font-size: var(--os-fs-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .t-cat { flex: 0 0 auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted); white-space: nowrap; }
+    .t-amt {
+      flex: 0 0 auto; margin-left: auto;
+      font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium);
+      font-feature-settings: 'tnum' 1; white-space: nowrap;
+    }
+
+    .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); padding: var(--os-sp-lg) var(--os-sp-sm); }
+
+    /* one column when the frame gets narrow */
+    @media (max-width: 560px) {
+      .cols { display: flex; flex-direction: column; overflow-y: auto; }
+      .env { overflow-y: visible; flex: 0 0 auto; }
+      .txs { flex: 0 0 auto; }
+      .txlist { overflow-y: visible; }
+    }
+
+    /* waiting-for-binding notice (graduated placement, bindings not resolved yet) */
+    .notice {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: var(--os-sp-sm); text-align: center; padding: var(--os-sp-xl);
+    }
+    .notice i { font-size: 28px; color: var(--os-text-subtle); }
+    .notice h2 { margin: 0; font-size: var(--os-fs-md); font-weight: var(--os-weight-semibold); }
+    .notice p { margin: 0; font-size: var(--os-fs-sm); color: var(--os-text-secondary); max-width: 380px; }
+
+    .data-ghost {
+      font: inherit; font-size: var(--os-fs-sm); cursor: pointer;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-secondary); border-radius: var(--os-radius-sm);
+      padding: calc(var(--os-sp-xs) + 1px) var(--os-sp-md);
+      transition: color 150ms, border-color 150ms;
+    }
+    .data-ghost:hover { color: var(--os-text); border-color: var(--os-text-subtle); background: transparent; opacity: 1; }
+
+    /* ---- editor modals ---------------------------------------------------------------- */
+    .ed { display: flex; flex-direction: column; gap: var(--os-sp-md); min-width: min(380px, 78vw); }
+    .ed label {
+      display: block; font-size: 11px; font-weight: var(--os-weight-semibold);
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
+      margin-bottom: var(--os-sp-sm);
+    }
+    .ed input, .ed select {
+      width: 100%; font: inherit; color: var(--os-text);
+      background-color: var(--os-bg-inset); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-sm); padding: var(--os-sp-sm) var(--os-sp-md); outline: none;
+      transition: border-color 150ms, background-color 150ms;
+    }
+    .ed select { padding-right: 34px; }   /* keep clear of the drawn caret from frame-prefs */
+    .ed input:focus, .ed select:focus { border-color: var(--os-text-muted); background-color: var(--os-bg-surface); box-shadow: none; }
+    .ed .num { font-feature-settings: 'tnum' 1; }
+    .pop-swatches { display: grid; grid-template-columns: repeat(6, 18px); gap: 6px; }
+    .pop-swatches button {
+      width: 18px; height: 18px; padding: 0; border: 0; cursor: pointer;
+      border-radius: var(--os-radius-sm); background: var(--sw);
+      transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), filter 150ms;
+    }
+    .pop-swatches button:hover { filter: brightness(1.08); opacity: 1; }
+    .pop-swatches button:active { transform: scale(0.88); }
+    .pop-swatches button.sel { box-shadow: 0 0 0 1px var(--os-bg-elevated), 0 0 0 2.5px var(--sw); }
+    .pop-swatches button:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .ed-del {
+      font: inherit; font-size: var(--os-fs-sm); cursor: pointer; margin-right: auto;
+      background: transparent; border: 1px solid var(--os-border-color);
+      color: var(--os-text-subtle); border-radius: var(--os-radius-sm);
+      padding: calc(var(--os-sp-xs) + 1px) var(--os-sp-md); transition: color 150ms, border-color 150ms;
+    }
+    .ed-del:hover { color: var(--os-cError); border-color: var(--os-cError); background: transparent; opacity: 1; }
+    .ed-del.armed { color: var(--os-cError); border-color: var(--os-cError); background: var(--os-cError-muted); }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel, Modal } from "./lib/js/framelib.js";
+
+    const CHANNELS = Array.from({ length: 12 }, (_, i) => "c" + (i + 1));
+
+    const pad2 = (n) => String(n).padStart(2, "0");
+    const curMonth = () => { const d = new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1); };
+    const localToday = () => { const d = new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); };
+    const shiftMonth = (m, by) => {
+      const [y, mo] = m.split("-").map(Number);
+      const d = new Date(y, mo - 1 + by, 1);
+      return d.getFullYear() + "-" + pad2(d.getMonth() + 1);
+    };
+    const monthLabel = (m) => {
+      const [y, mo] = m.split("-").map(Number);
+      return new Date(y, mo - 1, 1).toLocaleString("en-US", { month: "long" }) + " " + y;
+    };
+    const dayLabel = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const fmtMoney = (n) => {
+      const v = Math.round(Number(n) * 100) / 100;
+      return v.toLocaleString("en-US", {
+        minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2,
+      });
+    };
+
+    function App() {
+      const [me, setMe]           = useState(null);
+      const [data, setData]       = useState(null);      // the /api/month payload
+      const [month, setMonth]     = useState(curMonth());
+      const [currency, setCurrency] = useState("$");
+      const [storage, setStorage] = useState(null);      // { backend, pending, can_manage }
+      const [waiting, setWaiting] = useState(false);     // graduated placement, binding missing
+      const [editCat, setEditCat] = useState(null);      // category being edited
+      const [catArmed, setCatArmed] = useState(false);
+      const [editTx, setEditTx]   = useState(null);      // transaction being edited
+      const [txArmed, setTxArmed] = useState(false);
+      const [addCat, setAddCat]   = useState("");        // add-row category (sticks as last-used)
+      const [addAmt, setAddAmt]   = useState("");
+      const [addNote, setAddNote] = useState("");
+      const [newExp, setNewExp]   = useState("");
+      const [newInc, setNewInc]   = useState("");
+      const monthRef = useRef(month);
+
+      async function refresh() {
+        const r = await frame.api("api/month?month=" + monthRef.current).catch(() => null);
+        if (!r) return;
+        if (r.storage) setStorage(r.storage);
+        setWaiting(!!r.waiting_for_binding);
+        if (r.settings) setCurrency(r.settings.currency || "$");
+        if (r.categories) setData(r);
+      }
+      // Writes go over the tether (frame.busSend) — fire-and-forget; the view refreshes
+      // from the budget_changed push, sender included. Feature-detect: an older viewer's
+      // framelib has no busSend, so fall back to the HTTP write it was using before.
+      const write = (path, body) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+          return Promise.resolve({});
+        }
+        return frame.api(path, body).catch(() => null);
+      };
+      useEffect(() => {
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
+      }, []);
+      useEffect(() => { monthRef.current = month; refresh(); }, [month]);
+      useFramePush({ budget_changed: refresh });
+
+      // Default the add-row select to the last-used category (the month's newest
+      // transaction), else the first expense category.
+      useEffect(() => {
+        if (!data) return;
+        setAddCat((prev) => {
+          if (prev && data.categories.some((c) => c.id === prev)) return prev;
+          const last = data.transactions[0];
+          if (last && data.categories.some((c) => c.id === last.category_id)) return last.category_id;
+          const firstExp = data.categories.find((c) => !c.is_income);
+          return firstExp ? firstExp.id : (data.categories[0] ? data.categories[0].id : "");
+        });
+      }, [data]);
+
+      if (!me) return html`<div></div>`;
+      const isEditor = !!me.is_sfi_editor;
+      const cur = currency;
+
+      // ---- optimistic local patches (push reconciles the aggregates) -------------------
+      function patchCatLocal(id, patch) {
+        setData((d) => d && ({
+          ...d,
+          categories: d.categories.map((c) => c.id === id ? { ...c, ...patch } : c),
+          transactions: d.transactions.map((t) => t.category_id === id ? {
+            ...t,
+            ...(patch.name !== undefined ? { category_name: patch.name } : {}),
+            ...(patch.channel !== undefined ? { channel: patch.channel } : {}),
+          } : t),
+        }));
+      }
+
+      // ---- mutations -------------------------------------------------------------------
+      function addCategory(name, isIncome, clear) {
+        const v = name.trim();
+        clear();
+        if (!v) return;
+        write("api/category", { name: v, is_income: isIncome ? 1 : 0 });
+      }
+      function saveCat(cat, patch) {
+        patchCatLocal(cat.id, patch);
+        setEditCat((c) => c && c.id === cat.id ? { ...c, ...patch } : c);
+        write("api/category/" + cat.id, patch);
+      }
+      function deleteCategory(cat) {
+        if (!catArmed) { setCatArmed(true); return; }
+        setCatArmed(false); setEditCat(null);
+        setData((d) => d && ({
+          ...d,
+          categories: d.categories.filter((c) => c.id !== cat.id),
+          transactions: d.transactions.filter((t) => t.category_id !== cat.id),
+        }));
+        write("api/category/" + cat.id + "/delete", {});
+      }
+      function addTx() {
+        const amount = Math.abs(parseFloat(addAmt));
+        if (!addCat || !Number.isFinite(amount) || amount <= 0) return;
+        // Adding while looking at another month lands the entry in that month.
+        const date = month === curMonth() ? localToday() : month + "-01";
+        write("api/tx", { category_id: addCat, amount, note: addNote.trim(), date });
+        setAddAmt(""); setAddNote("");
+      }
+      function saveTx(tx, patch) {
+        setData((d) => {
+          if (!d) return d;
+          const cat = patch.category_id ? d.categories.find((c) => c.id === patch.category_id) : null;
+          const extra = cat ? { category_name: cat.name, channel: cat.channel, is_income: cat.is_income } : {};
+          return { ...d, transactions: d.transactions.map((t) => t.id === tx.id ? { ...t, ...patch, ...extra } : t) };
+        });
+        setEditTx((t) => t && t.id === tx.id ? { ...t, ...patch } : t);
+        write("api/tx/" + tx.id, patch);
+      }
+      function deleteTx(tx) {
+        if (!txArmed) { setTxArmed(true); return; }
+        setTxArmed(false); setEditTx(null);
+        setData((d) => d && ({ ...d, transactions: d.transactions.filter((t) => t.id !== tx.id) }));
+        write("api/tx/" + tx.id + "/delete", {});
+      }
+      async function onCurrencyClick() {
+        if (typeof frame.prompt !== "function") return;
+        const v = await frame.prompt("Shown before every amount.", {
+          title: "Currency symbol", defaultValue: cur, placeholder: "$", okLabel: "Save",
+        });
+        if (v === null) return;
+        const c = (v.trim() || "$").slice(0, 4);
+        setCurrency(c);
+        write("api/settings", { currency: c });
+      }
+
+      // ---- the data drawer (owner-only) --------------------------------------------------
+      // One button, one surface: the frame says nothing about storage at rest, and every
+      // data action lives here. Single call site so #755 (frame-chrome data controls) can
+      // replace this wholesale. See docs/table-graduation.md.
+      async function onDrawer() {
+        if (storage.pending) {
+          const stop = await frame.confirm("Stop the move to a shared table?", {
+            title: "Budget data", okLabel: "Stop", cancelLabel: "Keep going",
+          });
+          if (stop) { await write("api/data/cancel_graduate", {}); refresh(); }
+          return;
+        }
+        if (storage.backend === "shared") {
+          await frame.alert("This budget's categories and transactions live in a shared table, so other frames in this space can work with the same rows.", { title: "Budget data" });
+          return;
+        }
+        const mode = frame.choose
+          ? await frame.choose("These categories and transactions live on this device.", {
+              title: "Budget data",
+              options: [
+                { id: "convert", label: "Move to a shared table", icon: "ph-dresser",
+                  detail: "Copies this budget so other frames can use it" },
+                { id: "adopt", label: "Use an existing shared table", icon: "ph-plugs-connected",
+                  detail: "Point this budget at tables you already have" },
+              ],
+            })
+          : ((await frame.confirm("Move this budget's data to a shared table?", { title: "Budget data", okLabel: "Move" })) ? "convert" : null);
+        if (mode) { await write("api/data/graduate", { mode }); refresh(); }
+      }
+
+      const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
+
+      // ---- derived view data -------------------------------------------------------------
+      const cats = data ? data.categories : [];
+      const expenses = cats.filter((c) => !c.is_income);
+      const incomes = cats.filter((c) => c.is_income);
+      const groups = [];
+      if (data) {
+        for (const t of data.transactions) {
+          const g = groups[groups.length - 1];
+          if (g && g.date === t.date) g.txs.push(t); else groups.push({ date: t.date, txs: [t] });
+        }
+      }
+      const addChObj = cats.find((c) => c.id === addCat);
+      const addCh = addChObj ? addChObj.channel : "c1";
+
+      const catOptions = () => html`
+        ${expenses.length ? html`<optgroup label="expenses">
+          ${expenses.map((c) => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}
+        </optgroup>` : null}
+        ${incomes.length ? html`<optgroup label="income">
+          ${incomes.map((c) => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}
+        </optgroup>` : null}
+      `;
+
+      const catRow = (c) => {
+        const hasEnvelope = !c.is_income && c.monthly_budget > 0;
+        const over = hasEnvelope && c.spent > c.monthly_budget;
+        const pct = hasEnvelope ? Math.min(100, (c.spent / c.monthly_budget) * 100) : 0;
+        return html`
+          <div class="cat" key=${c.id} style=${"--ch: var(--os-" + c.channel + ")"}
+            onClick=${isEditor ? () => { setEditCat({ ...c }); setCatArmed(false); } : null}>
+            <span class="cat-dot"></span>
+            <span class="cat-name">${c.name}</span>
+            <span class="cat-fig">
+              ${(c.is_income ? "+" : "") + cur + fmtMoney(c.spent)}
+              ${hasEnvelope ? html`<span class="of">${" / " + cur + fmtMoney(c.monthly_budget)}</span>` : null}
+            </span>
+            ${hasEnvelope ? html`
+              <div class="cat-bar">
+                <div class=${"cat-fill" + (over ? " over" : "")} style=${"width: " + pct + "%"}></div>
+              </div>` : null}
+          </div>`;
+      };
+
+      const newCatInput = (isIncome) => html`
+        <div class="cat-new">
+          <i class="ph-light ph-plus"></i>
+          <input placeholder="Add a category…" maxlength="60"
+            value=${isIncome ? newInc : newExp}
+            onInput=${(e) => (isIncome ? setNewInc : setNewExp)(e.target.value)}
+            onKeyDown=${(e) => { if (e.key === "Enter") addCategory(e.target.value, isIncome, () => (isIncome ? setNewInc : setNewExp)("")); }}
+            onBlur=${(e) => addCategory(e.target.value, isIncome, () => (isIncome ? setNewInc : setNewExp)(""))} />
+        </div>`;
+
+      const t = data ? data.totals : { income: 0, expenses: 0, balance: 0 };
+
+      return html`
+        <main class=${isEditor ? "" : "read-only"}>
+          <div class="header">
+            <i class="ph-light ph-wallet"></i>
+            <h1>Family Budget</h1>
+            <span class="mode">${mode}</span>
+            ${storage && storage.can_manage ? html`
+              <button class=${"drawer" + (storage.pending ? " pending" : "")}
+                title=${storage.pending ? "Finishing a move to a shared table" : "Budget data"}
+                onClick=${onDrawer}>
+                <i class="ph-light ph-dresser"></i>
+              </button>` : null}
+            ${isEditor ? html`
+              <button class="drawer" title="Budget settings" onClick=${onCurrencyClick}>
+                <i class="ph-light ph-gear-six"></i>
+              </button>` : null}
+          </div>
+
+          ${!isEditor ? html`
+            <div class="banner">
+              <i class="ph-light ph-eye"></i>
+              ${me.is_sfi_member
+                ? html`You have viewer-only access. Ask the owner to raise your role to edit this budget.`
+                : html`You're viewing this budget publicly. Join this space to record income and expenses.`}
+            </div>` : null}
+
+          ${waiting ? html`
+            <div class="notice">
+              <i class="ph-light ph-table"></i>
+              <h2>Almost there</h2>
+              <p>${me.is_owner
+                ? html`Pick the categories table, then the transactions table to finish.`
+                : html`The owner is finishing this budget's move to shared tables.`}</p>
+              ${me.is_owner ? html`<button class="data-ghost" onClick=${refresh}>Open the picker again</button>` : null}
+            </div>`
+          : !data ? html`<div></div>` : html`
+            <div class="monthbar">
+              <button class="mnav" title="Previous month" onClick=${() => setMonth(shiftMonth(month, -1))}>
+                <i class="ph-light ph-caret-left"></i>
+              </button>
+              <span class="mlabel">${monthLabel(month)}</span>
+              <button class="mnav" title="Next month" onClick=${() => setMonth(shiftMonth(month, 1))}>
+                <i class="ph-light ph-caret-right"></i>
+              </button>
+              ${month !== curMonth() ? html`
+                <button class="mtoday" onClick=${() => setMonth(curMonth())}>today</button>` : null}
+            </div>
+
+            <div class="summary">
+              <div class="sum">
+                <span class="sum-label">in</span>
+                <span class="sum-val">${cur + fmtMoney(t.income)}</span>
+              </div>
+              <div class="sum">
+                <span class="sum-label">out</span>
+                <span class="sum-val">${cur + fmtMoney(t.expenses)}</span>
+              </div>
+              <div class="sum balance">
+                <span class="sum-label">balance</span>
+                <span class=${"sum-val" + (t.balance < 0 ? " neg" : "")}>
+                  ${(t.balance < 0 ? "-" : "") + cur + fmtMoney(Math.abs(t.balance))}
+                </span>
+              </div>
+            </div>
+
+            <div class="cols">
+              <div class="env">
+                <div class="grp">
+                  <div class="grp-label">expenses</div>
+                  ${expenses.map(catRow)}
+                  ${isEditor ? newCatInput(false) : null}
+                </div>
+                <div class="grp">
+                  <div class="grp-label">income</div>
+                  ${incomes.map(catRow)}
+                  ${isEditor ? newCatInput(true) : null}
+                </div>
+              </div>
+
+              <div class="txs">
+                ${isEditor ? html`
+                  <div class="tx-add" style=${"--ch: var(--os-" + addCh + "); --ch-fg: var(--os-" + addCh + "-fg)"}>
+                    <select title="Category" value=${addCat} onChange=${(e) => setAddCat(e.target.value)}>
+                      ${catOptions()}
+                    </select>
+                    <input class="amt" inputmode="decimal" placeholder="0.00" value=${addAmt}
+                      onInput=${(e) => setAddAmt(e.target.value)}
+                      onKeyDown=${(e) => { if (e.key === "Enter") addTx(); }} />
+                    <input class="note" placeholder="Note…" maxlength="200" value=${addNote}
+                      onInput=${(e) => setAddNote(e.target.value)}
+                      onKeyDown=${(e) => { if (e.key === "Enter") addTx(); }} />
+                    <button class="go" title="Add transaction" onClick=${addTx}>
+                      <i class="ph-light ph-plus"></i>
+                    </button>
+                  </div>` : null}
+
+                <div class="txlist">
+                  ${groups.length === 0 ? html`
+                    <div class="empty">Nothing recorded this month.</div>` : null}
+                  ${groups.map((g) => html`
+                    <div class="tgrp" key=${g.date}>
+                      <div class="txdate">${dayLabel(g.date)}</div>
+                      ${g.txs.map((tx) => html`
+                        <div class="trow" key=${tx.id} style=${"--ch: var(--os-" + tx.channel + ")"}
+                          onClick=${isEditor ? () => { setEditTx({ ...tx }); setTxArmed(false); } : null}>
+                          <span class="cat-dot"></span>
+                          <span class="t-main">
+                            <span class="t-note">${tx.note || tx.category_name}</span>
+                            ${tx.note ? html`<span class="t-cat">${tx.category_name}</span>` : null}
+                          </span>
+                          <span class="t-amt">${(tx.is_income ? "+" : "") + cur + fmtMoney(tx.amount)}</span>
+                        </div>
+                      `)}
+                    </div>
+                  `)}
+                </div>
+              </div>
+            </div>`}
+
+          ${editCat ? html`
+            <${Modal} title="Edit category" onClose=${() => { setEditCat(null); setCatArmed(false); }}
+              actions=${html`
+                <button class=${"ed-del" + (catArmed ? " armed" : "")}
+                  onClick=${() => deleteCategory(editCat)}>
+                  ${catArmed ? "Click again to delete" : "Delete category"}
+                </button>
+                <button onClick=${() => { setEditCat(null); setCatArmed(false); }}>Done</button>
+              `}>
+              <div class="ed">
+                <div>
+                  <label>Name</label>
+                  <input value=${editCat.name} maxlength="60"
+                    onBlur=${(e) => { const v = e.target.value.trim(); if (v && v !== editCat.name) saveCat(editCat, { name: v }); }}
+                    onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                </div>
+                <div>
+                  <label>Color</label>
+                  <div class="pop-swatches">
+                    ${CHANNELS.map((ch) => html`
+                      <button key=${ch} title=${ch}
+                        class=${ch === editCat.channel ? "sel" : ""}
+                        style=${"--sw: var(--os-" + ch + ")"}
+                        onClick=${() => saveCat(editCat, { channel: ch })}></button>
+                    `)}
+                  </div>
+                </div>
+                ${!editCat.is_income ? html`
+                  <div>
+                    <label>Monthly budget</label>
+                    <input class="num" inputmode="decimal" placeholder="No envelope"
+                      value=${editCat.monthly_budget ? String(editCat.monthly_budget) : ""}
+                      onBlur=${(e) => { const n = Math.max(0, parseFloat(e.target.value) || 0); if (n !== editCat.monthly_budget) saveCat(editCat, { monthly_budget: n }); }}
+                      onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                  </div>` : null}
+              </div>
+            </${Modal}>` : null}
+
+          ${editTx && data ? html`
+            <${Modal} title="Edit transaction" onClose=${() => { setEditTx(null); setTxArmed(false); }}
+              actions=${html`
+                <button class=${"ed-del" + (txArmed ? " armed" : "")}
+                  onClick=${() => deleteTx(editTx)}>
+                  ${txArmed ? "Click again to delete" : "Delete transaction"}
+                </button>
+                <button onClick=${() => { setEditTx(null); setTxArmed(false); }}>Done</button>
+              `}>
+              <div class="ed">
+                <div>
+                  <label>Category</label>
+                  <select value=${editTx.category_id}
+                    onChange=${(e) => saveTx(editTx, { category_id: e.target.value })}>
+                    ${catOptions()}
+                  </select>
+                </div>
+                <div>
+                  <label>Amount</label>
+                  <input class="num" inputmode="decimal" value=${String(editTx.amount)}
+                    onBlur=${(e) => { const n = Math.abs(parseFloat(e.target.value)); if (Number.isFinite(n) && n > 0 && n !== editTx.amount) saveTx(editTx, { amount: n }); }}
+                    onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                </div>
+                <div>
+                  <label>Note</label>
+                  <input value=${editTx.note} maxlength="200" placeholder="Optional"
+                    onBlur=${(e) => { const v = e.target.value.trim(); if (v !== editTx.note) saveTx(editTx, { note: v }); }}
+                    onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                </div>
+                <div>
+                  <label>Date</label>
+                  <input type="date" value=${editTx.date}
+                    onChange=${(e) => { const v = e.target.value; if (v && v !== editTx.date) saveTx(editTx, { date: v }); }} />
+                </div>
+              </div>
+            </${Modal}>` : null}
+        </main>
+      `;
+    }
+
+    render(html`<${App}/>`, document.body);
+  </script>
+</body>
+</html>

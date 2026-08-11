@@ -1,0 +1,17 @@
+{
+    "name": "Notes",
+    "description": "Somewhere to put a thought before it goes. The box at the top is always open and always ready, so capturing something takes one keystroke and no decisions — no title, no folder, no file. Notes stack up newest first, grouped under the day they were written, and any word you start with a # becomes a tag you can filter by later. Space editors write and edit; everyone else, including anyone the frame is shared with publicly, reads the same stream live. Deliberately not the Document frame: that one is for a page you sit down to write, this one is for the thing you would otherwise text yourself. Notes live in an encrypted LocalTable scoped to the placement.",
+    "frame_type": "Tandem",
+    "tags": ["everyday", "notes", "writing"],
+    "permissions": {
+        "net": []
+    },
+    "default_width_px": 460,
+    "default_height_px": 600,
+    "created_at": "2026-08-10T00:00:00Z",
+    "modified_at": "2026-08-10T00:00:00Z",
+    "app_version_min": "0.2.5",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

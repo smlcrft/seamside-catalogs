@@ -208,7 +208,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return replyPort.postMessage({
       status: 200, body: buf, contentType: mime,
       headers: { "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(found.name)}` },
-    }, [buf.buffer]);
+    }, [buf.buffer as ArrayBuffer]);
   }
 
   // Delete — gated by who_can_add (logic in handleWrite).

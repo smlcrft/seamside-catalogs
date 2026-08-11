@@ -599,7 +599,7 @@
 
       if (!meta) return html`<main></main>`;
       const { me, prefs, can_post, can_vote } = meta;
-      const mode = me.is_owner ? "owner" : me.is_sfi_editor ? "editor" : me.is_sfi_member ? "member" : (me.is_anon ? "public" : "visitor");
+      const mode = me.is_owner ? "owner" : me.is_sfi_editor ? "editor" : "viewer";
 
       return html`
         <main>

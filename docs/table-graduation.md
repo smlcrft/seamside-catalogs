@@ -99,23 +99,37 @@ control belongs in the frame chrome itself, driven by the platform's knowledge
 of the frame's declared local tables; until then the switch lives in the frame,
 as small as possible.)
 
-- **A storage chip in the header rail** (right side, before the mode text):
-  neutral inset chip, 12px icon + lowercase word — `ph-hard-drive` "local",
-  "sharing" with a 2s breathe on the icon while pending, `ph-table` "synced".
-  Keep it neutral: storage is status, never channel-tinted (mind an existing
-  `.header i` channel rule). For the owner, while local or pending, the chip is
-  a button; once shared (and for everyone else) it's a static chip with a title
-  tooltip.
-- **One system chooser** (framelib `frame.choose`, added for exactly this):
-  - local, chip click → title "Board data", two options and nothing else:
-    **"Convert to shared tables"** (detail: "copies this board's columns and
-    cards") and **"Use existing shared tables"** (detail: "points this board at
-    tables you already have") → `graduate` with the picked mode; the platform's
-    table picker takes it from there. Feature-detect `frame.choose` and fall
-    back to a convert-only `frame.confirm` on older chassis (and set
-    `app_version_min` to the release that ships `frame.choose`).
-  - pending, chip click → `frame.confirm("Stop the move to shared tables?")`,
-    ok "Stop", cancel "Keep going" → `cancel_graduate`.
+- **The data drawer: ONE icon button in the header rail.** The right rail runs
+  **role → data → settings**: the one-word role label (`owner` / `editor` /
+  `viewer`), then this button, then the frame's settings gear (`ph-gear-six`) if
+  it has one. Slots are optional; the order never changes.
+  24px ghost button, `ph-dresser` at 16px — the same glyph the
+  platform's pivot-nav rail uses for Tables, so the frame and the OS say
+  "tables" the same way. **Owner-only: everyone else sees nothing.** No state
+  word at rest — where the rows live is a setting, not news, and a frame that
+  announces its storage in the header is shouting a configuration detail at
+  people who will never touch it. (Ratified 2026-08-06, replacing the earlier
+  status-chip: chips read as prominent status, and a frame with several data
+  units grew a row of them.)
+  - The **only** ambient signal is a 5px channel dot on the button while
+    something is unfinished (mid-graduation, waiting for the picker), with the
+    2s breathe. Binary: dot or nothing.
+- **One surface behind it** (framelib `frame.choose` / `frame.confirm` /
+  `frame.alert`). Branch on state, in this order:
+  - **pending** → `frame.confirm("Stop the move to a shared table?")`, ok
+    "Stop", cancel "Keep going" → `cancel_graduate`.
+  - **already shared** → `frame.alert` naming what lives in the shared table
+    and why it matters ("These recipes live in a shared table, so other frames
+    in this space can work with the same rows."). Informational, no options.
+  - **local** → `frame.choose` whose message states the current state in plain
+    words ("These columns and cards live on this device.") and offers exactly
+    two options: **"Move to a shared table"** (`ph-dresser`, detail "copies this
+    board so other frames can use it") and **"Use an existing shared table"**
+    (`ph-plugs-connected`, detail "point this board at tables you already
+    have") → `graduate` with the picked mode; the platform's table picker takes
+    it from there. Feature-detect `frame.choose` and fall back to a
+    convert-only `frame.confirm` on older chassis (and set `app_version_min` to
+    the release that ships `frame.choose`).
 - **Auto-refire while pending.** If the owner dismissed the picker (or the app
   restarted), their next load of the main state route calls `ensureTables(peer)`
   so the picker comes back — no "reopen" button needed. Pending is an explicit

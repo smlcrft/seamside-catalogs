@@ -1,0 +1,20 @@
+{
+    "name": "Garden Planner",
+    "description": "Lay out a garden as snap-to-grid plots on a soil-toned canvas. Each plot is given a name, assigned to a person, tagged with the plant families growing in it, and stamped with when and at what stage it was planted. The frame pulls the last seven days of weather from Open-Meteo for the garden's location and tints every plot with a stress gradient — green when the plants are comfortable, red when the recent heat, rain or sun has been hard on what is planted there, worked out per plant family and softened by how much shade the bed gets. Plots start on the host device; the owner can move them to a shared space table, and can separately link an existing member roster (the schema matches Member Manager) so plots can be assigned to real people instead of typed-in names. Everyone else, including anyone the garden is shared with publicly, sees the same layout live and read-only.",
+    "frame_type": "Tandem",
+    "tags": ["household", "garden", "outdoors"],
+    "permissions": {
+        "net": [
+            "api.open-meteo.com",
+            "geocoding-api.open-meteo.com"
+        ]
+    },
+    "default_width_px": 900,
+    "default_height_px": 700,
+    "created_at": "2026-04-27T18:00:00Z",
+    "modified_at": "2026-08-07T21:30:00Z",
+    "app_version_min": "0.2.5",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

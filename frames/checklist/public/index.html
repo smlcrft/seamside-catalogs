@@ -224,9 +224,7 @@
         write("api/reorder", { ids }).catch(() => {});
       }
 
-      const mode = isEditor ? (me.is_owner ? "editor · owner" : "editor")
-                 : me.is_sfi_member ? "viewer · read-only"
-                 : (me.is_anon ? "anonymous · read-only" : "non-member · read-only");
+      const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
 
       return html`
         <main class=${isEditor ? "" : "read-only"}>
@@ -244,8 +242,8 @@
                 : html`You're viewing this list publicly. Join this space to add and check off tasks.`}
             </div>` : null}
 
-          ${items.length === 0 && !isEditor
-            ? html`<div class="empty">Nothing here yet.</div>`
+          ${items.length === 0
+            ? html`<div class="empty">${isEditor ? "Nothing on the list. The box above starts it." : "Nothing here yet."}</div>`
             : html`
               <div class="list" ref=${listRef}
                 onDragOver=${isEditor ? onListDragOver : null}

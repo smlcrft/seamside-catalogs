@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Focus Timer</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); }   /* follows the space channel at runtime via applyChannel */
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    /* the render root carries the height too, or `main { height: 100% }` resolves
+       against an auto-height div and the frame stops driving its own layout */
+    html, body, #app { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      height: 100%; max-width: 520px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-xl));
+    }
+
+    /* ---- header rail (24px first line; see PRECISION §6) ---------------------------
+       Role only. This frame keeps no collection, so it has no data drawer and nothing
+       to configure — an empty rail slot is better than a button that explains itself. */
+    .header { display: flex; align-items: center; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .header > i {
+      flex: 0 0 auto; width: 24px; height: 24px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 20px; line-height: 1; color: var(--ch);
+    }
+    .header h1 {
+      flex: 1 1 auto; min-width: 0; margin: 0;
+      font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); line-height: 24px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .header .mode {
+      flex: 0 0 auto; height: 24px; display: inline-flex; align-items: center;
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted); white-space: nowrap;
+    }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      flex: 0 0 auto;
+    }
+
+    /* ---- the dial -------------------------------------------------------------------
+       One full turn is one hour, so the ring reads as a clock face rather than an
+       abstract gauge: the tick at 3 o'clock is fifteen minutes because that is where
+       fifteen minutes lives. */
+    .stage { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; container-type: size; }
+    .dial {
+      /* the dial is square, so it has to be sized by the SHORTER axis of the stage — a
+         width-only rule leaves it taller than a short frame and the ring gets guillotined.
+         The plain min() is the fallback for anything without container queries. */
+      position: relative; aspect-ratio: 1 / 1; touch-action: none;
+      width: min(100%, 300px);
+      width: min(100cqw, 100cqh, 300px);
+    }
+    .dial svg { display: block; width: 100%; height: 100%; overflow: visible; }
+    .track { fill: none; stroke: var(--os-bg-inset); stroke-width: 12; }
+    .arc {
+      fill: none; stroke: var(--ch); stroke-width: 12; stroke-linecap: round;
+      transform: rotate(-90deg); transform-origin: 100px 100px;
+    }
+    /* while running the arc is driven by the clock, so it must not also be animated —
+       a transition here would make every tick lag a quarter second behind the number */
+    .arc.settling { transition: stroke-dashoffset 180ms var(--os-ease-out); }
+    .tick { stroke: var(--os-border-color); stroke-width: 2; stroke-linecap: round; }
+    .tick.major { stroke: var(--os-text-subtle); stroke-width: 2.5; }
+    /* the grab handle rides the end of the arc: the one part of a dial your hand expects */
+    .knob {
+      fill: var(--os-bg-surface); stroke: var(--ch); stroke-width: 3;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.10));
+    }
+    .settable .dial { cursor: grab; }
+    .settable .dial.turning { cursor: grabbing; }
+    .dial:focus-visible { outline: none; }
+    .settable .dial:focus-visible svg { filter: drop-shadow(0 0 0 2px var(--ch)); }
+    .settable .dial:focus-visible .knob { stroke-width: 4; }
+
+    /* the readout sits in the middle of the ring, mono and tabular so the digits do not
+       jitter as they count */
+    .readout {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 2px; pointer-events: none;
+    }
+    .time { font-feature-settings: 'tnum' 1;
+      font-size: clamp(30px, 11vw, 46px); line-height: 1; letter-spacing: -0.02em;
+      color: var(--os-text);
+    }
+    .state {
+      font-size: var(--os-fs-2xs); text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--os-text-muted);
+    }
+    .done .time { color: var(--ch); }
+    .done .state { color: var(--ch); }
+    .paused .time { color: var(--os-text-secondary); }
+
+    /* ---- controls -------------------------------------------------------------------- */
+    .controls { display: flex; align-items: center; justify-content: center; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .btn-primary {
+      background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); border: 0; cursor: pointer;
+      padding: var(--os-sp-sm) var(--os-sp-xl); border-radius: var(--os-radius-md);
+      font: inherit; font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium);
+      display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+      transition: filter 150ms, transform 80ms var(--os-ease-spring);
+    }
+    .btn-primary i { font-size: 16px; line-height: 0; }
+    .btn-primary:hover { filter: brightness(1.08); }
+    .btn-primary:active { transform: scale(0.97); }
+    .btn-primary:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    /* secondary: the constant-total padding depress (PRECISION §4) — 8/16 at rest, so
+       9 top / 7 bottom on press keeps the button exactly the same size */
+    .btn-quiet {
+      background: none; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); cursor: pointer;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+      transition: box-shadow 40ms ease, background 40ms ease, padding 40ms ease, color 150ms, border-color 150ms;
+    }
+    .btn-quiet i { font-size: 16px; line-height: 0; }
+    .btn-quiet:hover { color: var(--os-text); border-color: var(--os-text-subtle); background: var(--os-bg-subtle); }
+    .btn-quiet:active {
+      padding: 9px var(--os-sp-md) 7px; background: var(--os-bg-inset);
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.07);
+    }
+    .btn-quiet:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    /* ---- what we are working on ------------------------------------------------------ */
+    .label-row { flex: 0 0 auto; display: flex; justify-content: center; }
+    .label-row input {
+      width: 100%; max-width: 300px; text-align: center;
+      border: 0; background: none; box-shadow: none; font: inherit;
+      font-size: var(--os-fs-sm); color: var(--os-text); padding: var(--os-sp-xs) var(--os-sp-sm);
+      border-radius: var(--os-radius-sm); transition: background 150ms;
+    }
+    .label-row input::placeholder { color: var(--os-text-muted); }
+    .label-row input:hover { background: var(--os-bg-subtle); }
+    .label-row input:focus { outline: none; background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color); }
+    .label-static {
+      font-size: var(--os-fs-sm); color: var(--os-text-secondary); text-align: center;
+      padding: var(--os-sp-xs) var(--os-sp-sm);
+    }
+    .by {
+      flex: 0 0 auto; text-align: center; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      min-height: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+
+    const R = 84;                        // ring radius in the 200x200 viewBox
+    const C = 2 * Math.PI * R;           // circumference, for stroke-dasharray
+    const mmss = (s) => {
+      const t = Math.max(0, Math.round(s));
+      return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0");
+    };
+
+    // Tick marks every five minutes; every fifteen reads heavier, the way a clock face does.
+    const TICKS = Array.from({ length: 12 }, (_, i) => {
+      const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
+      const inner = i % 3 === 0 ? 93 : 95;
+      return {
+        key: i, major: i % 3 === 0,
+        x1: 100 + Math.cos(a) * inner, y1: 100 + Math.sin(a) * inner,
+        x2: 100 + Math.cos(a) * 99,    y2: 100 + Math.sin(a) * 99,
+      };
+    });
+
+    function App() {
+      const [me, setMe]         = useState(null);
+      const [sess, setSess]     = useState(null);
+      const [skew, setSkew]     = useState(0);      // host clock minus ours
+      const [drag, setDrag]     = useState(null);   // minutes while the dial is being turned
+      const [, setTick]         = useState(0);      // forces the countdown to re-render
+      const [labelDraft, setLabelDraft] = useState(null);
+      const dialRef = useRef(null);
+
+      async function refresh() {
+        const r = await frame.api("api/state").catch(() => null);
+        if (!r || !r.session) return;
+        setSkew(r.session.now_ms - Date.now());
+        setSess(r.session);
+      }
+      // Writes go over the tether (frame.busSend) — fire-and-forget; the dial re-reads from
+      // the timer_changed push, sender included. Feature-detect: an older viewer's framelib
+      // has no busSend, so fall back to the HTTP write it was using before.
+      const write = (path, body) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+          return Promise.resolve({});
+        }
+        return frame.api(path, body);
+      };
+
+      useEffect(() => {
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({ timer_changed: refresh });
+
+      // The only thing that ticks is the picture. Four times a second is enough for a
+      // seconds readout to land on time without spinning the CPU.
+      useEffect(() => {
+        const h = setInterval(() => setTick((n) => n + 1), 250);
+        return () => clearInterval(h);
+      }, []);
+
+      if (!me || !sess) return html`<div></div>`;
+      const isEditor = !!me.is_sfi_editor;
+      const now = Date.now() + skew;
+
+      const running  = sess.ends_at_ms > now;
+      const finished = sess.ends_at_ms > 0 && !running;
+      const paused   = !running && !finished && sess.paused_left_s > 0;
+      const idle     = !running && !finished && !paused;
+
+      const total = Math.max(1, sess.duration_s);
+      const left = running  ? (sess.ends_at_ms - now) / 1000
+                 : paused   ? sess.paused_left_s
+                 : finished ? 0
+                 : total;
+      // While turning the dial the ring follows the hand, not the stored value.
+      const shownMinutes = drag != null ? drag : Math.round(total / 60);
+      const shownSecs = drag != null ? drag * 60 : left;
+      // The ring IS the clock face: one whole turn is max_minutes, so the arc always means
+      // "this many minutes", never "this fraction of the session". Scaling it to the
+      // session instead would make a five-minute timer draw a full circle and put the
+      // knob at twelve o'clock, which contradicts the five-minute tick marks around it.
+      const frac = Math.max(0, Math.min(1, shownSecs / (sess.max_minutes * 60)));
+
+      const settable = isEditor && idle;
+
+      // ---- turning the dial ------------------------------------------------------------
+      // One full turn is MAX_MINUTES, starting at twelve o'clock and going clockwise.
+      function minutesAt(e) {
+        const el = dialRef.current;
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        const dx = e.clientX - (b.left + b.width / 2);
+        const dy = e.clientY - (b.top + b.height / 2);
+        if (dx === 0 && dy === 0) return null;
+        let a = Math.atan2(dx, -dy);              // 0 at twelve, growing clockwise
+        if (a < 0) a += Math.PI * 2;
+        const m = Math.round((a / (Math.PI * 2)) * sess.max_minutes);
+        return Math.min(sess.max_minutes, Math.max(sess.min_minutes, m || sess.max_minutes));
+      }
+      function onDown(e) {
+        if (!settable) return;
+        const m = minutesAt(e);
+        if (m == null) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setDrag(m);
+      }
+      function onMove(e) {
+        if (drag == null) return;
+        const m = minutesAt(e);
+        if (m != null && m !== drag) setDrag(m);
+      }
+      // Commit on release, not on every degree: the wire carries one write per turn.
+      function onUp(e) {
+        if (drag == null) return;
+        const m = drag;
+        setDrag(null);
+        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+        if (m * 60 !== sess.duration_s) {
+          setSess((s) => s && { ...s, duration_s: m * 60, paused_left_s: 0 });
+          write("api/set", { minutes: m }).catch(() => {});
+        }
+      }
+      // Arrow keys nudge a minute at a time — a dial you can also aim exactly.
+      function onKey(e) {
+        if (!settable) return;
+        const step = e.key === "ArrowUp" || e.key === "ArrowRight" ? 1
+                   : e.key === "ArrowDown" || e.key === "ArrowLeft" ? -1 : 0;
+        if (!step) return;
+        e.preventDefault();
+        const m = Math.min(sess.max_minutes, Math.max(sess.min_minutes, Math.round(total / 60) + step));
+        setSess((s) => s && { ...s, duration_s: m * 60, paused_left_s: 0 });
+        write("api/set", { minutes: m }).catch(() => {});
+      }
+
+      const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
+      const stateWord = running ? "focusing" : paused ? "paused" : finished ? "done" : "ready";
+      const knobA = (frac * Math.PI * 2) - Math.PI / 2;
+
+      return html`
+        <main class=${(settable ? "settable " : "") + (finished ? "done" : paused ? "paused" : "")}>
+          <div class="header">
+            <i class="ph-light ph-timer"></i>
+            <h1>Focus Timer</h1>
+            <span class="mode">${mode}</span>
+          </div>
+
+          ${!isEditor ? html`
+            <div class="banner">
+              <i class="ph-light ph-eye"></i>
+              <span>${me.is_anon ? "You are watching this timer." : "You can see this timer but not run it."}</span>
+            </div>` : null}
+
+          <div class="stage">
+            <div class=${"dial" + (drag != null ? " turning" : "")} ref=${dialRef}
+              tabIndex=${settable ? 0 : -1}
+              role="slider" aria-label="Session length in minutes"
+              aria-valuemin=${sess.min_minutes} aria-valuemax=${sess.max_minutes}
+              aria-valuenow=${shownMinutes} aria-valuetext=${shownMinutes + " minutes"}
+              onPointerDown=${onDown} onPointerMove=${onMove}
+              onPointerUp=${onUp} onPointerCancel=${onUp} onKeyDown=${onKey}>
+              <svg viewBox="0 0 200 200" aria-hidden="true">
+                ${TICKS.map((t) => html`
+                  <line key=${t.key} class=${"tick" + (t.major ? " major" : "")}
+                    x1=${t.x1} y1=${t.y1} x2=${t.x2} y2=${t.y2} />`)}
+                <circle class="track" cx="100" cy="100" r=${R} />
+                <circle class=${"arc" + (running || drag != null ? "" : " settling")} cx="100" cy="100" r=${R}
+                  stroke-dasharray=${C} stroke-dashoffset=${C * (1 - frac)} />
+                ${settable ? html`
+                  <circle class="knob" r="9"
+                    cx=${100 + Math.cos(knobA) * R} cy=${100 + Math.sin(knobA) * R} />` : null}
+              </svg>
+              <div class="readout">
+                <div class="time">${mmss(shownSecs)}</div>
+                <div class="state">${drag != null ? "set" : stateWord}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="by">
+            ${(running || paused) && sess.started_by ? sess.started_by + " started this" : ""}
+          </div>
+
+          ${isEditor ? html`
+            <div class="controls">
+              ${running
+                ? html`<button class="btn-primary" onClick=${() => write("api/pause", {})}>
+                    <i class="ph-light ph-pause"></i>pause</button>`
+                : html`<button class="btn-primary" onClick=${() => write("api/start", {})}>
+                    <i class="ph-light ph-play"></i>${paused ? "resume" : finished ? "again" : "start"}</button>`}
+              ${idle ? null : html`
+                <button class="btn-quiet" onClick=${() => write("api/reset", {})}>
+                  <i class="ph-light ph-arrow-counter-clockwise"></i>reset</button>`}
+            </div>` : null}
+
+          <div class="label-row">
+            ${isEditor
+              ? html`<input maxlength="80" placeholder="What are we working on?"
+                  value=${labelDraft != null ? labelDraft : sess.label}
+                  onInput=${(e) => setLabelDraft(e.target.value)}
+                  onBlur=${(e) => { setLabelDraft(null); const v = e.target.value.trim();
+                    if (v !== sess.label) write("api/label", { label: v }).catch(() => {}); }}
+                  onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />`
+              : (sess.label ? html`<div class="label-static">${sess.label}</div>` : null)}
+          </div>
+        </main>`;
+    }
+
+    render(html`<${App} />`, document.getElementById("app"));
+  </script>
+</body>
+</html>

@@ -56,7 +56,7 @@
     /* Press: never scale a clipped interior; darken like a secondary. */
     .seg button:active { transform: none; background: var(--os-bg-inset); }
     .seg button.active:active { background: color-mix(in srgb, var(--ch), var(--os-text) 10%); }
-    .seg button.active { background: var(--ch); color: var(--os-c4-fg, #2a2207); font-weight: var(--os-weight-medium); }
+    .seg button.active { background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); font-weight: var(--os-weight-medium); }
     .seg button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .limits { display: flex; gap: var(--os-sp-md); }
     .limits .field { flex: 1; }
@@ -215,10 +215,7 @@
         write("api/delete/" + f.id, {}).catch(() => {});
       }
 
-      const mode = me.is_owner ? "owner"
-                 : me.is_sfi_editor ? "editor"
-                 : me.is_sfi_member ? "member"
-                 : (me.is_anon ? "anonymous" : "guest");
+      const mode = me.is_owner ? "owner" : me.is_sfi_editor ? "editor" : "viewer";
 
       return html`
         <main>

@@ -1,0 +1,17 @@
+{
+    "name": "Focus Timer",
+    "description": "One clock, shared by everyone in the space. Turn the dial like a kitchen timer to set the length, press the middle to start, and the ring drains for everybody at once — a study room, a work sprint, a twenty-minute tidy that the whole house can see counting down. Whoever started it and what it is for are written under the dial. Space editors drive the timer; everyone else, including anyone the timer is shared with publicly, watches the same countdown live. There is no clock running on a server: the host stores the moment the session ends and every device works out the rest for itself, so the numbers agree even if a device sleeps.",
+    "frame_type": "Tandem",
+    "tags": ["everyday", "study", "focus", "timer"],
+    "permissions": {
+        "net": []
+    },
+    "default_width_px": 380,
+    "default_height_px": 460,
+    "created_at": "2026-08-07T20:30:00Z",
+    "modified_at": "2026-08-07T20:30:00Z",
+    "app_version_min": "0.2.5",
+    "depends_on_capabilities": [],
+    "licensed_under_cc0": true,
+    "attribution_log": []
+}

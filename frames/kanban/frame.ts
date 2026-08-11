@@ -77,7 +77,10 @@ type GradMode = "convert" | "adopt";
 type SfiSettings = { backend: Backend; pending_graduation?: GradMode };
 const allSettings: Record<string, SfiSettings> = loadJsonFile(import.meta.url, "settings.json", {});
 function getSettings(sfiId: string): SfiSettings {
-  return { backend: "local", ...(allSettings[sfiId] ?? {}) };
+  // Default LAST, not first: written before the spread it reads as a default but is
+  // whatever the stored object happens to carry, including a missing backend.
+  const stored = allSettings[sfiId] ?? ({} as Partial<SfiSettings>);
+  return { ...stored, backend: stored.backend ?? "local" };
 }
 function saveSettings(sfiId: string, s: SfiSettings): void {
   allSettings[sfiId] = s;

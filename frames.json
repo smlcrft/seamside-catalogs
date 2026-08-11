@@ -7,6 +7,68 @@
   "items": [
     {
       "kind": "Frames",
+      "id": "assignments",
+      "name": "Assignments",
+      "description": "What's due, and where you stand. Add your courses with their credit weight, then put each piece of work in with its due date and what fraction of the grade it carries. The frame opens on the work: overdue first, then this week, then later, with the nearest deadline counted in days rather than dates. Tick something off and it lifts out of the list. The other half is the arithmetic students do on the back of an envelope \u2014 each course's weighted grade so far, computed from what has actually been marked, and a GPA across courses by credit. Space editors add and tick; everyone else, including a study group the frame is shared with, sees the same board live. Courses and work live in encrypted LocalTables scoped to the placement.",
+      "icon": "",
+      "modified_at": "2026-08-10T00:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 640,
+        "default_height_px": 600,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/assignments.tar.gz",
+      "package_sha256": "c44dece88ae76f078c53f687e7c633a4b24bc0044310513041cfc2f24588961a",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "study",
+        "school",
+        "grades",
+        "deadlines"
+      ]
+    },
+    {
+      "kind": "Frames",
+      "id": "bookmarks",
+      "name": "Bookmarks",
+      "description": "A place to put links so you can find them again. Paste a URL anywhere in the frame and it saves itself \u2014 no form, no dialog \u2014 reading the site's name off the address and colouring it so the same site always looks the same. The search box is the frame's real interface: it filters by title, address and tag as you type, because a link you cannot find again is the same as one you never saved. Tag anything, filter by tag, rename what the URL got wrong. Space editors save and edit; everyone else, including anyone the frame is shared with publicly, can read and follow the same links. Nothing is fetched from the sites you save: this frame asks for no network access at all, so a private bookmark stays a private bookmark. Links live in an encrypted LocalTable scoped to the placement.",
+      "icon": "",
+      "modified_at": "2026-08-10T00:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 620,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/bookmarks.tar.gz",
+      "package_sha256": "95c0b8adf72baadb1abe75ba976c6165984abc16f865be7bf3fdd4b76e9f439e",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "everyday",
+        "bookmarks",
+        "links",
+        "reference"
+      ]
+    },
+    {
+      "kind": "Frames",
       "id": "calendar",
       "name": "Calendar",
       "description": "A simple shared calendar, unique per placement. Space editors add events on a given day or set them to repeat weekly (for example every Mon/Wed/Fri at 3pm) until an end date or forever, each with an optional time, length, color, link, and note; everyone else sees a clean read-only view, including anyone the space owner shares the frame publicly with. Switch between a month grid and a week view with events laid out by time of day. Timed events are authored in your own time zone and automatically shifted to each viewer's local time, so everyone sees the right moment wherever they are. Recurring events can be deleted just for one day, from a day onward, or entirely, and an event's link opens in the native browser (or a new tab on the web). The view also adapts to its size \u2014 the full month/week views when there's room, and a compact upcoming-events agenda once the tile gets small, so it stays usable down to about 200\u00d7200. The whole calendar lives in a single JSON file in a per-placement folder. No database or sync tables.",
@@ -86,11 +148,71 @@
         "camera": false
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/checklist.tar.gz",
-      "package_sha256": "4fa5820595a9b5ac21d743cb2c31b9f037377a07d4079600670205d8fbc79207",
+      "package_sha256": "fc875402771b882b6c51160e03e84fa4c6c846069cad12c8c80d86e8762bda8f",
       "app_version_min": "0.2.5",
       "tags": [
         "everyday",
         "tasks"
+      ]
+    },
+    {
+      "kind": "Frames",
+      "id": "chore_chart",
+      "name": "Chore Chart",
+      "description": "Who does what, and how it's going. Space editors add recurring chores, give each one to a person and a rhythm (daily, weekly, monthly, or just once), and tick them off as they get done. Every person gets their own card in their own colour, showing what's still open, what's already handled, and how long a streak they're on. A chore comes back by itself when its next turn arrives, so the chart is always about this week rather than a list that grows forever. Everyone else, including anyone the chart is shared with publicly, sees the same board live and read-only. Chores live in an encrypted LocalTable scoped to the placement; the owner can move them to a shared space table so other frames can work with the same rows.",
+      "icon": "",
+      "modified_at": "2026-08-07T19:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 640,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/chore_chart.tar.gz",
+      "package_sha256": "001bea9d147f96cc7598c1316fe7e0f8caf8a1185990939411be434390c63fd8",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "household",
+        "family"
+      ]
+    },
+    {
+      "kind": "Frames",
+      "id": "class_schedule",
+      "name": "Class Schedule",
+      "description": "Your week, laid out. Put each class on the days it meets with a time and a room, and the frame draws the timetable \u2014 only the hours you actually have classes in, only the days you actually use, so a Monday-to-Friday term never wastes half the grid on an empty weekend. A line tracks the current time across today's column, and the frame says what is next and when, so the common question is answered before you read anything. Share the placement with a roommate or a study group and everybody sees the same week. Space editors set the timetable; everyone else, including anyone it is shared with publicly, can read it. Classes live in an encrypted LocalTable scoped to the placement.",
+      "icon": "",
+      "modified_at": "2026-08-10T00:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 720,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/class_schedule.tar.gz",
+      "package_sha256": "cd41049e71258a7d9569f419790c4453e9fccb6274bf72a4f18f0dcf500fb167",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "study",
+        "school",
+        "timetable",
+        "schedule"
       ]
     },
     {
@@ -183,6 +305,35 @@
     },
     {
       "kind": "Frames",
+      "id": "family_budget",
+      "name": "Family Budget",
+      "description": "An envelope-lite family budget, unique per placement: money in, money out, categorized, one month at a time. Space editors record income and expenses against channel-colored category envelopes, set a monthly budget per envelope, and step through months to watch spending fill each bar. Everyone else, including anyone the frame is shared with publicly, sees a live read-only view of the month. Categories and transactions live in encrypted LocalTables scoped to the placement, every change is pushed live to all viewers, and the owner can graduate a placement's data to shared tables so other frames can bind the same rows.",
+      "icon": "",
+      "modified_at": "2026-08-04T22:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 760,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/family_budget.tar.gz",
+      "package_sha256": "7613f1c5d10f3fb0a4cfb69be326be86c3d6191d14aa12dd4651055128496bd6",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "household",
+        "money"
+      ]
+    },
+    {
+      "kind": "Frames",
       "id": "file_folder",
       "name": "File Folder",
       "description": "A simple shared file bucket, unique per placement. Members (or just the owner \u2014 the owner chooses) can add files by clicking 'Add file' or dragging them in from the desktop. The owner sets who may add files, a max file size, and a max number of files. Anyone who can open the frame can list and download its files, so sharing the frame publicly shares the folder. Files live in the frame's own data folder in a per-placement subfolder; only the owner's sharing preferences are stored, in a single JSON file. No database or sync tables.",
@@ -203,11 +354,73 @@
         "camera": false
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/file_folder.tar.gz",
-      "package_sha256": "34c15099739f3db87b7ec4799d45111d6ca7ec88988332af1c09146a46376893",
+      "package_sha256": "4d99301d9c69b73682b6afbec5f1227be834ebc18368bb6bfc45d567214cfc16",
       "app_version_min": "0.2.5",
       "tags": [
         "everyday",
         "files"
+      ]
+    },
+    {
+      "kind": "Frames",
+      "id": "flashcards",
+      "name": "Flashcards",
+      "description": "Decks you can share, with a schedule that stays yours. Cards live in the space, so a study group builds one deck together and everybody drills the same material \u2014 but what you have learned is counted per person, so your intervals never move because a classmate answered well. Reviewing uses SM-2, the spaced-repetition schedule Anki is built on: rate a card and it comes back tomorrow, in six days, or in a month, depending on how well you have been doing with it. Each answer shows what it will cost you, so choosing is a decision rather than a guess. Space editors write the cards; anyone in the space can study them. Decks, cards and each person's progress live in encrypted LocalTables scoped to the placement.",
+      "icon": "",
+      "modified_at": "2026-08-10T00:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 560,
+        "default_height_px": 480,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/flashcards.tar.gz",
+      "package_sha256": "5c9f80b91004831d210bc35977274d2d89bdec10642e8601e4e47ae39a067071",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "study",
+        "learning",
+        "flashcards",
+        "memory"
+      ]
+    },
+    {
+      "kind": "Frames",
+      "id": "focus_timer",
+      "name": "Focus Timer",
+      "description": "One clock, shared by everyone in the space. Turn the dial like a kitchen timer to set the length, press the middle to start, and the ring drains for everybody at once \u2014 a study room, a work sprint, a twenty-minute tidy that the whole house can see counting down. Whoever started it and what it is for are written under the dial. Space editors drive the timer; everyone else, including anyone the timer is shared with publicly, watches the same countdown live. There is no clock running on a server: the host stores the moment the session ends and every device works out the rest for itself, so the numbers agree even if a device sleeps.",
+      "icon": "",
+      "modified_at": "2026-08-07T20:30:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 380,
+        "default_height_px": 460,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/focus_timer.tar.gz",
+      "package_sha256": "1135a71ed7b6b23a00adc25bc4058d761c70aac82319a318423b54b6fa9e7d46",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "everyday",
+        "study",
+        "focus",
+        "timer"
       ]
     },
     {
@@ -335,6 +548,128 @@
     },
     {
       "kind": "Frames",
+      "id": "garden_planner",
+      "name": "Garden Planner",
+      "description": "Lay out a garden as snap-to-grid plots on a soil-toned canvas. Each plot is given a name, assigned to a person, tagged with the plant families growing in it, and stamped with when and at what stage it was planted. The frame pulls the last seven days of weather from Open-Meteo for the garden's location and tints every plot with a stress gradient \u2014 green when the plants are comfortable, red when the recent heat, rain or sun has been hard on what is planted there, worked out per plant family and softened by how much shade the bed gets. Plots start on the host device; the owner can move them to a shared space table, and can separately link an existing member roster (the schema matches Member Manager) so plots can be assigned to real people instead of typed-in names. Everyone else, including anyone the garden is shared with publicly, sees the same layout live and read-only.",
+      "icon": "",
+      "modified_at": "2026-08-07T21:30:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 900,
+        "default_height_px": 700,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [
+          "api.open-meteo.com",
+          "geocoding-api.open-meteo.com"
+        ],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/garden_planner.tar.gz",
+      "package_sha256": "c532ca69ec1cef7d72b1cfcbb25bb764c42bea2c1d5223394a649b3f6c6ca217",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "household",
+        "garden",
+        "outdoors"
+      ]
+    },
+    {
+      "kind": "Frames",
+      "id": "gift_list",
+      "name": "Gift List",
+      "description": "A wish list that can keep a secret. Everyone adds what they would like, and anyone else can quietly claim an item so two people don't buy the same thing \u2014 but the person the gift is for never sees the claims. They see their own list exactly as they wrote it, plus an honest note that something is being kept from them, which is the fun part. Works for a family Christmas, a birthday, or a baby shower, and the list can be shared publicly so relatives with no account can still see what is wanted and put their name on something. Wishes live in an encrypted LocalTable scoped to the placement; the owner can move them to a shared space table.",
+      "icon": "",
+      "modified_at": "2026-08-07T20:45:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 560,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/gift_list.tar.gz",
+      "package_sha256": "c46080a53c2e41e4fca210ba076a0a706483cb5126495e13ce00f7d8ef826ea3",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "household",
+        "family",
+        "gifts"
+      ]
+    },
+    {
+      "kind": "Frames",
+      "id": "grocery_list",
+      "name": "Grocery List",
+      "description": "The realtime shared shopping list, unique per placement. Space editors add items with a quantity and an aisle category, tick things off as they land in the cart, and sweep everything bought with one clear. Everyone else, including anyone the frame is shared with publicly, sees the same list live and read-only. Items live in an encrypted LocalTable scoped to the placement, and every check is pushed instantly to all viewers. The owner can move the list to a shared space table, after which the Meal Planner can send a week's ingredients straight into the same list.",
+      "icon": "",
+      "modified_at": "2026-08-04T23:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 520,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/grocery_list.tar.gz",
+      "package_sha256": "41f57573f68cb711b6b2c9f8f1e35a1c1244e1aa32e5bbc4aca698e5cb17ad25",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "household",
+        "kitchen"
+      ]
+    },
+    {
+      "kind": "Frames",
+      "id": "habit_tracker",
+      "name": "Habit Tracker",
+      "description": "One line per habit, one square per day, filled in when you did it. The grid runs right up to today and stretches as far back as the frame is wide, so a narrow tile shows the last fortnight and a wide one shows months \u2014 the same picture either way, just more of it. Tap today's square to mark it, or tap back a few days if you forgot to. Each habit keeps a current run and its best run, and the run is the point: the grid makes a gap visible in a way a checkbox never does. Space editors mark and edit; everyone else, including anyone the frame is shared with publicly, sees the same grid live. Habits and their marks live in encrypted LocalTables scoped to the placement.",
+      "icon": "",
+      "modified_at": "2026-08-10T00:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 560,
+        "default_height_px": 420,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/habit_tracker.tar.gz",
+      "package_sha256": "a4785e8fc77c947aad2aa36596bcf7b92acc08feb91bc810330268f009f8238a",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "everyday",
+        "habits",
+        "health"
+      ]
+    },
+    {
+      "kind": "Frames",
       "id": "help_desk",
       "name": "Help Desk",
       "description": "Anonymous visitors submit a message with email (plus admin-configured fields); known users in the space see a realtime inbox of incoming correspondence.",
@@ -385,7 +720,7 @@
         "camera": false
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/kanban.tar.gz",
-      "package_sha256": "17d3375428861ff0106873692934cd2528ba2cf5a677de10c54659607330e091",
+      "package_sha256": "78127856ee23746399971c3d1c2df549df25cbf76db68f4a1406c992c4dd55b7",
       "app_version_min": "0.2.5",
       "tags": [
         "everyday",
@@ -423,6 +758,36 @@
       "tags": [
         "smallbiz",
         "weather"
+      ]
+    },
+    {
+      "kind": "Frames",
+      "id": "meal_planner",
+      "name": "Meal Planner",
+      "description": "A weekly meal planner, unique per placement. Space editors lay out breakfast, lunch, dinner, and snacks across a seven day week, step between weeks, and keep servings and notes on every meal. On its own it is a freeform planner; link a shared recipes table for a recipe picker on each day, and a shared grocery table to send a day's or a week's ingredients straight to the list. Everyone else, including anyone the frame is shared with publicly, sees a live read-only view of the plan. Meals live in encrypted LocalTables scoped to the placement until the owner moves them to shared tables, and every change is pushed live to all viewers.",
+      "icon": "",
+      "modified_at": "2026-08-04T23:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 760,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/meal_planner.tar.gz",
+      "package_sha256": "4cbc8d84096db4bb9a8e375bbfc1fa26fe1d75d675ea944cff912328ea0f14b6",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "household",
+        "kitchen",
+        "planning"
       ]
     },
     {
@@ -485,6 +850,36 @@
     },
     {
       "kind": "Frames",
+      "id": "notes",
+      "name": "Notes",
+      "description": "Somewhere to put a thought before it goes. The box at the top is always open and always ready, so capturing something takes one keystroke and no decisions \u2014 no title, no folder, no file. Notes stack up newest first, grouped under the day they were written, and any word you start with a # becomes a tag you can filter by later. Space editors write and edit; everyone else, including anyone the frame is shared with publicly, reads the same stream live. Deliberately not the Document frame: that one is for a page you sit down to write, this one is for the thing you would otherwise text yourself. Notes live in an encrypted LocalTable scoped to the placement.",
+      "icon": "",
+      "modified_at": "2026-08-10T00:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 460,
+        "default_height_px": 600,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/notes.tar.gz",
+      "package_sha256": "778471104ec56463da3ac8a9e12a299dca22f203d911e97783651775a153ff3b",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "everyday",
+        "notes",
+        "writing"
+      ]
+    },
+    {
+      "kind": "Frames",
       "id": "outpost",
       "name": "Outpost",
       "description": "A lightweight public posting board for sharing with the world. Space members (editors) publish short posts \u2014 a passing thought, an open question, a status update, an announcement, a quick poll, or an image / audio / video clip \u2014 and anyone with the frame's share link can read them. Each post shows its author and the time it was shared, and URLs in the text become clickable (opened safely in the reader's browser). Posts live entirely in the frame's own data folder: one subfolder per placement holds a encrypted LocalTable (posts, media rows, and poll votes \u2014 indexed so a large, active feed stays fast) plus a per-post subfolder for any attached media bytes. Local file only, no sync tables.",
@@ -505,7 +900,7 @@
         "camera": false
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/outpost.tar.gz",
-      "package_sha256": "040fe2fe1e1904386eb8283498d82b386cbe8abba64c32fc80f6260024c5a5b4",
+      "package_sha256": "bb9685c1c794584d917b2ff42b4279919cfb9648bc5f9dcb57092c69c8c88635",
       "app_version_min": "0.2.5",
       "tags": [
         "community",
@@ -544,6 +939,35 @@
     },
     {
       "kind": "Frames",
+      "id": "recipe_box",
+      "name": "Recipe Box",
+      "description": "The family recipe collection, unique per placement. Space editors store recipes with ingredients, steps, servings, tags, and notes, then read them from a clean cooking view set like a well-made recipe card. Search and tag filters keep a growing collection easy to browse. Everyone else, including anyone the frame is shared with publicly, sees a live read-only view of the collection. Recipes live in encrypted LocalTables scoped to the placement, and the owner can graduate the collection to a shared table so the Meal Planner and future kitchen frames work over the same recipes. Every change is pushed live to all viewers.",
+      "icon": "",
+      "modified_at": "2026-08-04T23:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 760,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/recipe_box.tar.gz",
+      "package_sha256": "558e7015dd9f1b5daa0cd5ada4418e96be1d84682c1f7c4d76299a020803d247",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "household",
+        "kitchen"
+      ]
+    },
+    {
+      "kind": "Frames",
       "id": "roadmap",
       "name": "Roadmap",
       "description": "A simple, robust project roadmapping tool \u2014 one roadmap per placement. Set a project name, overview, and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in-progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Collapsed milestone headers still show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days-remaining and overdue color-coding. A milestone can only be marked done once all its tasks are complete. Everything is stored in a lightweight per-placement encrypted LocalTable database on the host and pushed live to every viewer; non-members get a read-only view.",
@@ -564,7 +988,7 @@
         "camera": false
       },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roadmap.tar.gz",
-      "package_sha256": "85a175c963850c23117dff3d6abbfb18f89ad2d884606179051e06cc72284167",
+      "package_sha256": "9efef5eb9514c2c37cb7a02a5d5ccd3e906fb97bb6698425610b4a20cb7c8333",
       "app_version_min": "0.2.5",
       "tags": [
         "smallbiz",
@@ -598,6 +1022,39 @@
       "tags": [
         "community",
         "chat"
+      ]
+    },
+    {
+      "kind": "Frames",
+      "id": "rss_reader",
+      "name": "RSS Reader",
+      "description": "A reader for the open web, shared with the people you read alongside. Paste any site or feed address and the frame finds the feed, pulls the items in, and keeps them in groups you name. What you have read is yours alone; what you boost and what you say about an item is shared, so a space becomes a small room of co-readers rather than a lonely inbox. Keyboard-first: j and k move, m marks read, b boosts. Because a reader must be able to reach whatever you subscribe to, this frame asks for open network access \u2014 the platform answers by running it in a satellite process that can reach the wider internet but is blocked from your own machine and local network. Feeds, items and comments live in encrypted LocalTables scoped to the placement.",
+      "icon": "",
+      "modified_at": "2026-08-10T00:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 900,
+        "default_height_px": 640,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [
+          "*"
+        ],
+        "web": [],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/rss_reader.tar.gz",
+      "package_sha256": "f9038f48252ba24bf868d1caaf972382ff650e7444a619c0a1f0c0ac56c7df84",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "everyday",
+        "reading",
+        "rss",
+        "news"
       ]
     },
     {
@@ -710,6 +1167,40 @@
       "tags": [
         "media",
         "music"
+      ]
+    },
+    {
+      "kind": "Frames",
+      "id": "trip_planner",
+      "name": "Trip Planner",
+      "description": "Plan a trip end to end, unique per placement. Space editors create trips and build each one out across three views: a day-by-day itinerary with times, activities, and places, a packing list grouped by category with live packed counts, and a running log of trip costs with a total. Places you name are looked up once and pinned on a map above the itinerary, so the whole trip reads at a glance. Everyone else, including anyone the frame is shared with publicly, sees a live read-only itinerary, so a share link doubles as the trip's printed handout. Trips live in encrypted LocalTables scoped to the placement, and every change is pushed live to all viewers.",
+      "icon": "",
+      "modified_at": "2026-08-06T22:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 760,
+        "default_height_px": 560,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "permissions": {
+        "net": [
+          "nominatim.openstreetmap.org"
+        ],
+        "web": [
+          "https://tiles.openfreemap.org"
+        ],
+        "web_scripts": [],
+        "microphone": false,
+        "camera": false
+      },
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/trip_planner.tar.gz",
+      "package_sha256": "a843cb697c1c9f7d171ef51f5d80ee6200d6f69c2705f1c2c7787b8bdabe3128",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "household",
+        "travel",
+        "planning"
       ]
     },
     {
