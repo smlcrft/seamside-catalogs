@@ -124,6 +124,27 @@
       font-feature-settings: 'tnum' 1; white-space: nowrap;
     }
 
+    /* The crew. Everyone else who keeps this habit, at a glance and read-only: you can
+       see the week they are having, you cannot fill it in for them. Deliberately quieter
+       than your own trail -- smaller pips, muted label, no hover -- because the card's
+       subject is still your own run. Absent entirely when nobody else has marked. */
+    .crew { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+    .crew-row { display: flex; align-items: center; gap: var(--os-sp-xs); }
+    .crew-name {
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      flex: 0 0 auto; max-width: 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .crew-trail { display: flex; gap: var(--gap); align-items: center; }
+    .pip {
+      width: calc(var(--cell) * 0.6); height: calc(var(--cell) * 0.6);
+      border-radius: 2px; background: var(--os-bg-inset);
+    }
+    .pip.on { background: color-mix(in srgb, var(--ch), transparent 55%); }
+    .crew-run { font-size: var(--os-fs-2xs); color: var(--os-text-muted); margin-left: auto; }
+    /* The crew is the first thing to go when the tile gets small: it is context, and the
+       day's action is not. Same breakpoints the trail already thins at. */
+    @media (max-height: 260px) { .crew { display: none; } }
+
     /* THE action. One per habit, unmissable, and the only thing on the card sized like a
        target — the previous version hid today inside a row of identical squares. */
     .today {
@@ -245,6 +266,18 @@
       return best;
     }
 
+    /** My own marks for a habit, and everyone else's, from the series the API returns.
+     * `me` is the viewer's user_id; a placement that has only ever had one person in it
+     * yields an empty `others` and the card renders exactly as it always did. */
+    function split(h, meId) {
+      const series = h.series || [];
+      const mine = series.find((s) => s.user_id === meId);
+      const others = series
+        .filter((s) => s.user_id !== meId && (s.days || []).length)
+        .sort((a, b) => (b.days.length - a.days.length) || String(a.user_name).localeCompare(String(b.user_name)));
+      return { days: (mine && mine.days) || [], others };
+    }
+
     function App() {
       const [me, setMe]   = useState(null);
       const [st, setSt]   = useState(null);
@@ -282,7 +315,7 @@
         const next = {};
         const bumps = {};
         for (const h of st.habits) {
-          const run = currentRun(new Set(h.days), days);
+          const run = currentRun(new Set(split(h, st.me).days), days);
           next[h.id] = run;
           if (prevRuns.current[h.id] !== undefined && run > prevRuns.current[h.id]) bumps[h.id] = true;
         }
@@ -308,12 +341,24 @@
       function toggle(h, day, on) {
         if (!isEditor) return;
         // Optimistic: the square fills under the finger, the push reconciles.
-        setSt((s) => s && ({
-          ...s,
-          habits: s.habits.map((x) => x.id !== h.id ? x : ({
-            ...x, days: on ? x.days.filter((d) => d !== day) : [...x.days, day].sort(),
-          })),
-        }));
+        // Optimism has to land on MY series now, not on a shared list of days —
+        // otherwise a tap appears to fill in whoever's row happened to be first.
+        setSt((s) => {
+          if (!s) return s;
+          const meId = s.me || "";
+          return {
+            ...s,
+            habits: s.habits.map((x) => {
+              if (x.id !== h.id) return x;
+              const series = (x.series || []).slice();
+              let i = series.findIndex((r) => r.user_id === meId);
+              if (i < 0) { series.push({ user_id: meId, user_name: "", days: [] }); i = series.length - 1; }
+              const days0 = series[i].days || [];
+              series[i] = { ...series[i], days: on ? days0.filter((d) => d !== day) : [...days0, day].sort() };
+              return { ...x, series };
+            }),
+          };
+        });
         write("api/mark", { habit_id: h.id, day, done: on ? 0 : 1 }).catch(() => {});
       }
       async function editHabit(h) {
@@ -339,7 +384,7 @@
       // The trail is a fortnight, not four months: it is evidence the run is real, and a
       // longer one was the thing that buried the day's action in noise.
       const trail = days.slice(-14);
-      const doneToday = st.habits.filter((h) => h.days.includes(today)).length;
+      const doneToday = st.habits.filter((h) => split(h, st.me).days.includes(today)).length;
       const total = st.habits.length;
 
       // The frame's one spoken line (PRECISION §2: Fedro, display only, never chrome).
@@ -372,7 +417,8 @@
             : html`
               <div class="rows">
                 ${st.habits.map((h) => {
-                  const set = new Set(h.days);
+                  const { days: myDays, others } = split(h, st.me);
+                  const set = new Set(myDays);
                   const cur = currentRun(set, days);
                   const best = bestRun(set, days);
                   const done = set.has(today);
@@ -394,6 +440,23 @@
                             onClick=${() => toggle(h, d, set.has(d))}></button>`)}
                           ${best > cur ? html`<span class="best">best ${best}</span>` : null}
                         </div>
+
+                        ${others.length ? html`
+                          <div class="crew">
+                            ${others.map((o) => {
+                              const oset = new Set(o.days);
+                              return html`
+                                <div class="crew-row" key=${o.user_id}>
+                                  <span class="crew-name" title=${o.user_name || "someone"}>${o.user_name || "someone"}</span>
+                                  <div class="crew-trail">
+                                    ${trail.map((d) => html`<span key=${d}
+                                      class=${"pip" + (oset.has(d) ? " on" : "")}
+                                      title=${o.user_name + " — " + d}></span>`)}
+                                  </div>
+                                  <span class="crew-run">${currentRun(oset, days)}</span>
+                                </div>`;
+                            })}
+                          </div>` : null}
                       </div>
 
                       <button class="today" disabled=${!isEditor}
