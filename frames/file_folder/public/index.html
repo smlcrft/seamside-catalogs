@@ -75,6 +75,10 @@
       transition: border-color 150ms, background 150ms, color 150ms;
     }
     .drop:hover { border-color: var(--ch); color: var(--os-text-secondary); }
+    /* Receptive: a file is over the frame and this folder can take it. Dashed is
+       the resting "drop target" vocabulary; solid + channel is the same binary
+       on-state the shell's image drop zones use. */
+    .drop.over { border-style: solid; border-color: var(--ch); color: var(--os-text-secondary); }
     .drop i { font-size: 26px; color: var(--ch); }
     .drop .big { font-size: var(--os-fs-base); color: var(--os-text); }
     .drop .hint { font-size: var(--os-fs-2xs); font-feature-settings: 'tnum' 1; }
@@ -142,8 +146,48 @@
       const [showCfg, setCfg] = useState(false);
       const [busy, setBusy]   = useState(false);
       const [armed, setArmed] = useState(null);
+      const [over, setOver]   = useState(false);
       const fileInput = useRef(null);
       const armTimer  = useRef(null);
+      // Drag depth, not a boolean: dragleave fires every time the pointer crosses
+      // into a child element, so counting enter/leave is what keeps the state from
+      // flickering as the file moves over the list.
+      const dragDepth = useRef(0);
+      // Latest-render box, so the window listeners below bind once and still see
+      // current limits instead of the first render's closure.
+      const dropBox   = useRef({ canTake: false, upload: null });
+
+      useEffect(() => {
+        const carriesFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+        const enter = (e) => { if (carriesFiles(e)) { dragDepth.current++; setOver(true); } };
+        const leave = () => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setOver(false); };
+        const over_ = (e) => {
+          if (!carriesFiles(e)) return;
+          // Cancelled even when this folder can't take the file: an uncancelled file
+          // drag leaves the webview's default in charge, which is to open the file
+          // as a page — and that would replace the frame (or the whole app).
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = dropBox.current.canTake ? "copy" : "none";
+        };
+        const drop = (e) => {
+          if (!carriesFiles(e)) return;
+          e.preventDefault();
+          dragDepth.current = 0;
+          setOver(false);
+          const { canTake, upload } = dropBox.current;
+          if (canTake && upload) upload(e.dataTransfer.files);
+        };
+        window.addEventListener("dragenter", enter);
+        window.addEventListener("dragleave", leave);
+        window.addEventListener("dragover", over_);
+        window.addEventListener("drop", drop);
+        return () => {
+          window.removeEventListener("dragenter", enter);
+          window.removeEventListener("dragleave", leave);
+          window.removeEventListener("dragover", over_);
+          window.removeEventListener("drop", drop);
+        };
+      }, []);
 
       async function refresh() {
         const s = await frame.api("api/state").catch(() => null);
@@ -155,6 +199,8 @@
       if (!st) return html`<div></div>`;
       const { me, prefs, can_add, files } = st;
       const atLimit = files.length >= prefs.max_files;
+      const canTake = can_add && !busy && !atLimit;
+      dropBox.current = { canTake, upload: uploadFiles };
 
       function savePrefs(patch) {
         const next = { ...prefs, ...patch };
@@ -257,10 +303,10 @@
             </div>` : null}
 
           ${can_add ? html`
-            <div class="drop" onClick=${() => !busy && !atLimit && fileInput.current?.click()}>
+            <div class=${"drop" + (over && canTake ? " over" : "")} onClick=${() => !busy && !atLimit && fileInput.current?.click()}>
               <i class="ph-light ${busy ? "ph-spinner-gap" : "ph-upload-simple"}"></i>
-              <span class="big">${busy ? "Uploading…" : atLimit ? "Folder is full" : "Add a file"}</span>
-              <span class="hint">${atLimit ? `${prefs.max_files}/${prefs.max_files} files` : `click to add · up to ${prefs.max_size_mb} MB · ${files.length}/${prefs.max_files}`}</span>
+              <span class="big">${busy ? "Uploading…" : atLimit ? "Folder is full" : over && canTake ? "Drop to add" : "Add a file"}</span>
+              <span class="hint">${atLimit ? `${prefs.max_files}/${prefs.max_files} files` : `click or drop · up to ${prefs.max_size_mb} MB · ${files.length}/${prefs.max_files}`}</span>
               <input ref=${fileInput} type="file" multiple style="display:none"
                 onChange=${(e) => { uploadFiles(e.target.files); e.target.value = ""; }} />
             </div>` : null}

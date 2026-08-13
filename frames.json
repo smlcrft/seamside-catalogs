@@ -19,13 +19,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/assignments.tar.gz",
       "package_sha256": "c44dece88ae76f078c53f687e7c633a4b24bc0044310513041cfc2f24588961a",
       "app_version_min": "0.2.5",
@@ -50,13 +43,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/bookmarks.tar.gz",
       "package_sha256": "95c0b8adf72baadb1abe75ba976c6165984abc16f865be7bf3fdd4b76e9f439e",
       "app_version_min": "0.2.5",
@@ -151,13 +137,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/chore_chart.tar.gz",
       "package_sha256": "001bea9d147f96cc7598c1316fe7e0f8caf8a1185990939411be434390c63fd8",
       "app_version_min": "0.2.5",
@@ -180,13 +159,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/class_schedule.tar.gz",
       "package_sha256": "cd41049e71258a7d9569f419790c4453e9fccb6274bf72a4f18f0dcf500fb167",
       "app_version_min": "0.2.5",
@@ -278,13 +250,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/family_budget.tar.gz",
       "package_sha256": "7613f1c5d10f3fb0a4cfb69be326be86c3d6191d14aa12dd4651055128496bd6",
       "app_version_min": "0.2.5",
@@ -299,7 +264,7 @@
       "name": "File Folder",
       "description": "A simple shared file bucket, unique per placement. Members (or just the owner \u2014 the owner chooses) can add files by clicking 'Add file' or dragging them in from the desktop. The owner sets who may add files, a max file size, and a max number of files. Anyone who can open the frame can list and download its files, so sharing the frame publicly shares the folder. Files live in the frame's own data folder in a per-placement subfolder; only the owner's sharing preferences are stored, in a single JSON file. No database or sync tables.",
       "icon": "",
-      "modified_at": "2026-08-04T21:00:00Z",
+      "modified_at": "2026-08-12T18:30:00Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 420,
@@ -308,7 +273,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/file_folder.tar.gz",
-      "package_sha256": "4d99301d9c69b73682b6afbec5f1227be834ebc18368bb6bfc45d567214cfc16",
+      "package_sha256": "d10ffc2966f658d8fb03a7f63752b31e1d969661ee1b99dba8b70f816b384008",
       "app_version_min": "0.2.5",
       "tags": [
         "everyday",
@@ -329,13 +294,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/flashcards.tar.gz",
       "package_sha256": "5c9f80b91004831d210bc35977274d2d89bdec10642e8601e4e47ae39a067071",
       "app_version_min": "0.2.5",
@@ -360,13 +318,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/focus_timer.tar.gz",
       "package_sha256": "1135a71ed7b6b23a00adc25bc4058d761c70aac82319a318423b54b6fa9e7d46",
       "app_version_min": "0.2.5",
@@ -489,18 +440,14 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/garden_planner.tar.gz",
+      "package_sha256": "c532ca69ec1cef7d72b1cfcbb25bb764c42bea2c1d5223394a649b3f6c6ca217",
       "permissions": {
         "net": [
           "api.open-meteo.com",
           "geocoding-api.open-meteo.com"
-        ],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
+        ]
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/garden_planner.tar.gz",
-      "package_sha256": "c532ca69ec1cef7d72b1cfcbb25bb764c42bea2c1d5223394a649b3f6c6ca217",
       "app_version_min": "0.2.5",
       "tags": [
         "household",
@@ -522,13 +469,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/gift_list.tar.gz",
       "package_sha256": "c46080a53c2e41e4fca210ba076a0a706483cb5126495e13ce00f7d8ef826ea3",
       "app_version_min": "0.2.5",
@@ -552,13 +492,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/grocery_list.tar.gz",
       "package_sha256": "41f57573f68cb711b6b2c9f8f1e35a1c1244e1aa32e5bbc4aca698e5cb17ad25",
       "app_version_min": "0.2.5",
@@ -581,13 +514,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/habit_tracker.tar.gz",
       "package_sha256": "a4785e8fc77c947aad2aa36596bcf7b92acc08feb91bc810330268f009f8238a",
       "app_version_min": "0.2.5",
@@ -712,13 +638,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/meal_planner.tar.gz",
       "package_sha256": "4cbc8d84096db4bb9a8e375bbfc1fa26fe1d75d675ea944cff912328ea0f14b6",
       "app_version_min": "0.2.5",
@@ -786,13 +705,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/notes.tar.gz",
       "package_sha256": "778471104ec56463da3ac8a9e12a299dca22f203d911e97783651775a153ff3b",
       "app_version_min": "0.2.5",
@@ -861,13 +773,6 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
-      "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
-      },
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/recipe_box.tar.gz",
       "package_sha256": "558e7015dd9f1b5daa0cd5ada4418e96be1d84682c1f7c4d76299a020803d247",
       "app_version_min": "0.2.5",
@@ -934,17 +839,13 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/rss_reader.tar.gz",
+      "package_sha256": "f9038f48252ba24bf868d1caaf972382ff650e7444a619c0a1f0c0ac56c7df84",
       "permissions": {
         "net": [
           "*"
-        ],
-        "web": [],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
+        ]
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/rss_reader.tar.gz",
-      "package_sha256": "f9038f48252ba24bf868d1caaf972382ff650e7444a619c0a1f0c0ac56c7df84",
       "app_version_min": "0.2.5",
       "tags": [
         "everyday",
@@ -1061,19 +962,16 @@
         "depends_on_capabilities": []
       },
       "capability_preview": null,
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/trip_planner.tar.gz",
+      "package_sha256": "a843cb697c1c9f7d171ef51f5d80ee6200d6f69c2705f1c2c7787b8bdabe3128",
       "permissions": {
         "net": [
           "nominatim.openstreetmap.org"
         ],
         "web": [
           "https://tiles.openfreemap.org"
-        ],
-        "web_scripts": [],
-        "microphone": false,
-        "camera": false
+        ]
       },
-      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/trip_planner.tar.gz",
-      "package_sha256": "a843cb697c1c9f7d171ef51f5d80ee6200d6f69c2705f1c2c7787b8bdabe3128",
       "app_version_min": "0.2.5",
       "tags": [
         "household",
