@@ -128,22 +128,25 @@
        see the week they are having, you cannot fill it in for them. Deliberately quieter
        than your own trail -- smaller pips, muted label, no hover -- because the card's
        subject is still your own run. Absent entirely when nobody else has marked. */
-    .crew { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
-    .crew-row { display: flex; align-items: center; gap: var(--os-sp-xs); }
-    .crew-name {
-      font-size: var(--os-fs-2xs); color: var(--os-text-muted);
-      flex: 0 0 auto; max-width: 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .crew-trail { display: flex; gap: var(--gap); align-items: center; }
+    .crew { display: flex; flex-direction: column; gap: 2px; margin-top: 5px; }
+    /* The pips column-align with the trail above them, which is the whole point of the
+       strip: one glance down a column is one day across the crew. So the row starts with
+       the pips at the same 9px/3px rhythm as .cell, and the name follows the way `best`
+       does -- a label in the gutter would have shifted every crew day out of line with
+       the day above it. */
+    .crew-row { display: flex; align-items: center; min-width: 0; overflow: hidden; }
+    .crew-trail { display: flex; gap: 3px; align-items: center; }
     .pip {
-      width: calc(var(--cell) * 0.6); height: calc(var(--cell) * 0.6);
-      border-radius: 2px; background: var(--os-bg-inset);
+      flex: 0 0 auto; width: 9px; height: 5px; border-radius: 2px;
+      background: var(--os-bg-inset);
     }
     .pip.on { background: color-mix(in srgb, var(--ch), transparent 55%); }
-    .crew-run { font-size: var(--os-fs-2xs); color: var(--os-text-muted); margin-left: auto; }
-    /* The crew is the first thing to go when the tile gets small: it is context, and the
-       day's action is not. Same breakpoints the trail already thins at. */
-    @media (max-height: 260px) { .crew { display: none; } }
+    .crew-name, .crew-run {
+      margin-left: var(--os-sp-sm); font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      white-space: nowrap;
+    }
+    .crew-name { max-width: 10ch; overflow: hidden; text-overflow: ellipsis; }
+    .crew-run { margin-left: var(--os-sp-xs); font-feature-settings: 'tnum' 1; }
 
     /* THE action. One per habit, unmissable, and the only thing on the card sized like a
        target — the previous version hid today inside a row of identical squares. */
@@ -172,6 +175,7 @@
       .card { gap: var(--os-sp-md); padding: var(--os-sp-md); }
       .fig { min-width: 40px; }
       .trail .cell:nth-child(-n+4) { display: none; }          /* ten days */
+      .crew-trail .pip:nth-child(-n+4) { display: none; }      /* the crew drops the same days */
     }
     @media (max-width: 380px) {
       .card { gap: var(--os-sp-sm); padding: var(--os-sp-sm) var(--os-sp-md); }
@@ -179,7 +183,9 @@
       .fig .n { font-size: 26px; }
       .h-name { font-size: var(--os-fs-base); }
       .trail .cell:nth-child(-n+7) { display: none; }          /* a week */
+      .crew-trail .pip:nth-child(-n+7) { display: none; }
       .trail .best { display: none; }
+      .crew-name { max-width: 6ch; }
       .today { width: 44px; height: 44px; }
       .today i { font-size: 20px; }
     }
@@ -188,6 +194,7 @@
       .fig .n { font-size: 22px; }
       .fig .unit { display: none; }
       .trail .cell:nth-child(-n+10) { display: none; }         /* four days */
+      .crew-trail .pip:nth-child(-n+10) { display: none; }
       .today { width: 38px; height: 38px; }
       .today i { font-size: 18px; }
     }
@@ -205,6 +212,7 @@
       main { padding: var(--os-sp-sm); gap: 4px; }
       .verdict { margin: 0 0 4px; }
       .trail { display: none; }
+      .crew { display: none; }                                 /* context goes before the action does */
       .card { padding: 6px var(--os-sp-md); gap: var(--os-sp-md); }
       .rows { gap: 6px; }
       .today { width: 36px; height: 36px; }
@@ -447,12 +455,12 @@
                               const oset = new Set(o.days);
                               return html`
                                 <div class="crew-row" key=${o.user_id}>
-                                  <span class="crew-name" title=${o.user_name || "someone"}>${o.user_name || "someone"}</span>
                                   <div class="crew-trail">
                                     ${trail.map((d) => html`<span key=${d}
                                       class=${"pip" + (oset.has(d) ? " on" : "")}
-                                      title=${o.user_name + " — " + d}></span>`)}
+                                      title=${(o.user_name || "someone") + " — " + d}></span>`)}
                                   </div>
+                                  <span class="crew-name" title=${o.user_name || "someone"}>${o.user_name || "someone"}</span>
                                   <span class="crew-run">${currentRun(oset, days)}</span>
                                 </div>`;
                             })}
