@@ -30,9 +30,16 @@ const HABITS_SCHEMA = [
 ];
 
 const MARKS_SCHEMA = [
-  { name: "habit_id", col_type: "text"    as const, nullable: false, default_val: "" },
-  { name: "day",      col_type: "text"    as const, nullable: false, default_val: "" },
-  { name: "made_ms",  col_type: "integer" as const, nullable: false, default_val: "0" },
+  { name: "habit_id",  col_type: "text"    as const, nullable: false, default_val: "" },
+  { name: "day",       col_type: "text"    as const, nullable: false, default_val: "" },
+  { name: "made_ms",   col_type: "integer" as const, nullable: false, default_val: "0" },
+  // WHO kept it. A mark is a person-day, not a placement-day: in a shared space the
+  // question is not "was this done" but "who is keeping it up", and a single row per
+  // habit-day cannot answer that. The name is denormalized because a frame has no
+  // member directory to look one up in, and a mark should still read as somebody's
+  // after they leave the space.
+  { name: "user_id",   col_type: "text"    as const, nullable: false, default_val: "" },
+  { name: "user_name", col_type: "text"    as const, nullable: false, default_val: "" },
 ];
 
 declareTables([
@@ -89,23 +96,57 @@ async function readAll(sfiId: string) {
   oldest.setDate(oldest.getDate() - WINDOW_DAYS);
   const cutoff = dayString(oldest.getTime());
 
-  const byHabit: Record<string, string[]> = {};
+  // habit -> person -> days. The person key is the user_id; "" is a mark made before
+  // this frame recorded who made it (see backfillLegacyMarks).
+  const byHabit: Record<string, Record<string, { name: string; days: string[] }>> = {};
   for (const m of mrows) {
     const day = String(m.day || "");
     if (day < cutoff) continue;            // outside the window the grid can draw
     const hid = String(m.habit_id || "");
-    (byHabit[hid] ||= []).push(day);
+    const uid = String(m.user_id || "");
+    const people = (byHabit[hid] ||= {});
+    const person = (people[uid] ||= { name: String(m.user_name || ""), days: [] });
+    if (!person.name && m.user_name) person.name = String(m.user_name);
+    person.days.push(day);
   }
   return {
     today: dayString(Date.now()),
     window_days: WINDOW_DAYS,
-    habits: hrows.map((h) => ({
-      id: h._row_id,
-      name: h.name,
-      sort_order: Number(h.sort_order) || 0,
-      days: (byHabit[String(h._row_id)] || []).sort(),
-    })),
+    habits: hrows.map((h) => {
+      const people = byHabit[String(h._row_id)] || {};
+      return {
+        id: h._row_id,
+        name: h.name,
+        sort_order: Number(h.sort_order) || 0,
+        // One series per person who has ever marked this habit. The client picks its
+        // own out by user_id; everyone else becomes a read-only trail beneath it.
+        series: Object.entries(people).map(([user_id, p]) => ({
+          user_id, user_name: p.name, days: p.days.sort(),
+        })),
+      };
+    }),
   };
+}
+
+/** Stamp marks made before this frame knew who made them.
+ *
+ * Runs only when an OWNER reads: their identity is the only honest answer for a mark
+ * from the single-user era, and waiting for real evidence beats guessing at read time
+ * or inventing a migration that runs with nobody's name to hand. One pass; after it
+ * there is nothing left to match. */
+async function backfillLegacyMarks(sfiId: string, peer: Peer): Promise<void> {
+  if (!peer.is_owner || !peer.user_id) return;
+  const marks = table("marks", sfiId);
+  // Scan and filter rather than `where: { user_id: "" }`: a row written before the
+  // column existed answers NULL, not the empty string, so the equality match finds
+  // nothing and the old marks stay stranded as "someone" forever.
+  const { rows } = await marks.query({ limit: 5000 });
+  const orphans = rows.filter((r) => !r.user_id);
+  if (!orphans.length) return;
+  for (const r of orphans) {
+    await marks.upsert(String(r._row_id), { user_id: peer.user_id, user_name: peer.user_name || "" });
+  }
+  log(`habit_tracker: attributed ${orphans.length} pre-multiuser mark(s) to the owner`);
 }
 
 function notify(sfiId: string) {
@@ -122,7 +163,9 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
 
   const ok = async (): Promise<WriteResult> => {
     notify(sfiId);
-    return { status: 200, body: await readAll(sfiId) };
+    // `me` rides along so a write's reply is a drop-in replacement for the list
+    // state — without it the client would lose track of which series is its own.
+    return { status: 200, body: { ...(await readAll(sfiId)), me: peer.user_id || "" } };
   };
 
   if (op === "habit") {
@@ -161,10 +204,16 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     const day = validDay(v?.day, today);
     if (!day) return { status: 400, body: { error: "bad day" } };
 
-    const { rows } = await marks.query({ where: { habit_id: hid, day }, limit: 2 });
+    // You mark your OWN square. The identity comes from the request, never from the
+    // body: a client that could name the user could fill in someone else's week.
+    const uid = peer.user_id || "";
+    const { rows } = await marks.query({ where: { habit_id: hid, day, user_id: uid }, limit: 2 });
     const want = !!v?.done;
     if (want && rows.length === 0) {
-      await marks.upsert(null, { habit_id: hid, day, made_ms: Date.now() });
+      await marks.upsert(null, {
+        habit_id: hid, day, made_ms: Date.now(),
+        user_id: uid, user_name: peer.user_name || "",
+      });
     } else if (!want) {
       for (const r of rows) await marks.delete(String(r._row_id));
     }
@@ -210,7 +259,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   if (!(await readyTables(peer))) return jsonReply(replyPort, 503, { error: "tables not ready" });
 
   if (reqPath === "/api/list" && method === "GET") {
-    return jsonReply(replyPort, 200, await readAll(sfiId));
+    await backfillLegacyMarks(sfiId, peer);
+    return jsonReply(replyPort, 200, { ...(await readAll(sfiId)), me: peer.user_id || "" });
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });
