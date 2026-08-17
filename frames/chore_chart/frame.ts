@@ -28,6 +28,9 @@ import {
   pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
   declareTables, ensureTables, table,
 } from "@frame-core";
+// Namespace import so features newer than the running host degrade to no-ops
+// instead of failing the module load (0.2.6 hosts lack forgetBinding).
+import * as frameCore from "@frame-core";
 
 // ----- Schema (the `chores` v1 contract — declared verbatim, one source of truth) -------
 const CHORES_SCHEMA = [
@@ -242,7 +245,14 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   // --- Data backend (owner-only): per-placement graduation local → shared -------------
   if (op === "data/graduate") {
     if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    if (settings.backend === "shared") return { status: 400, body: { error: "already shared" } };
+    if (settings.backend === "shared") {
+      // Re-point: only "adopt" makes sense once shared. Forget the current binding(s)
+      // so ensureTables re-fires the picker(s); pending "adopt" finishes on sight.
+      if (v?.mode !== "adopt") return { status: 400, body: { error: "already shared" } };
+      ensureSharedDecls();
+      frameCore.forgetBinding?.("chores_shared", sfiId);
+      wiredShared.delete(sfiId);
+    }
     settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";
     saveSettings(sfiId, settings);
     ensureSharedDecls();
@@ -398,12 +408,15 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   // Read — open to everyone (non-members get a read-only view of this placement's chart).
   // No seeding: an empty chart is an honest empty chart.
   if (reqPath === "/api/list" && method === "GET") {
+    const r = ensureTables({ ...peer, is_owner: false } as Peer);
     return jsonReply(replyPort, 200, {
       chores: await listRows(dataTable(sfiId, settings)),
       storage: {
         backend: settings.backend,
         pending: !!settings.pending_graduation,
         can_manage: peer.is_owner,
+        // bound shared table name(s) — app ≥ 0.2.7 supplies tableTitle; older hosts leave it unset
+        table_titles: settings.backend === "shared" ? [r.byKey["chores_shared"]?.tableTitle].filter((t): t is string => !!t) : [],
       },
     });
   }

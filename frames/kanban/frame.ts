@@ -25,6 +25,9 @@ import {
   pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
   declareTables, ensureTables, table,
 } from "@frame-core";
+// Namespace import so features newer than the running host degrade to no-ops
+// instead of failing the module load (0.2.6 hosts lack forgetBinding).
+import * as frameCore from "@frame-core";
 
 // ----- Schemas (one source of truth for the local AND shared declarations) --------------
 const COLUMNS_SCHEMA = [
@@ -256,7 +259,15 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   // --- Data backend (owner-only): per-placement graduation local → shared -------------
   if (op === "data/graduate") {
     if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    if (settings.backend === "shared") return { status: 400, body: { error: "already shared" } };
+    if (settings.backend === "shared") {
+      // Re-point: only "adopt" makes sense once shared. Forget both bindings so
+      // ensureTables re-fires the pickers (columns, then cards).
+      if (v?.mode !== "adopt") return { status: 400, body: { error: "already shared" } };
+      ensureSharedDecls();
+      frameCore.forgetBinding?.("columns_shared", sfiId);
+      frameCore.forgetBinding?.("cards_shared", sfiId);
+      wiredShared.delete(sfiId);
+    }
     settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";
     saveSettings(sfiId, settings);
     ensureSharedDecls();
@@ -465,12 +476,18 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
         });
       }
     }
+    // Name the bound shared tables (app ≥ 0.2.7 supplies tableTitle; older hosts leave it unset).
+    const r = ensureTables({ ...peer, is_owner: false } as Peer);
+    const tableTitles = settings.backend === "shared"
+      ? [r.byKey["columns_shared"]?.tableTitle, r.byKey["cards_shared"]?.tableTitle].filter((t): t is string => !!t)
+      : [];
     return jsonReply(replyPort, 200, {
       columns: await boardData(columns, cards),
       storage: {
         backend: settings.backend,
         pending: !!settings.pending_graduation,
         can_manage: peer.is_owner,
+        table_titles: tableTitles,
       },
     });
   }

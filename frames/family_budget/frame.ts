@@ -28,6 +28,9 @@ import {
   pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
   declareTables, ensureTables, table,
 } from "@frame-core";
+// Namespace import so features newer than the running host degrade to no-ops
+// instead of failing the module load (0.2.6 hosts lack forgetBinding).
+import * as frameCore from "@frame-core";
 
 // ----- Schemas (one source of truth for the local AND shared declarations) --------------
 const CATEGORIES_SCHEMA = [
@@ -282,7 +285,15 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   // --- Data backend (owner-only): per-placement graduation local → shared -------------
   if (op === "data/graduate") {
     if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    if (settings.backend === "shared") return { status: 400, body: { error: "already shared" } };
+    if (settings.backend === "shared") {
+      // Re-point: only "adopt" makes sense once shared. Forget the current binding(s)
+      // so ensureTables re-fires the picker(s); pending "adopt" finishes on sight.
+      if (v?.mode !== "adopt") return { status: 400, body: { error: "already shared" } };
+      ensureSharedDecls();
+      frameCore.forgetBinding?.("categories_shared", sfiId);
+      frameCore.forgetBinding?.("transactions_shared", sfiId);
+      wiredShared.delete(sfiId);
+    }
     settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";
     saveSettings(sfiId, settings);
     ensureSharedDecls();
@@ -483,6 +494,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
         await categories.upsert(null, { name, channel, is_income: isIncome, monthly_budget: 0 });
       }
     }
+    const r = ensureTables({ ...peer, is_owner: false } as Peer);
     return jsonReply(replyPort, 200, {
       month,
       settings: { currency: settings.currency || "$" },
@@ -490,6 +502,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
         backend: settings.backend,
         pending: !!settings.pending_graduation,
         can_manage: peer.is_owner,
+        // bound shared table name(s) — app ≥ 0.2.7 supplies tableTitle; older hosts leave it unset
+        table_titles: settings.backend === "shared" ? [r.byKey["categories_shared"]?.tableTitle, r.byKey["transactions_shared"]?.tableTitle].filter((t): t is string => !!t) : [],
       },
       ...(await monthData(categories, transactions, month)),
     });

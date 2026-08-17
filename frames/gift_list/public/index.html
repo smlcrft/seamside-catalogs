@@ -291,7 +291,18 @@
           return;
         }
         if (storage.backend === "shared") {
-          await frame.alert("These wishes live in a shared table, so other frames in this space can work with the same rows.", { title: "List data" });
+          const names = (storage.table_titles || []).map((t) => `"${t}"`).join(" and ");
+          const where = names ? `${names}, a shared table` : "a shared table";
+          const picked = frame.choose
+            ? await frame.choose(`These wishes live in ${where}, so other frames in this space can work with the same rows.`, {
+                title: "List data",
+                options: [
+                  { id: "adopt", label: "Use a different shared table", icon: "ph-plugs-connected",
+                    detail: "Point this at another table you already have" },
+                ],
+              })
+            : null;
+          if (picked === "adopt") { await write("api/data/graduate", { mode: "adopt" }).catch(() => null); refresh(); }
           return;
         }
         const mode = frame.choose

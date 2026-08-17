@@ -34,6 +34,9 @@ import {
   pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
   declareTables, ensureTables, table,
 } from "@frame-core";
+// Namespace import so features newer than the running host degrade to no-ops
+// instead of failing the module load (0.2.6 hosts lack forgetBinding).
+import * as frameCore from "@frame-core";
 
 // ----- Schema (the `wishes` v1 contract — declared verbatim, one source of truth) -------
 const WISHES_SCHEMA = [
@@ -213,7 +216,14 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   // --- Data backend (owner-only) ------------------------------------------------------
   if (op === "data/graduate") {
     if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    if (settings.backend === "shared") return { status: 400, body: { error: "already shared" } };
+    if (settings.backend === "shared") {
+      // Re-point: only "adopt" makes sense once shared. Forget the current binding(s)
+      // so ensureTables re-fires the picker(s); pending "adopt" finishes on sight.
+      if (v?.mode !== "adopt") return { status: 400, body: { error: "already shared" } };
+      ensureSharedDecls();
+      frameCore.forgetBinding?.("wishes_shared", sfiId);
+      wiredShared.delete(sfiId);
+    }
     settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";
     saveSettings(sfiId, settings);
     ensureSharedDecls();
@@ -355,6 +365,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
 
   // Read — open to everyone, redacted per viewer by listRows.
   if (reqPath === "/api/list" && method === "GET") {
+    const r = ensureTables({ ...peer, is_owner: false } as Peer);
     return jsonReply(replyPort, 200, {
       wishes: await listRows(dataTable(sfiId, settings), peer),
       me_name: peer.user_name,
@@ -362,6 +373,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
         backend: settings.backend,
         pending: !!settings.pending_graduation,
         can_manage: peer.is_owner,
+        // bound shared table name(s) — app ≥ 0.2.7 supplies tableTitle; older hosts leave it unset
+        table_titles: settings.backend === "shared" ? [r.byKey["wishes_shared"]?.tableTitle].filter((t): t is string => !!t) : [],
       },
     });
   }
