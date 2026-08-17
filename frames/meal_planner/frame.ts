@@ -26,6 +26,9 @@ import {
   pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
   declareTables, ensureTables, table,
 } from "@frame-core";
+// Namespace import so features newer than the running host degrade to no-ops
+// instead of failing the module load (0.2.6 hosts lack forgetBinding).
+import * as frameCore from "@frame-core";
 
 // ----- Contract schemas (verbatim from docs/schema-contracts.md; never vary these) ------
 const MEAL_PLAN_SCHEMA = [
@@ -70,6 +73,7 @@ const UNIT_SHARED: Record<Unit, string> = {
   plan: "meals_shared", recipes: "recipes_shared", grocery: "grocery_shared",
 };
 const sharedDeclsRegistered = new Set<Unit>();
+const SHARED_KEY: Record<Unit, string> = { plan: "meals_shared", recipes: "recipes_shared", grocery: "grocery_shared" };
 function ensureSharedDecls(unit: Unit): void {
   if (sharedDeclsRegistered.has(unit)) return;
   sharedDeclsRegistered.add(unit);
@@ -284,9 +288,15 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
     const unit = v?.unit as Unit;
     if (unit !== "plan" && unit !== "recipes" && unit !== "grocery") return { status: 400, body: { error: "bad unit" } };
-    if (settings[unit].backend === "shared") return { status: 400, body: { error: "already shared" } };
     const mode: GradMode = v?.mode === "adopt" ? "adopt" : "convert";
     if (unit !== "plan" && mode !== "adopt") return { status: 400, body: { error: "link units adopt only" } };
+    if (settings[unit].backend === "shared") {
+      // Re-point: only "adopt" once shared. Forget the unit's binding so ensureTables
+      // re-fires its picker; pending "adopt" finishes on sight.
+      if (mode !== "adopt") return { status: 400, body: { error: "already shared" } };
+      ensureSharedDecls(unit);
+      frameCore.forgetBinding?.(SHARED_KEY[unit], sfiId);
+    }
     settings[unit].pending_graduation = mode;
     saveSettings(sfiId, settings);
     ensureSharedDecls(unit);
@@ -309,7 +319,10 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     settings[unit].backend = "none";
     delete settings[unit].pending_graduation;
     saveSettings(sfiId, settings);
-    return ok(); // the platform binding remains and is harmless; standalone behavior returns
+    // Drop the platform binding too, so a later re-link re-fires the picker instead of
+    // silently reusing whatever table was bound before.
+    frameCore.forgetBinding?.(SHARED_KEY[unit], sfiId);
+    return ok();
   }
 
   // --- Send ingredients to the linked grocery list --------------------------------------
@@ -538,6 +551,12 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
         backend: settings.plan.backend,
         pending: !!settings.plan.pending_graduation,
         can_manage: peer.is_owner,
+        // bound shared table name per unit — app ≥ 0.2.7 supplies tableTitle; older hosts leave it unset
+        table_titles: (() => {
+          const r = ensureTables({ ...peer, is_owner: false } as Peer);
+          const t = (unit: Unit) => (settings[unit].backend === "shared" ? r.byKey[SHARED_KEY[unit]]?.tableTitle : undefined) ?? null;
+          return { plan: t("plan"), recipes: t("recipes"), grocery: t("grocery") };
+        })(),
       },
       links: { recipes: !!recipes, grocery: !!grocery },
       link_pending: {

@@ -23,8 +23,11 @@
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
   pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
-  declareTables, ensureTables, table, forgetBinding,
+  declareTables, ensureTables, table,
 } from "@frame-core";
+// Namespace import so features newer than the running host degrade to no-ops
+// instead of failing the module load (0.2.6 hosts lack forgetBinding).
+import * as frameCore from "@frame-core";
 
 // ----- Schemas (one source of truth for the local AND shared declarations) --------------
 const COLUMNS_SCHEMA = [
@@ -261,8 +264,8 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
       // ensureTables re-fires the pickers (columns, then cards).
       if (v?.mode !== "adopt") return { status: 400, body: { error: "already shared" } };
       ensureSharedDecls();
-      forgetBinding("columns_shared", sfiId);
-      forgetBinding("cards_shared", sfiId);
+      frameCore.forgetBinding?.("columns_shared", sfiId);
+      frameCore.forgetBinding?.("cards_shared", sfiId);
       wiredShared.delete(sfiId);
     }
     settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";

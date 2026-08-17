@@ -542,11 +542,13 @@
 
       async function onDrawer() {
         if (!frame.choose) return onPlanData();   // older chassis: the plan is the only surface
+        const tt = (w.storage && w.storage.table_titles) || {};
+        const named = (unit, fallback) => tt[unit] ? `in "${tt[unit]}"` : fallback;
         const planState = w.storage.pending ? "finishing a move to a shared table"
-                        : w.storage.backend === "shared" ? "in a shared table"
+                        : w.storage.backend === "shared" ? named("plan", "in a shared table")
                         : "on this device";
         const linkState = (unit, linked) => linkPending(unit) ? "waiting for the table picker"
-                        : linked ? "linked to a shared table" : "not linked";
+                        : linked ? (tt[unit] ? `linked to "${tt[unit]}"` : "linked to a shared table") : "not linked";
         const unit = await frame.choose("Where this planner keeps things, and what it borrows from other frames.", {
           title: "Data",
           options: [
@@ -570,7 +572,16 @@
           return;
         }
         if (w.storage.backend === "shared") {
-          await frame.alert("These planned meals live in a shared table, so other frames in this space can work with the same rows.", { title: "Planned meals" });
+          const tt = (w.storage.table_titles || {}).plan;
+          const where = tt ? `"${tt}", a shared table` : "a shared table";
+          const picked = await frame.choose(`These planned meals live in ${where}, so other frames in this space can work with the same rows.`, {
+            title: "Planned meals",
+            options: [
+              { id: "adopt", label: "Use a different shared table", icon: "ph-plugs-connected",
+                detail: "Point this plan at another table you already have" },
+            ],
+          });
+          if (picked === "adopt") { await write("api/data/graduate", { unit: "plan", mode: "adopt" }).catch(() => null); refresh(); }
           return;
         }
         const mode = frame.choose
@@ -598,10 +609,19 @@
           return;
         }
         if (linked) {
-          const un = await frame.confirm("Unlink the shared " + label + " table? This planner keeps working without it.", {
-            title: label, okLabel: "Unlink",
+          const tt = ((w.storage && w.storage.table_titles) || {})[unit];
+          const where = tt ? `"${tt}"` : "a shared " + label + " table";
+          const picked = await frame.choose("This planner is linked to " + where + ".", {
+            title: label,
+            options: [
+              { id: "relink", label: "Link a different table", icon: "ph-plugs-connected",
+                detail: "Pick another shared " + label + " table" },
+              { id: "unlink", label: "Unlink", icon: "ph-plugs",
+                detail: "This planner keeps working without it" },
+            ],
           });
-          if (un) { await write("api/data/unlink", { unit }).catch(() => null); refresh(); }
+          if (picked === "relink") { await write("api/data/graduate", { unit, mode: "adopt" }).catch(() => null); refresh(); }
+          if (picked === "unlink") { await write("api/data/unlink", { unit }).catch(() => null); refresh(); }
           return;
         }
         const yes = await frame.confirm("Link a shared " + label + " table? Pick the table the " + label + " frame already uses.", {
