@@ -118,9 +118,16 @@ as small as possible.)
   `frame.alert`). Branch on state, in this order:
   - **pending** → `frame.confirm("Stop the move to a shared table?")`, ok
     "Stop", cancel "Keep going" → `cancel_graduate`.
-  - **already shared** → `frame.alert` naming what lives in the shared table
-    and why it matters ("These recipes live in a shared table, so other frames
-    in this space can work with the same rows."). Informational, no options.
+  - **already shared** → `frame.choose` that **names the table** and offers
+    exactly one option, **"Use a different shared table"** (`ph-plugs-connected`)
+    → `graduate` with mode `adopt` (the frame calls `forgetBinding(key, sfi)`
+    first so the picker re-fires; its per-placement sidecar rebuilds on adopt).
+    Message: "These recipes live in "Reading list", a shared table, so other
+    frames in this space can work with the same rows." The title comes from
+    `ensureTables(peer).byKey[key].tableTitle` (app ≥ 0.2.7; on older hosts it
+    is undefined — say "a shared table"). Ratified 2026-08-16, replacing the
+    earlier informational-only alert: a user living on a shared table could not
+    tell WHICH table, and had no way to move the placement to another one.
   - **local** → `frame.choose` whose message states the current state in plain
     words ("These columns and cards live on this device.") and offers exactly
     two options: **"Move to a shared table"** (`ph-dresser`, detail "copies this
@@ -129,7 +136,8 @@ as small as possible.)
     have") → `graduate` with the picked mode; the platform's table picker takes
     it from there. Feature-detect `frame.choose` and fall back to a
     convert-only `frame.confirm` on older chassis (and set `app_version_min` to
-    the release that ships `frame.choose`).
+    the release that ships `frame.choose`). A frame that shows the bound table's
+    title or offers re-point needs `app_version_min` ≥ `0.2.7`.
 - **Auto-refire while pending.** If the owner dismissed the picker (or the app
   restarted), their next load of the main state route calls `ensureTables(peer)`
   so the picker comes back — no "reopen" button needed. Pending is an explicit
