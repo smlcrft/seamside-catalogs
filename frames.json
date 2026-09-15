@@ -55,6 +55,30 @@
     },
     {
       "kind": "Frames",
+      "id": "cafe_orders",
+      "name": "Cafe Orders",
+      "description": "Let people order from their phone. Share the frame's link and anyone can open the menu, build an order, leave a name and send it \u2014 no account, no app. Behind the counter the same frame is an order board: new orders arrive live, and staff move each one through making, ready and collected. The menu is yours to edit, items can be marked sold out mid-rush, and you can close ordering with one switch when the kitchen is under water. Payment is optional: by default people pay when they collect, and if you connect a Stripe capability the frame will take card payment on Stripe's own hosted checkout instead \u2014 card details never touch this frame or your devices. Orders live in an encrypted LocalTable scoped to the placement; the owner can move them to a shared space table.",
+      "icon": "",
+      "modified_at": "2026-08-08T00:00:00Z",
+      "frame_preview": {
+        "frame_type": "Tandem",
+        "default_width_px": 520,
+        "default_height_px": 640,
+        "depends_on_capabilities": []
+      },
+      "capability_preview": null,
+      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/cafe_orders.tar.gz",
+      "package_sha256": "ed9ca93c93a04db7c99876e7cac799e3daf51e8afed0b68418781921ca0aa1ff",
+      "app_version_min": "0.2.5",
+      "tags": [
+        "smallbiz",
+        "cafe",
+        "orders",
+        "public-share"
+      ]
+    },
+    {
+      "kind": "Frames",
       "id": "calendar",
       "name": "Calendar",
       "description": "A simple shared calendar, unique per placement. Space editors add events on a given day or set them to repeat weekly (for example every Mon/Wed/Fri at 3pm) until an end date or forever, each with an optional time, length, color, link, and note; everyone else sees a clean read-only view, including anyone the space owner shares the frame publicly with. Switch between a month grid and a week view with events laid out by time of day. Timed events are authored in your own time zone and automatically shifted to each viewer's local time, so everyone sees the right moment wherever they are. Recurring events can be deleted just for one day, from a day onward, or entirely, and an event's link opens in the native browser (or a new tab on the web). The view also adapts to its size \u2014 the full month/week views when there's room, and a compact upcoming-events agenda once the tile gets small, so it stays usable down to about 200\u00d7200. The whole calendar lives in a single JSON file in a per-placement folder. No database or sync tables.",

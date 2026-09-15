@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cafe Orders</title>
+  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <style>
+    :root { --ch: var(--os-c1); }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    /* the render root carries the height too, or `main { height: 100% }` resolves
+       against an auto-height div and the frame stops driving its own layout */
+    html, body, #app { height: 100%; }
+    body {
+      margin: 0; font-family: var(--os-font-sans); background: var(--os-bg);
+      color: var(--os-text); font-size: var(--os-fs-base);
+    }
+    main {
+      height: 100%; margin: 0 auto; position: relative;
+      display: flex; flex-direction: column; gap: var(--os-sp-md);
+      padding: clamp(var(--os-sp-md), 3vw, var(--os-sp-xl));
+    }
+    /* The customer is on a phone, held in one hand. The staff board is on a counter
+       tablet and wants the room. Two products, two measures. */
+    main.shop  { max-width: 520px; }
+    main.board { max-width: 1000px; }
+
+    /* ---- header rail --------------------------------------------------------------- */
+    .header { display: flex; align-items: center; gap: var(--os-sp-sm); flex: 0 0 auto; }
+    .header > i {
+      flex: 0 0 auto; width: 24px; height: 24px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 20px; line-height: 1; color: var(--ch);
+    }
+    .header h1 {
+      flex: 1 1 auto; min-width: 0; margin: 0;
+      font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); line-height: 24px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .header .mode {
+      flex: 0 0 auto; height: 24px; display: inline-flex; align-items: center;
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted); white-space: nowrap;
+    }
+    .iconbtn {
+      flex: 0 0 auto; width: 24px; height: 24px; padding: 0;
+      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--os-text-subtle); font-size: 16px; line-height: 1;
+      transition: color 150ms, background 150ms;
+    }
+    .iconbtn i { font-size: 16px; line-height: 1; color: inherit; width: auto; height: auto; }
+    .iconbtn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
+    .iconbtn:active { transform: scale(0.92); }
+    .iconbtn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    /* open / closed is the single most important fact on the page for a customer */
+    .status-line {
+      flex: 0 0 auto; display: flex; align-items: center; gap: var(--os-sp-xs);
+      font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: var(--os-radius-full); flex: 0 0 auto;
+      background: var(--ch);
+    }
+    .dot.shut { background: none; box-shadow: inset 0 0 0 1.5px var(--os-text-subtle); }
+
+    .banner {
+      display: flex; align-items: center; gap: var(--os-sp-xs);
+      background: var(--os-bg-inset); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); font-size: var(--os-fs-sm);
+      color: var(--os-text-secondary); flex: 0 0 auto;
+    }
+
+    /* ---- the menu ------------------------------------------------------------------- */
+    .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-bottom: var(--os-sp-sm); }
+    .cat {
+      font-size: 11px; font-weight: var(--os-weight-semibold); text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--os-text-muted);
+      margin: var(--os-sp-lg) 0 var(--os-sp-xs);
+    }
+    .scroll > .cat:first-child { margin-top: 0; }
+
+    .row {
+      display: flex; align-items: center; gap: var(--os-sp-md); min-width: 0;
+      padding: var(--os-sp-sm) var(--os-sp-xs); border-radius: var(--os-radius-sm);
+      transition: background 150ms;
+    }
+    .row + .row { border-top: 1px solid var(--os-border-color-subtle); }
+    .r-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .r-name { font-size: var(--os-fs-sm); word-break: break-word; }
+    .r-desc { font-size: var(--os-fs-2xs); color: var(--os-text-muted); word-break: break-word; }
+    .r-price {
+      flex: 0 0 auto; font-size: var(--os-fs-sm);
+      font-feature-settings: 'tnum' 1; color: var(--os-text-secondary); white-space: nowrap;
+    }
+    .row.out .r-name { color: var(--os-text-muted); text-decoration: line-through; }
+    .row.out .r-price { color: var(--os-text-muted); }
+    .outtag {
+      flex: 0 0 auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted);
+      background: var(--os-bg-inset); border-radius: var(--os-radius-full);
+      padding: 1px var(--os-sp-sm); white-space: nowrap;
+    }
+
+    /* the add control: a real target, thumb-sized, with the count living inside it */
+    .add-btn {
+      flex: 0 0 auto; min-width: 34px; height: 34px; padding: 0 var(--os-sp-sm);
+      border-radius: var(--os-radius-full); cursor: pointer;
+      background: none; border: 1.5px solid var(--os-border-color);
+      color: var(--os-text-secondary); font: inherit; font-size: var(--os-fs-sm);
+      display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+      transition: background 150ms, border-color 150ms, color 150ms, transform 80ms var(--os-ease-spring);
+    }
+    /* a typographic plus, not an icon glyph: at 34px it is crisper than the icon font,
+       it scales with the button, and it sits on the same baseline as the count that
+       replaces it once something is in the order */
+    .add-btn .glyph { font-size: 19px; line-height: 1; font-weight: 300; }
+    .add-btn:hover { border-color: var(--ch); color: var(--ch); }
+    .add-btn:active { transform: scale(0.9); }
+    .add-btn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    .add-btn.has {
+      background: var(--ch); border-color: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); font-feature-settings: 'tnum' 1;
+    }
+
+    /* ---- THE ONE FUN MOMENT: the cart bar --------------------------------------------
+       It lives in the thumb zone at the bottom of the phone and rises into place the
+       moment the order stops being empty, so the first tap visibly turns browsing into
+       ordering. Nothing else in the frame moves on its own. */
+    .cart {
+      position: sticky; bottom: 0; flex: 0 0 auto; z-index: 2;
+      display: flex; align-items: center; gap: var(--os-sp-md);
+      background: var(--ch); color: var(--ch-fg, var(--os-c1-fg));
+      border-radius: var(--os-radius-lg); padding: var(--os-sp-sm) var(--os-sp-md);
+      box-shadow: var(--os-shadow-md);
+      animation: cart-rise 260ms var(--os-ease-spring);
+    }
+    @keyframes cart-rise {
+      0%   { transform: translateY(120%); opacity: 0; }
+      100% { transform: translateY(0); opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) { .cart { animation: none; } }
+    .cart .count {
+      flex: 0 0 auto; min-width: 26px; height: 26px; padding: 0 6px;
+      border-radius: var(--os-radius-full);
+      background: color-mix(in srgb, var(--ch-fg, #fff), transparent 78%);
+      display: inline-flex; align-items: center; justify-content: center; font-size: var(--os-fs-sm); font-feature-settings: 'tnum' 1;
+    }
+    .cart .total {
+      flex: 1 1 auto; font-size: var(--os-fs-sm);
+      font-feature-settings: 'tnum' 1;
+    }
+    .cart .go {
+      flex: 0 0 auto; background: color-mix(in srgb, var(--ch-fg, #fff), transparent 80%);
+      color: inherit; border: 0; border-radius: var(--os-radius-md); cursor: pointer;
+      padding: var(--os-sp-sm) var(--os-sp-lg); font: inherit; font-size: var(--os-fs-sm);
+      font-weight: var(--os-weight-medium);
+      transition: filter 150ms, transform 80ms var(--os-ease-spring);
+    }
+    .cart .go:hover { filter: brightness(1.12); }
+    .cart .go:active { transform: scale(0.97); }
+    .cart .go:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    /* ---- the customer's own ticket, once placed -------------------------------------- */
+    .ticket {
+      flex: 0 0 auto; display: flex; align-items: center; gap: var(--os-sp-md);
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color);
+      border-radius: var(--os-radius-md); padding: var(--os-sp-md);
+    }
+    .ticket .ref {
+      flex: 0 0 auto; font-family: var(--os-font-mono); font-size: var(--os-fs-lg);
+      font-weight: var(--os-weight-semibold); color: var(--ch);
+    }
+    .ticket .what { flex: 1 1 auto; min-width: 0; font-size: var(--os-fs-sm); color: var(--os-text-secondary); }
+    .ticket .what b { color: var(--os-text); font-weight: var(--os-weight-medium); }
+
+    /* ---- the staff board ------------------------------------------------------------ */
+    .lane-head {
+      display: flex; align-items: baseline; gap: var(--os-sp-sm);
+      font-size: 11px; font-weight: var(--os-weight-semibold); text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--os-text-muted); margin-bottom: var(--os-sp-xs);
+    }
+    .tickets {
+      display: grid; align-content: start; gap: var(--os-sp-md);
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    }
+    .tk {
+      display: flex; flex-direction: column; gap: var(--os-sp-xs); min-width: 0;
+      background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle);
+      border-radius: var(--os-radius-md); padding: var(--os-sp-md);
+    }
+    .tk.making { border-color: var(--ch); }
+    .tk.ready  { background: color-mix(in srgb, var(--ch), var(--os-bg-surface) 92%); border-color: var(--ch); }
+    .tk-top { display: flex; align-items: baseline; gap: var(--os-sp-sm); min-width: 0; }
+    .tk-ref {
+      font-family: var(--os-font-mono); font-size: var(--os-fs-md);
+      font-weight: var(--os-weight-semibold); color: var(--ch);
+    }
+    .tk-who { flex: 1 1 auto; min-width: 0; font-size: var(--os-fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tk-when { flex: 0 0 auto; font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-feature-settings: 'tnum' 1; }
+    .tk-lines { font-size: var(--os-fs-sm); color: var(--os-text-secondary); display: flex; flex-direction: column; gap: 1px; }
+    .tk-lines span b { font-feature-settings: 'tnum' 1; color: var(--os-text); font-weight: var(--os-weight-medium); }
+    .tk-note { font-size: var(--os-fs-2xs); color: var(--os-text-muted); font-style: italic; }
+    .tk-foot { display: flex; align-items: center; gap: var(--os-sp-sm); margin-top: 2px; }
+    .tk-total {
+      flex: 1 1 auto; font-size: var(--os-fs-sm);
+      font-feature-settings: 'tnum' 1; color: var(--os-text-secondary);
+    }
+    .paidtag {
+      flex: 0 0 auto; font-size: var(--os-fs-2xs); border-radius: var(--os-radius-full);
+      padding: 1px var(--os-sp-sm); background: var(--ch); color: var(--ch-fg, var(--os-c1-fg));
+    }
+
+    .btn-primary {
+      background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); border: 0; cursor: pointer;
+      padding: var(--os-sp-sm) var(--os-sp-lg); border-radius: var(--os-radius-md);
+      font: inherit; font-size: var(--os-fs-sm); font-weight: var(--os-weight-medium);
+      display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+      transition: filter 150ms, transform 80ms var(--os-ease-spring);
+    }
+    .btn-primary i { font-size: 16px; line-height: 0; }
+    .btn-primary:hover { filter: brightness(1.08); }
+    .btn-primary:active { transform: scale(0.97); }
+    .btn-primary:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+    /* secondary: constant-total padding depress (PRECISION §4) — 8/16 rest, 9/7 pressed */
+    .btn-quiet {
+      background: none; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md);
+      padding: var(--os-sp-sm) var(--os-sp-md); cursor: pointer;
+      font: inherit; font-size: var(--os-fs-sm); color: var(--os-text-secondary);
+      display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+      transition: box-shadow 40ms ease, background 40ms ease, padding 40ms ease, color 150ms, border-color 150ms;
+    }
+    .btn-quiet i { font-size: 16px; line-height: 0; }
+    .btn-quiet:hover { color: var(--os-text); border-color: var(--os-text-subtle); background: var(--os-bg-subtle); }
+    .btn-quiet:active { padding: 9px var(--os-sp-md) 7px; background: var(--os-bg-inset); box-shadow: inset 0 2px 4px rgba(0,0,0,0.07); }
+    .btn-quiet:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
+
+    .toolbar { display: flex; align-items: center; gap: var(--os-sp-sm); flex: 0 0 auto; flex-wrap: wrap; }
+    .toolbar .spacer { flex: 1 1 auto; }
+    .seg { display: flex; flex: 0 0 auto; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md); overflow: hidden; }
+    .seg button {
+      border-radius: 0; min-width: 0; background: var(--os-bg); border: 0; cursor: pointer;
+      padding: var(--os-sp-sm) var(--os-sp-md); font: inherit; font-size: var(--os-fs-sm);
+      color: var(--os-text-secondary); transition: background 150ms, color 150ms;
+    }
+    .seg button + button { border-left: 1px solid var(--os-border-color); }
+    .seg button:hover:not(.active) { background: var(--os-bg-subtle); }
+    .seg button.active { background: var(--ch); color: var(--ch-fg, var(--os-c1-fg)); font-weight: var(--os-weight-medium); }
+
+    .add-strip {
+      display: flex; align-items: center; flex: 0 0 auto; width: 100%; max-width: 560px;
+      background: var(--os-bg-inset); border: 0; border-radius: var(--os-radius-md);
+      padding: 2px var(--os-sp-xs); transition: background 150ms, box-shadow 150ms;
+    }
+    .add-strip:focus-within { background: var(--os-bg-surface); box-shadow: inset 0 0 0 1px var(--os-border-color); }
+    .add-strip > i { color: var(--os-text-subtle); font-size: 14px; line-height: 0; flex: 0 0 auto; margin: 0 var(--os-sp-xs); }
+    .add-strip input {
+      display: block; border: 0; background: transparent; box-shadow: none; font: inherit;
+      font-size: var(--os-fs-sm); color: var(--os-text); padding: 6px var(--os-sp-sm);
+      width: 100%; min-width: 0;
+    }
+    .add-strip input:focus { outline: none; background: transparent; box-shadow: none; }
+    .add-strip input.f-name { flex: 1 1 0; width: auto; }
+    .add-strip input.f-price {
+      flex: 0 0 90px; width: 90px; text-align: right; font-feature-settings: 'tnum' 1;
+      border-left: 1px solid var(--os-border-color-subtle);
+    }
+
+    .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-xl); }
+    .notice {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: var(--os-sp-sm); text-align: center; padding: var(--os-sp-xl); flex: 1;
+    }
+    .notice i { font-size: 28px; color: var(--os-text-subtle); }
+    .notice p { margin: 0; font-size: var(--os-fs-sm); color: var(--os-text-secondary); max-width: 340px; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { frame, html, render, useState, useEffect, useFramePush, applyChannel } from "./lib/js/framelib.js";
+
+    // Money is integer cents on the wire and only ever becomes a string for display.
+    const money = (sym, cents) => sym + (Math.round(cents) / 100).toFixed(2);
+    const ago = (ms) => {
+      const m = Math.floor((Date.now() - ms) / 60000);
+      if (m < 1) return "just now";
+      if (m < 60) return m + "m";
+      return Math.floor(m / 60) + "h";
+    };
+    const NEXT = { new: "making", making: "ready", ready: "collected" };
+    const NEXT_LABEL = { new: "start", making: "ready", ready: "collected" };
+
+    function App() {
+      const [me, setMe]       = useState(null);
+      const [st, setSt]       = useState(null);
+      const [cart, setCart]   = useState({});      // { [itemId]: qty }
+      const [mine, setMine]   = useState(null);    // this customer's placed ticket
+      const [tab, setTab]     = useState("orders");
+      const [draft, setDraft] = useState({ name: "", price: "" });
+      const [busy, setBusy]   = useState(false);
+
+      async function refresh() {
+        const r = await frame.api("api/state").catch(() => null);
+        if (r) setSt(r);
+      }
+      const write = (path, body) => {
+        if (typeof frame.busSend === "function") {
+          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
+          return Promise.resolve({});
+        }
+        return frame.api(path, body);
+      };
+      useEffect(() => {
+        frame.api("api/whoami").then((m) => {
+          if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
+          setMe(m);
+        }).catch(() => setMe({}));
+        refresh();
+      }, []);
+      useFramePush({ cafe_changed: refresh });
+
+      // A customer watching their own ticket: poll it, because the push carries no
+      // per-order payload and their id is the only thing they hold.
+      useEffect(() => {
+        if (!mine || !mine.id) return;
+        const tick = async () => {
+          const r = await frame.api("api/order/" + mine.id).catch(() => null);
+          if (r && r.status) setMine((m) => m && { ...m, status: r.status, paid: r.paid });
+        };
+        const h = setInterval(tick, 5000);
+        tick();
+        return () => clearInterval(h);
+      }, [mine && mine.id]);
+
+      if (!me || !st) return html`<div></div>`;
+      const shop = st.shop;
+      const sym = shop.symbol || "$";
+      const isStaff = !!st.is_staff;
+
+      // ---------------------------------------------------------------- customer view
+      if (!isStaff) {
+        const lines = st.menu.filter((m) => cart[m.id]);
+        const count = lines.reduce((n, m) => n + cart[m.id], 0);
+        const total = lines.reduce((n, m) => n + cart[m.id] * m.price_cents, 0);
+
+        const bump = (m, d) => setCart((c) => {
+          const q = (c[m.id] || 0) + d;
+          const next = { ...c };
+          if (q <= 0) delete next[m.id]; else next[m.id] = q;
+          return next;
+        });
+
+        async function placeOrder() {
+          if (!count || busy) return;
+          const name = await frame.prompt("Who is this order for? We'll call the name out.", {
+            title: "Almost there", okLabel: "Place order", value: me.user_name || "",
+          });
+          if (name === null) return;
+          setBusy(true);
+          // The order goes over HTTP, not the bus: this is the one write whose RESULT the
+          // caller needs (the ref to read out, and a payment link when card is on), and
+          // busSend is deliberately one-way.
+          const r = await frame.api("api/order", {
+            items: lines.map((m) => ({ id: m.id, qty: cart[m.id] })),
+            customer_name: (name || "").trim(),
+            return_url: location.href,
+          }).catch(() => null);
+          setBusy(false);
+          if (!r || !r.ok) {
+            await frame.alert((r && r.error) || "That didn't go through. Try again in a moment.", { title: "Sorry" });
+            return;
+          }
+          setCart({});
+          setMine({ id: r.order_id, ref: r.ref, total_cents: r.total_cents, status: "new", paid: false });
+          if (r.pay_url && typeof frame.openExternalUrl === "function") frame.openExternalUrl(r.pay_url);
+        }
+
+        const cats = [...new Set(st.menu.map((m) => m.category || ""))];
+
+        return html`
+          <main class="shop">
+            <div class="header">
+              <i class="ph-light ph-coffee"></i>
+              <h1>${shop.shop_name}</h1>
+            </div>
+
+            <div class="status-line">
+              <span class=${"dot" + (shop.ordering_open ? "" : " shut")}></span>
+              <span>${shop.ordering_open ? "taking orders" : "not taking orders right now"}</span>
+            </div>
+
+            ${mine ? html`
+              <div class="ticket">
+                <span class="ref">${mine.ref}</span>
+                <span class="what">
+                  ${mine.status === "ready" ? html`<b>Ready — come and get it.</b>`
+                    : mine.status === "collected" ? "Collected. Thanks!"
+                    : mine.status === "making" ? html`<b>We're making it.</b>`
+                    : mine.status === "cancelled" ? "This order was cancelled."
+                    : "Order received."}
+                  ${" "}${money(sym, mine.total_cents)}${mine.paid ? " · paid" : ""}
+                </span>
+              </div>` : null}
+
+            ${!shop.ordering_open && !mine ? html`
+              <div class="banner">
+                <i class="ph-light ph-moon"></i>
+                <span>${shop.pickup_note || "Back soon."}</span>
+              </div>` : null}
+
+            <div class="scroll">
+              ${st.menu.length === 0
+                ? html`<div class="empty">Nothing on the menu yet.</div>`
+                : cats.map((c) => html`
+                  <div key=${c || "_"}>
+                    ${c ? html`<div class="cat">${c}</div>` : null}
+                    ${st.menu.filter((m) => (m.category || "") === c).map((m) => html`
+                      <div class=${"row" + (m.sold_out ? " out" : "")} key=${m.id}>
+                        <div class="r-body">
+                          <span class="r-name">${m.name}</span>
+                          ${m.description ? html`<span class="r-desc">${m.description}</span>` : null}
+                        </div>
+                        <span class="r-price">${money(sym, m.price_cents)}</span>
+                        ${m.sold_out
+                          ? html`<span class="outtag">sold out</span>`
+                          : (shop.ordering_open ? html`
+                            <button class=${"add-btn" + (cart[m.id] ? " has" : "")}
+                              title=${cart[m.id] ? "One more" : "Add to order"}
+                              onClick=${() => bump(m, 1)}
+                              onContextMenu=${(e) => { e.preventDefault(); bump(m, -1); }}>
+                              ${cart[m.id] ? cart[m.id] : html`<span class="glyph">+</span>`}
+                            </button>` : null)}
+                      </div>
+                    `)}
+                  </div>
+                `)}
+            </div>
+
+            ${count > 0 ? html`
+              <div class="cart">
+                <span class="count">${count}</span>
+                <span class="total">${money(sym, total)}</span>
+                <button class="go" disabled=${busy} onClick=${placeOrder}>
+                  ${busy ? "sending…" : "place order"}
+                </button>
+              </div>` : null}
+          </main>`;
+      }
+
+      // ------------------------------------------------------------------- staff view
+      const orders = st.orders || [];
+      const live = orders.filter((o) => o.status === "new" || o.status === "making" || o.status === "ready");
+      const done = orders.filter((o) => o.status === "collected" || o.status === "cancelled");
+      const mode = st.is_owner ? "owner" : "editor";
+
+      async function onShop() {
+        const what = await frame.choose(shop.shop_name, {
+          title: "Shop",
+          options: [
+            { id: "toggle", label: shop.ordering_open ? "Stop taking orders" : "Start taking orders",
+              icon: shop.ordering_open ? "ph-moon" : "ph-sun",
+              detail: shop.ordering_open ? "The menu stays up, the buttons go away" : "Customers can order again" },
+            { id: "name", label: "Shop name", icon: "ph-pencil-simple", detail: shop.shop_name },
+            { id: "note", label: "Closed message", icon: "ph-chat-text", detail: shop.pickup_note || "none" },
+            { id: "pay", label: "Payment", icon: "ph-credit-card",
+              detail: shop.payment_mode === "stripe" ? "card, via Stripe" : "pay at the counter" },
+          ],
+        });
+        if (what === "toggle") write("api/shop", { ordering_open: !shop.ordering_open });
+        else if (what === "name") {
+          const v = await frame.prompt("Shop name", { title: "Shop", value: shop.shop_name, okLabel: "Save" });
+          if (v && v.trim()) write("api/shop", { shop_name: v.trim() });
+        } else if (what === "note") {
+          const v = await frame.prompt("Shown when you're not taking orders.", { title: "Closed message", value: shop.pickup_note, okLabel: "Save" });
+          if (v !== null) write("api/shop", { pickup_note: v.trim() });
+        } else if (what === "pay") {
+          const m = await frame.choose("How do people pay?", {
+            title: "Payment",
+            options: [
+              { id: "counter", label: "At the counter", icon: "ph-storefront", detail: "Cash or card when they collect" },
+              { id: "stripe", label: "Card, before collecting", icon: "ph-credit-card",
+                detail: "Needs a Stripe capability connected" },
+            ],
+          });
+          if (m) write("api/shop", { payment_mode: m });
+        }
+      }
+
+      function addItem() {
+        const name = draft.name.trim();
+        if (!name) return;
+        // Typed as "3.50", stored as 350. Parse to cents by hand rather than multiplying
+        // a float by 100, which turns 3.35 into 334.99999999999994.
+        const cleaned = draft.price.replace(/[^0-9.]/g, "");
+        const [whole, frac = ""] = cleaned.split(".");
+        const cents = (parseInt(whole || "0", 10) * 100) + parseInt((frac + "00").slice(0, 2), 10);
+        write("api/item", { name, price_cents: Number.isFinite(cents) ? cents : 0 });
+        setDraft({ name: "", price: "" });
+      }
+
+      return html`
+        <main class="board">
+          <div class="header">
+            <i class="ph-light ph-coffee"></i>
+            <h1>${shop.shop_name}</h1>
+            <span class="mode">${mode}</span>
+            ${st.is_owner ? html`
+              <button class="iconbtn" title="Shop settings" onClick=${onShop}>
+                <i class="ph-light ph-gear-six"></i>
+              </button>` : null}
+          </div>
+
+          <div class="toolbar">
+            <div class="seg" role="tablist">
+              <button role="tab" aria-selected=${tab === "orders"} class=${tab === "orders" ? "active" : ""}
+                onClick=${() => setTab("orders")}>orders${live.length ? " · " + live.length : ""}</button>
+              <button role="tab" aria-selected=${tab === "menu"} class=${tab === "menu" ? "active" : ""}
+                onClick=${() => setTab("menu")}>menu</button>
+            </div>
+            <span class="spacer"></span>
+            <div class="status-line">
+              <span class=${"dot" + (shop.ordering_open ? "" : " shut")}></span>
+              <span>${shop.ordering_open ? "open" : "closed"}</span>
+            </div>
+            ${tab === "orders" && done.length ? html`
+              <button class="btn-quiet" onClick=${() => write("api/orders/clear_done")}>
+                <i class="ph-light ph-broom"></i>clear ${done.length} done</button>` : null}
+          </div>
+
+          ${tab === "orders" ? html`
+            <div class="scroll">
+              ${live.length === 0 && done.length === 0
+                ? html`<div class="notice">
+                    <i class="ph-light ph-receipt"></i>
+                    <p>No orders yet. Share this frame's link and they'll land here.</p>
+                  </div>`
+                : html`
+                  <div class="lane-head"><span>working</span><span>${live.length}</span></div>
+                  ${live.length === 0 ? html`<div class="empty">Nothing on the go.</div>` : html`
+                    <div class="tickets">
+                      ${live.map((o) => html`
+                        <div class=${"tk " + o.status} key=${o.id}>
+                          <div class="tk-top">
+                            <span class="tk-ref">${o.ref}</span>
+                            <span class="tk-who">${o.customer_name}</span>
+                            <span class="tk-when">${ago(o.placed_ms)}</span>
+                          </div>
+                          <div class="tk-lines">
+                            ${o.items.map((l, i) => html`<span key=${i}><b>${l.qty}</b> ${l.name}</span>`)}
+                          </div>
+                          ${o.note ? html`<div class="tk-note">${o.note}</div>` : null}
+                          <div class="tk-foot">
+                            <span class="tk-total">${money(sym, o.total_cents)}</span>
+                            ${o.paid ? html`<span class="paidtag">paid</span>` : null}
+                            <button class="btn-primary" onClick=${() => write("api/order/" + o.id + "/status", { status: NEXT[o.status] })}>
+                              ${NEXT_LABEL[o.status]}
+                            </button>
+                          </div>
+                        </div>
+                      `)}
+                    </div>`}
+                `}
+            </div>` : null}
+
+          ${tab === "menu" ? html`
+            <div class="add-strip">
+              <i class="ph-light ph-plus"></i>
+              <input class="f-name" maxlength="120" placeholder="Add something to the menu…" value=${draft.name}
+                onInput=${(e) => setDraft({ ...draft, name: e.target.value })}
+                onKeyDown=${(e) => { if (e.key === "Enter") addItem(); }} />
+              <input class="f-price" inputmode="decimal" placeholder="0.00" value=${draft.price}
+                onInput=${(e) => setDraft({ ...draft, price: e.target.value })}
+                onKeyDown=${(e) => { if (e.key === "Enter") addItem(); }} />
+            </div>
+            <div class="scroll">
+              ${st.menu.length === 0
+                ? html`<div class="empty">The menu is empty. Add the first thing above.</div>`
+                : st.menu.map((m) => html`
+                  <div class=${"row" + (m.sold_out ? " out" : "")} key=${m.id}>
+                    <div class="r-body">
+                      <span class="r-name">${m.name}</span>
+                      ${m.description ? html`<span class="r-desc">${m.description}</span>` : null}
+                    </div>
+                    <span class="r-price">${money(sym, m.price_cents)}</span>
+                    <button class="btn-quiet" title=${m.sold_out ? "Put it back on" : "Mark it sold out"}
+                      onClick=${() => write("api/item/" + m.id, { sold_out: m.sold_out ? 0 : 1 })}>
+                      ${m.sold_out ? "back on" : "sold out"}
+                    </button>
+                    <button class="iconbtn" title="Remove from the menu"
+                      onClick=${async () => {
+                        if (await frame.confirm(`Remove "${m.name}" from the menu?`, { title: "Menu", okLabel: "Remove" }))
+                          write("api/item/" + m.id + "/delete");
+                      }}>
+                      <i class="ph-light ph-trash-simple"></i>
+                    </button>
+                  </div>
+                `)}
+            </div>` : null}
+        </main>`;
+    }
+
+    render(html`<${App} />`, document.getElementById("app"));
+  </script>
+</body>
+</html>
