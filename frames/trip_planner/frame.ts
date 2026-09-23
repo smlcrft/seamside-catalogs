@@ -6,26 +6,26 @@
 //                                           space editors get the interactive planner.
 //                                           The read-only itinerary is the showcase: a
 //                                           share link is the trip's handout.
-//   data_storage:   storage-local-db     — LocalTables: encrypted at rest on the host
-//                                           device, scoped per placement so each placement
-//                                           is its own independent set of trips.
+//   data_storage:   the space's tables   — trips.table.jsonl plus trip_itinerary /
+//                                           trip_packing / trip_expenses rows keyed by
+//                                           trip_id, at the space's root: synced with it
+//                                           and shared by every Trip Planner in the space.
 //   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so all viewers of the placement refresh live.
-//   settings_scope: settings-per-sfi      — table bindings are keyed by peer.sfi_id.
+//                                           so every viewer refreshes live.
 //
-// Four tables: trips, plus itinerary / packing / expenses rows keyed by trip_id.
+// The page has no network of its own, so the map's style, tiles, glyphs and sprites come
+// through this worker from tiles.openfreemap.org (see /tiles/ below).
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
   pushToInstance, sanitizeText,
-  declareTables, ensureTables, table,
+  declareTables, table,
 } from "@frame-core";
 
-// ----- LocalTables (encrypted, per-placement — no ceremony, no graduation) --------------
+// ----- The space's tables (named for the trip, so no other frame's rows land in them) -----
 declareTables([
   {
-    key: "trips", title: "Trips", description: "Trips for this placement's planner.",
-    local: true,
+    key: "trips", title: "Trips", description: "Trips planned in this space.",
     schema: [
       { name: "name",        col_type: "text",    nullable: false, default_val: "" },
       { name: "destination", col_type: "text",    nullable: false, default_val: "" },
@@ -36,8 +36,7 @@ declareTables([
     ],
   },
   {
-    key: "itinerary", title: "Trip Itinerary", description: "Itinerary entries, keyed by trip.",
-    local: true,
+    key: "trip_itinerary", title: "Trip Itinerary", description: "Itinerary entries, keyed by trip.",
     schema: [
       { name: "trip_id",    col_type: "text",    nullable: false, default_val: "" },
       { name: "day_date",   col_type: "text",    nullable: false, default_val: "" },
@@ -55,8 +54,7 @@ declareTables([
     ],
   },
   {
-    key: "packing", title: "Trip Packing", description: "Packing list items, keyed by trip.",
-    local: true,
+    key: "trip_packing", title: "Trip Packing", description: "Packing list items, keyed by trip.",
     schema: [
       { name: "trip_id",  col_type: "text",    nullable: false, default_val: "" },
       { name: "item",     col_type: "text",    nullable: false, default_val: "" },
@@ -65,8 +63,7 @@ declareTables([
     ],
   },
   {
-    key: "expenses", title: "Trip Expenses", description: "Trip costs, keyed by trip.",
-    local: true,
+    key: "trip_expenses", title: "Trip Expenses", description: "Trip costs, keyed by trip.",
     schema: [
       { name: "trip_id",     col_type: "text", nullable: false, default_val: "" },
       { name: "description", col_type: "text", nullable: false, default_val: "" },
@@ -80,24 +77,6 @@ declareTables([
 type Tbl = ReturnType<typeof table>;
 type Peer = ReturnType<typeof parsePeerInfo>;
 
-const TABLE_KEYS = ["trips", "itinerary", "packing", "expenses"];
-
-/** ensureTables, but QUIET and with local tables awaited.
- * Quiet: is_owner stripped, so no passive path can ever fire an owner-facing binding
- * modal. Awaited: a fresh placement's local self-ensure is async, so touch missing
- * local tables with a no-op query, then re-read. */
-async function readyLocalTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  const missing = TABLE_KEYS.filter((k) => !r.byKey[k]);
-  if (missing.length) {
-    for (const k of missing) {
-      try { await table(k, peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`trip_planner: ensure "${k}" failed: ${e}`); }
-    }
-    r = ensureTables(quiet);
-  }
-  return TABLE_KEYS.every((k) => !!r.byKey[k]);
-}
 
 // ----- Helpers --------------------------------------------------------------------------
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -177,6 +156,42 @@ function geocodeSoon(sfiId: string, rowId: string, location: string, itinerary: 
   })().catch(() => {});
 }
 
+// ----- Map tiles ------------------------------------------------------------------------
+// OpenFreeMap is free and unmetered, but every viewer's pan and zoom costs it requests, so
+// what this worker fetched is kept a while in memory (shared by every space and viewer).
+const TILE_HOST = "https://tiles.openfreemap.org/";
+const TILE_TTL_MS = 6 * 60 * 60 * 1000;
+const TILE_CACHE_MAX = 600;
+const tileCache = new Map<string, { at: number; status: number; type: string; bytes: Uint8Array }>();
+
+async function serveTile(
+  replyPort: { postMessage(m: { status: number; body?: Uint8Array | string; contentType?: string; headers?: Record<string, string> }): void },
+  path: string, query: Record<string, string>,
+): Promise<void> {
+  if (!/^[A-Za-z0-9_.@{}\-\/ %,]+$/.test(path) || path.includes("..")) {
+    return replyPort.postMessage({ status: 400, body: "bad path", contentType: "text/plain" });
+  }
+  const qs = new URLSearchParams(query).toString();
+  const key = path + (qs ? "?" + qs : "");
+  const hit = tileCache.get(key);
+  if (hit && Date.now() - hit.at < TILE_TTL_MS) {
+    return replyPort.postMessage({ status: hit.status, body: hit.bytes, contentType: hit.type, headers: { "Cache-Control": "private, max-age=3600" } });
+  }
+  try {
+    const res = await fetch(TILE_HOST + key, { headers: { "User-Agent": GEO_UA } });
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const type = res.headers.get("content-type") ?? "application/octet-stream";
+    // A tile past the data's edge is an honest 404 (maplibre draws nothing there); keep it too.
+    if (res.ok || res.status === 404) {
+      if (tileCache.size >= TILE_CACHE_MAX) tileCache.delete(tileCache.keys().next().value!);
+      tileCache.set(key, { at: Date.now(), status: res.status, type, bytes });
+    }
+    replyPort.postMessage({ status: res.status, body: bytes, contentType: type, headers: { "Cache-Control": "private, max-age=3600" } });
+  } catch {
+    replyPort.postMessage({ status: 502, body: "map tiles unreachable", contentType: "text/plain" });
+  }
+}
+
 function notify(sfiId: string) {
   pushToInstance(sfiId, { type: "trip_changed" });
 }
@@ -184,9 +199,9 @@ function notify(sfiId: string) {
 function dataTables(sfiId: string) {
   return {
     trips: table("trips", sfiId),
-    itinerary: table("itinerary", sfiId),
-    packing: table("packing", sfiId),
-    expenses: table("expenses", sfiId),
+    itinerary: table("trip_itinerary", sfiId),
+    packing: table("trip_packing", sfiId),
+    expenses: table("trip_expenses", sfiId),
   };
 }
 
@@ -275,11 +290,6 @@ async function tripDetail(sfiId: string, id: string) {
 type WriteResult = { status: number; body: unknown };
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  // Local tables resolve with zero ceremony; awaiting keeps a fresh placement's first
-  // request from racing the self-ensure. Quiet — see readyLocalTables.
-  if (!(await readyLocalTables(peer))) {
-    return { status: 503, body: { error: "table not ready" } };
-  }
   const { trips, itinerary, packing, expenses } = dataTables(sfiId);
 
   // Every op below mutates state and is editor-only. Non-members AND Viewer-role
@@ -338,7 +348,7 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     const dayDate = cleanDate(v?.day_date);
     const sortOrder = Number(await itinerary.max("sort_order", { trip_id: tripId, day_date: dayDate }) ?? -1) + 1;
     const location = sanitizeText(v?.location, 120);
-    const rowId = await itinerary.upsert(null, {
+    const { row_id: rowId } = await itinerary.upsert(null, {
       trip_id: tripId, day_date: dayDate,
       time: sanitizeText(v?.time, 24), activity,
       location, sort_order: sortOrder,
@@ -485,6 +495,12 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   const peer = parsePeerInfo(query, cookies);
   const sfiId = peer.sfi_id;
 
+  // The map's tiles, style, glyphs and sprites, fetched here for the page (which has no
+  // network). The page rewrites every tiles.openfreemap.org URL to /tiles/<same path>.
+  if (method === "GET" && reqPath.startsWith("/tiles/")) {
+    return serveTile(replyPort, reqPath.slice("/tiles/".length), query);
+  }
+
   // Static assets — open to everyone, including anon read-only viewers.
   if (method === "GET" && !reqPath.startsWith("/api/")) {
     return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
@@ -509,15 +525,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, r.status, r.body);
   }
 
-  // Local tables resolve with zero ceremony; awaiting keeps a fresh placement's first
-  // request from racing the self-ensure. Quiet — see readyLocalTables.
-  if (!(await readyLocalTables(peer))) {
-    return jsonReply(replyPort, 503, { error: "table not ready" });
-  }
-
-  // Reads — open to everyone (non-members get a read-only view of this placement's
-  // trips). No seeding, on purpose: a fresh placement is an honest empty state, and a
-  // GET never mutates.
+  // Reads — open to everyone (non-members get a read-only view of the space's trips).
+  // No seeding, on purpose: a fresh space is an honest empty state, and a GET never
+  // mutates.
   if (reqPath === "/api/trips" && method === "GET") {
     return jsonReply(replyPort, 200, { trips: await tripsList(sfiId) });
   }

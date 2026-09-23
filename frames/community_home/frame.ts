@@ -6,10 +6,9 @@
 //   - Space editor — sees an admin builder UI (title, sections, links)
 //     with a "preview" toggle that renders the same public view.
 //
-// Storage is LocalTables (encrypted at rest, host-local, not peer-synced), scoped per
-// placement — the same frame can be placed multiple times in one space (or across many
-// spaces) and each placement owns its own content. Realtime edits are fanned out to every
-// live viewer of the placement via pushToInstance(sfi_id, …).
+// The page's blocks are the space's table community_home_blocks and its title/tagline are
+// frameSettings rows, so each space has one page, synced with it. Realtime edits are fanned
+// out to every live viewer via pushToInstance(sfi_id, …).
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, serveHtmlShell, pushToInstance, parsePeerInfo, onUiMessage,
@@ -17,16 +16,15 @@ import {
 } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
-// LOCALTABLES — per-placement (no sfi_id columns needed).
+// THE SPACE'S TABLE — named for this frame, so no other frame's rows land in it.
 // ----------------------------------------------------------------------------------------
 declareTables([
   {
     // Unified page-content table. Lets admins mix sections, links, and pub_frame embeds
     // in any order. The per-kind columns stay empty for kinds that don't use them.
-    key: "blocks",
+    key: "community_home_blocks",
     title: "Community Home Blocks",
-    description: "Sections, links, and public-frame embeds, in display order.",
-    local: true,
+    description: "Sections, links, and public-frame links, in display order.",
     schema: [
       { name: "kind",       col_type: "text",    nullable: false, default_val: "section" },
       { name: "heading",    col_type: "text",    nullable: false, default_val: "" },
@@ -50,7 +48,7 @@ type Settings = ReturnType<typeof frameSettings>;
 const VALID_FORMATS = new Set(["text", "html"]);
 const VALID_KINDS = new Set(["section", "link", "pub_frame"]);
 
-// Reject javascript:/data:/file: URLs so pub_frame iframe srcs can't run scripts in the parent context.
+// Only http(s) links on the page: never javascript:/data:/file:.
 function isSafeUrl(u: string): boolean {
   return /^https?:\/\//i.test(u.trim());
 }
@@ -74,29 +72,36 @@ function clampStr(v: unknown, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-// Page-level settings (title / tagline / updated_at) live in the
-// per-placement frameSettings store — one row per key, race-free. The default
-// "About us" block is seeded once, gated on the "seeded" setting marker.
+// Page-level settings (title / tagline / updated_at) are frameSettings rows of the space —
+// a store every frame in the space shares, so each key carries this frame's name. The
+// default page is seeded once, by the first editor to open it (v1 writes a worker's rows
+// as the person it answers, so a reader could not); until then readers see it unseeded.
 const SEED_BLOCK_ROW = "seed_about"; // fixed id so a concurrent first-load can't duplicate it
+const K = (k: string) => `community_home_${k}`;
+const SEED = {
+  title: "Welcome to our community",
+  tagline: "A place for updates, links, and news.",
+  block: {
+    kind: "section", heading: "About us",
+    body: "Tell visitors what your community is about. Edit this text, the title and the tagline, and add sections and links in any order.",
+    format: "text", sort_order: 0,
+  },
+};
 
 async function ensurePage(settings: Settings, blocks: Tbl): Promise<void> {
-  if (await settings.get("seeded")) return;
-  await settings.set("seeded", true);
-  await settings.set("title", "Welcome to our community");
-  await settings.set("tagline", "A place for updates, links, and news.");
-  await settings.set("updated_at", Date.now());
-  await blocks.upsert(SEED_BLOCK_ROW, {
-    kind: "section", heading: "About us",
-    body: "Tell visitors what your community is about. Use the edit panel on the left to change this text, update the title, and add sections, links, or public-frame embeds in any order.",
-    format: "text", sort_order: 0,
-  });
+  if (await settings.get(K("seeded"))) return;
+  await settings.set(K("seeded"), true);
+  await settings.set(K("title"), SEED.title);
+  await settings.set(K("tagline"), SEED.tagline);
+  await settings.set(K("updated_at"), Date.now());
+  await blocks.upsert(SEED_BLOCK_ROW, SEED.block);
 }
 
 async function getPage(settings: Settings, blocks: Tbl) {
   const [title, tagline, updatedAt] = await Promise.all([
-    settings.get<string>("title"),
-    settings.get<string>("tagline"),
-    settings.get<number>("updated_at"),
+    settings.get<string>(K("title")),
+    settings.get<string>(K("tagline")),
+    settings.get<number>(K("updated_at")),
   ]);
   const { rows } = await blocks.query({
     order_by: [{ col: "sort_order" }, { col: "_created_at" }],
@@ -113,7 +118,7 @@ async function getPage(settings: Settings, blocks: Tbl) {
 }
 
 async function touchPage(settings: Settings): Promise<void> {
-  await settings.set("updated_at", Date.now());
+  await settings.set(K("updated_at"), Date.now());
 }
 
 async function broadcast(sfiId: string, settings: Settings, blocks: Tbl): Promise<void> {
@@ -136,19 +141,19 @@ async function handleWrite(
 ): Promise<WriteResult> {
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "forbidden" } };
   const settings = frameSettings(sfiId);
-  const blocks = table("blocks", sfiId);
+  const blocks = table("community_home_blocks", sfiId);
   await ensurePage(settings, blocks);
 
   // Update top-level page settings (title / tagline).
   if (op === "admin/page") {
     if (!data) return { status: 400, body: { error: "invalid body" } };
     if (typeof data.title === "string") {
-      await settings.set("title", clampStr(data.title, MAX_TITLE));
+      await settings.set(K("title"), clampStr(data.title, MAX_TITLE));
     }
     if (typeof data.tagline === "string") {
-      await settings.set("tagline", clampStr(data.tagline, MAX_TAGLINE));
+      await settings.set(K("tagline"), clampStr(data.tagline, MAX_TAGLINE));
     }
-    await settings.set("updated_at", Date.now());
+    await settings.set(K("updated_at"), Date.now());
     await broadcast(sfiId, settings, blocks);
     return { status: 200, body: { ok: true } };
   }
@@ -294,16 +299,17 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
       }
       return send({ error: "sfi_id missing" }, 400);
     }
-    // Local tables are always ready; the gate stays so a future graduation to
-    // synced tables needs no code change here.
     const ready = ensureTables(peer);
     if (!ready.ready) return send({ error: "table not bound" }, 503);
     const settings = frameSettings(sfiId);
-    const blocks = table("blocks", sfiId);
+    const blocks = table("community_home_blocks", sfiId);
 
     // ----- public: fetch current page content (both anon and admin share this).
     if (reqPath === "/api/page" && method === "GET") {
-      await ensurePage(settings, blocks);
+      if (peer.is_sfi_editor) await ensurePage(settings, blocks);
+      else if (!(await settings.get(K("seeded")))) {
+        return send({ title: SEED.title, tagline: SEED.tagline, updated_at: 0, blocks: [{ id: SEED_BLOCK_ROW, ...SEED.block }] });
+      }
       return send(await getPage(settings, blocks));
     }
 

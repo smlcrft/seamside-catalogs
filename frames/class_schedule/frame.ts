@@ -4,7 +4,8 @@
 // Design axes:
 //   privacy:        privacy-public-view  — a roommate or study group reads the same week;
 //                                           space editors set it.
-//   data_storage:   storage-local        — LocalTable, no contract (docs/schema-contracts.md).
+//   data_storage:   the space's table   — `class_schedule.table.jsonl` at the space's root,
+//                                           synced with it; no contract (docs/schema-contracts.md).
 //   view_realtime:  view-collaborative    — every change pushes.
 //   settings_scope: settings-per-sfi
 //
@@ -23,6 +24,8 @@ import {
   pushToInstance, sanitizeText, declareTables, ensureTables, table,
 } from "@frame-core";
 
+const TABLE = "class_schedule";
+
 const CLASSES_SCHEMA = [
   { name: "title",     col_type: "text"    as const, nullable: false, default_val: "" },
   { name: "day",       col_type: "integer" as const, nullable: false, default_val: "0" },   // 0 = Monday
@@ -33,7 +36,7 @@ const CLASSES_SCHEMA = [
 ];
 
 declareTables([
-  { key: "classes", title: "Classes", description: "Weekly class meetings for this placement.", local: true, schema: CLASSES_SCHEMA },
+  { key: TABLE, title: "Classes", description: "Weekly class meetings for this space.", local: true, schema: CLASSES_SCHEMA },
 ]);
 
 type Peer = ReturnType<typeof parsePeerInfo>;
@@ -56,15 +59,15 @@ function normalizeTimes(startRaw: unknown, endRaw: unknown): { start: number; en
 async function readyTables(peer: Peer): Promise<boolean> {
   const quiet = { ...peer, is_owner: false } as Peer;
   let r = ensureTables(quiet);
-  if (!r.byKey["classes"]) {
-    try { await table("classes", peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`class_schedule: ensure failed: ${e}`); }
+  if (!r.byKey[TABLE]) {
+    try { await table(TABLE, peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`class_schedule: ensure failed: ${e}`); }
     r = ensureTables(quiet);
   }
-  return !!r.byKey["classes"];
+  return !!r.byKey[TABLE];
 }
 
 async function listRows(sfiId: string) {
-  const { rows } = await table("classes", sfiId).query({ limit: 1000 });
+  const { rows } = await table(TABLE, sfiId).query({ limit: 1000 });
   return rows.map((r) => ({
     id: r._row_id,
     title: r.title,
@@ -83,7 +86,7 @@ function notify(sfiId: string) {
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
   if (!(await readyTables(peer))) return { status: 503, body: { error: "table not ready" } };
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  const t = table("classes", sfiId);
+  const t = table(TABLE, sfiId);
   const ok = async (): Promise<WriteResult> => { notify(sfiId); return { status: 200, body: { ok: true } }; };
 
   if (op === "class") {

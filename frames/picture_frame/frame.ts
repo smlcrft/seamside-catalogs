@@ -1,21 +1,22 @@
 // ----------------------------------------------------------------------------------------
-// Picture Frame — a digital picture frame, one per placement (sfi_id).
+// Picture Frame — a digital picture frame, one per space (sfi_id).
 //
 // Design axes:
 //   privacy:        privacy-public-view  — editors curate the photos; Viewer-role members and
 //                                          anonymous link visitors get a browseable read-only view.
-//   data_storage:   storage-local-db     — photo ROWS live in a per-placement LocalTable
-//                                          (encrypted at rest, host-local, never synced); photo
-//                                          BYTES live as files beside it. Display state lives in
-//                                          the per-placement frameSettings key/value store.
+//   data_storage:   the space's table    — photo ROWS are `picture_frame_photos.table.jsonl` at
+//                                          the space's root; each photo and its thumbnail are files
+//                                          of the space under `Picture Frame/<photo_id>/`, named by
+//                                          the row. Display state is this session's own keys.
 //   view_realtime:  view-collaborative   — every mutation calls pushToInstance so all viewers of
-//                                          the placement refresh live.
-//   settings_scope: settings-per-sfi     — everything is keyed by peer.sfi_id.
+//                                          the space refresh live.
+//   settings_scope: photos per space, display per session — two frames in one space share
+//                                          the photos and each keeps its own wall.
 //
 // The shared display
 // ------------------
-// The frame is a wall display: there is exactly ONE current photo per placement, and
-// {mode, current_photo_id} in frameSettings IS the frame's display state. Restoring it on load
+// The frame is a wall display: there is exactly ONE current photo per session, and
+// {mode, current_photo_id} in the session's keys IS the frame's display state. Restoring it on load
 // is what makes the frame come back to the same photo after a restart — there is no separate
 // "remember where I was" mechanism. Editors drive that state; everyone else browses locally in
 // the frontend without persisting anything (see public/index.html).
@@ -36,17 +37,17 @@
 // ----------------------------------------------------------------------------------------
 import {
   log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance,
-  sanitizeText, toIntOrNull, clampInt, frameDataDir, serveFileAtPath, path,
-  declareTables, ensureTables, table, frameSettings, onUiMessage,
+  sanitizeText, toIntOrNull, clampInt, serveFileAtPath, spaceFiles, sessionKv,
+  declareTables, ensureTables, table, onUiMessage,
 } from "@frame-core";
 
-// ----- LocalTable (per-placement — no sfi_id column needed) ------------------------------
+// ----- The space's table (named for this frame: its rows point at bytes only it serves) ----
+const PHOTOS = "picture_frame_photos";
 declareTables([
   {
-    key: "photos",
+    key: PHOTOS,
     title: "Picture Frame Photos",
-    description: "Photos shown by this picture frame (image bytes live as files beside the table).",
-    local: true,
+    description: "Photos shown by this picture frame; `path` and `thumb_path` are its files in the space.",
     schema: [
       { name: "name",       col_type: "text",    nullable: false, default_val: "" },          // original filename
       { name: "mime",       col_type: "text",    nullable: false, default_val: "image/jpeg" },
@@ -56,39 +57,63 @@ declareTables([
       { name: "sort_order", col_type: "integer", nullable: false, default_val: "0" },
       { name: "added_ms",   col_type: "integer", nullable: false, default_val: "0" },
       { name: "added_by",   col_type: "text",    nullable: false, default_val: "" },
+      { name: "path",       col_type: "text",    nullable: false, default_val: "" },          // Picture Frame/<id>/<name>
+      { name: "thumb_path", col_type: "text",    nullable: false, default_val: "" },          // its grid thumbnail, if any
     ],
   },
 ]);
 
 type Tbl = ReturnType<typeof table>;
-type Settings = ReturnType<typeof frameSettings>;
+type Settings = ReturnType<typeof settingsFor>;
 type Peer = ReturnType<typeof parsePeerInfo>;
 interface Tables { settings: Settings; photos: Tbl }
 
 // ----- Caps -----------------------------------------------------------------------------
 const MAX_PHOTOS = 300;
-const MAX_BYTES = 25 * 1024 * 1024;   // per upload, AFTER the client's downscale
+const MAX_BYTES = 8 * 1024 * 1024;    // per upload, AFTER the client's downscale; a request past 8 MiB never arrives
 const MAX_THUMB_BYTES = 2 * 1024 * 1024;
 const MIN_SECS = 3;
 const MAX_SECS = 3600;
 const DEFAULT_SECS = 15;
 const MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-// ----- On-disk layout (image BYTES only; rows live in the LocalTable) --------------------
-// data/photos/<sfi_slug>/<photo_id>          full image
-// data/photos/<sfi_slug>/<photo_id>.thumb    480px downscale used by the grid
-const PHOTOS_DIR = path.join(frameDataDir(import.meta.url), "photos");
-
-function sfiSlug(sfiId: string): string {
-  return (sfiId || "").replace(/[^a-zA-Z0-9_-]/g, "_") || "default";
+// ----- Files (in the space): Picture Frame/<photo_id>/<name> and its thumbnail ----------
+const FOLDER = "Picture Frame";
+function dirFor(id: string): string { return `${FOLDER}/${id}`; }
+const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+// The stored name says what the bytes are (the page may re-encode a photo as JPEG).
+function fileName(name: string, mime: string): string {
+  const stem = name.replace(/\.[^.]*$/, "") || "photo";
+  const n = `${stem}.${EXT[mime]}`;
+  return n.startsWith("thumbnail.") ? `photo-${n}` : n;
 }
-function dirFor(sfiId: string): string { return path.join(PHOTOS_DIR, sfiSlug(sfiId)); }
-function fullPath(sfiId: string, id: string): string { return path.join(dirFor(sfiId), id); }
-function thumbPath(sfiId: string, id: string): string { return path.join(dirFor(sfiId), id + ".thumb"); }
+function sniffMime(b: Uint8Array): string {
+  if (b[0] === 0x89) return "image/png";
+  if (b[0] === 0x47) return "image/gif";
+  if (b[0] === 0x52) return "image/webp";
+  return "image/jpeg";
+}
+// A row may name only a file of its own photo's folder.
+function fileOf(id: string, p: unknown): string | null {
+  const s = String(p ?? "");
+  return s.startsWith(dirFor(id) + "/") ? s : null;
+}
 
-const ID_RE = /^[0-9a-fA-F-]{8,64}$/;
+// A photo's id is its row id (the table's own, base-36 and a dash), which also names its folder.
+const ID_RE = /^[0-9A-Za-z_-]{8,64}$/;
 
-// ----- Display state (frameSettings — one row per key, race-free) ------------------------
+// ----- Display state: this session's own keys, one per field, a JSON value each -----------
+function settingsFor() {
+  const k = (key: string) => `display/${key}`;
+  return {
+    async get<T>(key: string): Promise<T | null> {
+      const op = await sessionKv.get(k(key));
+      if (op?.value == null) return null;
+      try { return JSON.parse(op.value) as T; } catch { return null; }
+    },
+    set: (key: string, value: unknown) => sessionKv.put(k(key), JSON.stringify(value ?? null)),
+  };
+}
 type Mode = "grid" | "single";
 type Fit = "contain" | "cover";
 interface Display {
@@ -195,7 +220,7 @@ function serveBytes(replyPort: any, buf: Uint8Array, mime: string) {
     status: 200,
     body: buf,
     contentType: mime,
-    // Photo ids are UUIDs and a photo's bytes never change, so this is safe — and it makes both
+    // A photo id is never reused and a photo's bytes never change, so this is safe — and it makes both
     // the grid and a looping slideshow essentially free after first paint.
     headers: { "Cache-Control": "private, max-age=31536000, immutable" },
   }, [buf.buffer]);
@@ -229,7 +254,7 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
   const ready = ensureTables(peer);
   if (!ready.ready) return { status: 503, body: { error: "table not bound" } };
-  const t: Tables = { settings: frameSettings(sfiId), photos: table("photos", sfiId) };
+  const t: Tables = { settings: settingsFor(), photos: table(PHOTOS, sfiId) };
 
   // Set what the frame is displaying. This is the shared wall state: it persists and pushes
   // to every viewer. Non-editors never reach here; they browse in local frontend state instead.
@@ -298,8 +323,7 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     const idx = before.findIndex((p) => p.id === id);
 
     await t.photos.delete(id);
-    try { Deno.removeSync(fullPath(sfiId, id)); } catch { /* already gone */ }
-    try { Deno.removeSync(thumbPath(sfiId, id)); } catch { /* never had one */ }
+    await spaceFiles.remove(dirFor(id)).catch(() => { /* already gone */ });
 
     const after = before.filter((p) => p.id !== id);
     const patch: Partial<Display> = {};
@@ -348,11 +372,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
   }
 
-  // Local tables are always ready; the gate stays so a future graduation to synced tables
-  // needs no code change here. ensureTables IS the auth gate — no hand-rolled member check.
   const ready = ensureTables(peer);
   if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
-  const t: Tables = { settings: frameSettings(peer.sfi_id), photos: table("photos", peer.sfi_id) };
+  const t: Tables = { settings: settingsFor(), photos: table(PHOTOS, peer.sfi_id) };
 
   // Identity + display state + the whole photo list, in one round trip.
   if (reqPath === "/api/state" && method === "GET") {
@@ -390,11 +412,12 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
       return jsonReply(replyPort, 409, { error: `this frame holds at most ${MAX_PHOTOS} photos` });
     }
 
-    // Row first — its _row_id names the file on disk — then the bytes, undoing the row if the
+    // Row first — its _row_id names the photo's folder — then the bytes, undoing the row if the
     // write fails, so a failed upload can never strand a row pointing at nothing.
     const sortOrder = Number(await t.photos.max("sort_order") ?? -1) + 1;
+    const name = safeName(query.name);
     const { row_id } = await t.photos.upsert(null, {
-      name: safeName(query.name),
+      name,
       mime,
       size: body.byteLength,
       w: clampInt(toIntOrNull(query.w) ?? 0, 0, 100_000),
@@ -404,9 +427,11 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
       added_by: sanitizeText(peer.user_name, 64),
     });
     try {
-      Deno.mkdirSync(dirFor(peer.sfi_id), { recursive: true });
-      Deno.writeFileSync(fullPath(peer.sfi_id, row_id), bytes);
+      const file = `${dirFor(row_id)}/${fileName(name, mime)}`;
+      await spaceFiles.write(file, bytes);
+      await t.photos.upsert(row_id, { path: file });
     } catch (e) {
+      await spaceFiles.remove(dirFor(row_id)).catch(() => {});
       await t.photos.delete(row_id);
       return jsonReply(replyPort, 500, { error: "failed to store photo: " + e });
     }
@@ -431,8 +456,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     if (!looksLikeImage(bytes)) return jsonReply(replyPort, 415, { error: "file is not an image" });
     if (!(await t.photos.get(id))) return jsonReply(replyPort, 404, { error: "photo not found" });
     try {
-      Deno.mkdirSync(dirFor(peer.sfi_id), { recursive: true });
-      Deno.writeFileSync(thumbPath(peer.sfi_id, id), bytes);
+      const file = `${dirFor(id)}/thumbnail.${EXT[sniffMime(bytes)]}`;
+      await spaceFiles.write(file, bytes);
+      await t.photos.upsert(id, { thumb_path: file });
     } catch (e) {
       // A missing thumbnail is survivable — /api/thumb falls back to the full image.
       log("picture_frame: thumbnail write failed: " + e);
@@ -446,9 +472,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     if (!ID_RE.test(id)) return jsonReply(replyPort, 400, { error: "bad id" });
     const row = await t.photos.get(id);
     if (!row) return jsonReply(replyPort, 404, { error: "not found" });
-    let buf: Uint8Array;
-    try { buf = Deno.readFileSync(fullPath(peer.sfi_id, id)); }
-    catch { return jsonReply(replyPort, 404, { error: "not found" }); }
+    const file = fileOf(id, row.path);
+    const buf = file ? await spaceFiles.read(file).catch(() => null) : null;
+    if (!buf) return jsonReply(replyPort, 404, { error: "not found" });
     return serveBytes(replyPort, buf, String(row.mime || "application/octet-stream"));
   }
 
@@ -458,13 +484,14 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     if (!ID_RE.test(id)) return jsonReply(replyPort, 400, { error: "bad id" });
     const row = await t.photos.get(id);
     if (!row) return jsonReply(replyPort, 404, { error: "not found" });
-    let buf: Uint8Array | null = null;
-    let mime = "image/jpeg";
-    try { buf = Deno.readFileSync(thumbPath(peer.sfi_id, id)); }
-    catch {
-      try { buf = Deno.readFileSync(fullPath(peer.sfi_id, id)); mime = String(row.mime || mime); }
-      catch { return jsonReply(replyPort, 404, { error: "not found" }); }
+    const thumb = fileOf(id, row.thumb_path);
+    let buf = thumb ? await spaceFiles.read(thumb).catch(() => null) : null;
+    const mime = buf ? sniffMime(buf) : String(row.mime || "image/jpeg");
+    if (!buf) {
+      const file = fileOf(id, row.path);
+      buf = file ? await spaceFiles.read(file).catch(() => null) : null;
     }
+    if (!buf) return jsonReply(replyPort, 404, { error: "not found" });
     return serveBytes(replyPort, buf, mime);
   }
 

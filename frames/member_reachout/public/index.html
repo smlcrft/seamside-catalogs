@@ -12,8 +12,9 @@
 <script type="module">
 import {
   frame, html, render, useState, useEffect, useMemo,
-  useFramePush, applyChannel, WAITING, WaitingForOwner,
+  useFramePush, applyChannel,
 } from "./lib/js/framelib.js";
+import { ListLine, chooseList, settleList } from "./members_list.js";
 
 // ---- small helpers --------------------------------------------------------------------
 function fmtWhen(ms) {
@@ -34,8 +35,7 @@ function cleanPhone(p) {
   return String(p || "").replace(/[^0-9+]/g, "");
 }
 
-// Writes go over the tether (frame.busSend) — HTTP POST bodies are dropped on Android.
-// Fire-and-forget: resulting state arrives via the log_changed / settings_changed pushes.
+// Writes go over the tether (frame.busSend). Fire-and-forget: resulting state arrives via the log_changed / settings_changed pushes.
 // Feature-detect: an older viewer's framelib has no busSend — fall back to HTTP.
 // (api/resolve is a GET — it needs the response to build the links, so it can't ride the bus.)
 const write = (path, body) => {
@@ -50,21 +50,27 @@ const write = (path, body) => {
 function App() {
   const [state, setState] = useState(null);   // { settings, viewer, can_edit, roles }
   const [log, setLog] = useState(null);        // { entries, can_edit?, anon_view? }
-  const [waiting, setWaiting] = useState(false);
   const [compose, setCompose] = useState(null); // null | { to_all, roles, subject, message }
   const [showSettings, setShowSettings] = useState(false);
 
   async function loadState() {
-    const s = await frame.apiSafe("api/state");
-    if (s === WAITING) { setWaiting(true); return null; }
-    setWaiting(false);
+    const s = await frame.api("api/state");
     setState(s);
     return s;
   }
   async function loadLog() {
-    const l = await frame.apiSafe("api/log");
-    if (l === WAITING) { setWaiting(true); return; }
+    const l = await frame.api("api/log");
     setLog(l);
+  }
+
+  async function bind(list) {
+    try {
+      await frame.api("api/bind", { list });
+    } catch (e) {
+      await frame.alert(e.message || "failed");
+    }
+    await loadState();
+    await loadLog();
   }
 
   useEffect(() => {
@@ -73,18 +79,27 @@ function App() {
       if (s) {
         applyChannel(document.body, s.viewer?.space_color || "");
         await loadLog();
+        await settleList(s, bind);
       }
     })();
   }, []);
+
+  // The roster is the bound members list, written by Member Manager from its own frame:
+  // watch it so the audience counts follow (members only — the roster is theirs).
+  const bound = state?.bound || "";
+  const watching = !!bound && !!state?.viewer?.is_sfi_member;
+  useEffect(() => {
+    if (!watching || !window.seamside?.kv?.watch) return;
+    let soon = 0;
+    const w = window.seamside.kv.watch(`t/${bound}/`, () => { clearTimeout(soon); soon = setTimeout(loadState, 300); });
+    return () => { clearTimeout(soon); w.close(); };
+  }, [bound, watching]);
 
   useFramePush({
     log_changed: () => loadLog(),
     settings_changed: async () => { await loadState(); await loadLog(); },
   });
 
-  if (waiting) {
-    return html`<${WaitingForOwner} className="empty" message="Waiting for the space owner to link this frame to the Members table…" />`;
-  }
   if (!state || !log) return html`<div class="empty">Loading…</div>`;
 
   const { settings, viewer, can_edit, roles } = state;
@@ -124,7 +139,10 @@ function App() {
       </div>
     </header>
 
-    ${can_edit && html`
+    <${ListLine} bound=${state.bound} canBind=${state.can_bind}
+      onChoose=${async () => { const n = await chooseList(state.bound); if (n && n !== state.bound) await bind(n); }} />
+
+    ${can_edit && state.bound && html`
       <button class="new-message" onClick=${openNew}>
         <i class="ph-light ph-paper-plane-tilt"></i>
         <span>New message</span>
@@ -133,7 +151,7 @@ function App() {
 
     <${SentLog}
       entries=${entries}
-      canEdit=${can_edit}
+      canEdit=${can_edit && !!state.bound}
       isMember=${viewer.is_sfi_member}
       onResend=${resend}
       onRefresh=${loadLog}
@@ -207,7 +225,7 @@ function LogEntry({ entry, canEdit, onResend, onRefresh }) {
           ${entry.subject && html`<div class="entry__subject">${entry.subject}</div>`}
           <div class="entry__message">${entry.message}</div>
           <div class="entry__foot">
-            <span class="entry__count">${countLabel}</span>
+            <span class="entry__count">${countLabel}${entry.sent_by_name ? ` · by ${entry.sent_by_name}` : ""}</span>
             ${canEdit && html`
               <span class="entry__tools">
                 <button class="ghost" title="Re-send this message" onClick=${() => onResend(entry)}>

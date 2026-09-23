@@ -10,7 +10,8 @@
 <body class="ch1">
 <div id="root"></div>
 <script type="module">
-import { frame, html, render, useState, useEffect, useFramePush, WAITING, WaitingForOwner } from "./lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useFramePush } from "./lib/js/framelib.js";
+import { ListLine, chooseList, settleList } from "./members_list.js";
 
 // Writes go over the tether (frame.busSend) — HTTP POST bodies are dropped on Android.
 // Fire-and-forget: resulting state arrives via the members_changed / settings_changed
@@ -44,36 +45,55 @@ function roleChannel(role, roles) {
 function App() {
   const [state, setState] = useState(null); // { prefs, viewer, can_edit }
   const [members, setMembers] = useState([]);
-  const [waiting, setWaiting] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
   async function loadState() {
-    const s = await frame.apiSafe("api/state");
-    if (s === WAITING) { setWaiting(true); return null; }
+    const s = await frame.api("api/state");
     setState(s);
-    setWaiting(false);
     return s;
   }
 
   async function loadMembers() {
-    const r = await frame.apiSafe("api/members");
-    if (r === WAITING) { setWaiting(true); return; }
+    const r = await frame.api("api/members");
     setMembers(r.rows || []);
+  }
+
+  async function bind(list) {
+    try {
+      await frame.api("api/bind", { list });
+    } catch (e) {
+      await frame.alert(e.message || "failed");
+    }
+    await loadState();
+    await loadMembers();
   }
 
   useEffect(() => {
     (async () => {
       const s = await loadState();
-      if (s) await loadMembers();
+      if (!s) return;
+      await loadMembers();
+      await settleList(s, bind);
     })();
   }, []);
+
+  // The bound list is a table of the space that other frames (and other sessions of this
+  // one) write too, and their pushes never reach this page: watch the table itself
+  // (members only — the contact details are theirs).
+  const bound = state?.bound || "";
+  const watching = !!bound && !state?.viewer?.is_anon;
+  useEffect(() => {
+    if (!watching || !window.seamside?.kv?.watch) return;
+    let soon = 0;
+    const w = window.seamside.kv.watch(`t/${bound}/`, () => { clearTimeout(soon); soon = setTimeout(loadMembers, 250); });
+    return () => { clearTimeout(soon); w.close(); };
+  }, [bound, watching]);
 
   useFramePush({
     members_changed: () => loadMembers(),
     settings_changed: async () => { await loadState(); await loadMembers(); },
   });
 
-  if (waiting) return html`<${WaitingForOwner} className="empty" message="Waiting for the space owner to bind a SyncTable for this roster…" />`;
   if (!state) return html`<div id="list" class="empty">Loading…</div>`;
 
   const prefs = state.prefs;
@@ -127,7 +147,10 @@ function App() {
       </div>
     </header>
 
-    ${canEdit && html`<${AddRow} roles=${prefs.roles} hasPhone=${hasPhone} onAdd=${addMember} />`}
+    <${ListLine} bound=${state.bound} canBind=${state.can_bind}
+      onChoose=${async () => { const n = await chooseList(state.bound); if (n && n !== state.bound) await bind(n); }} />
+
+    ${canEdit && state.bound && html`<${AddRow} roles=${prefs.roles} hasPhone=${hasPhone} onAdd=${addMember} />`}
 
     ${showReadonlyNote && html`
       <p class="muted readonly-note">
@@ -140,6 +163,7 @@ function App() {
       <${MemberList}
         members=${members}
         viewer=${viewer}
+        bound=${state.bound}
         canEdit=${canEdit}
         hasPhone=${hasPhone}
         roles=${prefs.roles}
@@ -164,7 +188,7 @@ function AddRow({ roles, hasPhone, onAdd }) {
   const [phone, setPhone] = useState("");
   const [role, setRole] = useState(roles[0] || "");
 
-  useEffect(() => { if (!role && roles.length) setRole(roles[0]); }, [roles]);
+  useEffect(() => { if (!roles.includes(role)) setRole(roles[0] || ""); }, [roles]);
 
   async function submit() {
     const n = name.trim();
@@ -194,11 +218,11 @@ function AddRow({ roles, hasPhone, onAdd }) {
   `;
 }
 
-function MemberList({ members, viewer, canEdit, hasPhone, roles, onUpdate, onDelete }) {
+function MemberList({ members, viewer, bound, canEdit, hasPhone, roles, onUpdate, onDelete }) {
   if (!members.length) {
     return html`
       <div id="list" class="empty">
-        ${canEdit ? "No members yet — add the first one above." : "No members yet."}
+        ${canEdit && bound ? "No members yet — add the first one above." : "No members yet."}
       </div>
     `;
   }

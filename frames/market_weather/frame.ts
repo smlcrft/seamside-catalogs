@@ -1,7 +1,8 @@
 // ----------------------------------------------------------------------------------------
-// Market Weather — a turnout forecaster for outdoor commerce. Per-placement location lives
-// in a single JSON file keyed by sfi_id. Open-Meteo is hit at most once every 15 minutes
-// per location and the result is shared across all placements pointing at the same place.
+// Market Weather — a turnout forecaster for outdoor commerce. Each session's location and
+// events are its own `prefs` key (sessionKv), so two markets in one space keep their own.
+// Open-Meteo is hit at most once every 15 minutes per location, shared by every space
+// pointing at the same place.
 //
 // For each of the next 72 hours we compute a composite "expected turnout" score in
 // [0..100] from independent factors that each return a score in [-1..+1]:
@@ -30,10 +31,10 @@
 import {
   log, parsePeerInfo, serveFileAtPath, serveHtmlShell,
   jsonReply, parseJsonBody, sanitizeText, pushToInstance, onUiMessage,
-  loadJsonFile, saveJsonFile,
+  sessionKv,
 } from "@frame-core";
 
-// ----- Per-placement preferences (single JSON file) -------------------------------------
+// ----- Per-session preferences (the session's `prefs` key) ------------------------------
 // A WeeklyEvent is a recurring window (one day-of-week + a start→end time) for which
 // View A computes turnout stats whenever the next occurrence falls inside the 72-hour
 // forecast horizon. Names are user-given (e.g., "Baking Day").
@@ -48,10 +49,6 @@ type WeeklyEvent = {
 };
 type Prefs = { location: string; events: WeeklyEvent[] };
 const DEFAULT_PREFS: Prefs = { location: "", events: [] };
-
-const allPrefs: Record<string, Prefs> = loadJsonFile(
-  import.meta.url, "prefs.json", {} as Record<string, Prefs>,
-);
 
 function sanitizeEvent(v: unknown): WeeklyEvent | null {
   if (!v || typeof v !== "object") return null;
@@ -74,8 +71,9 @@ function sanitizeEvent(v: unknown): WeeklyEvent | null {
   return { id, name, day_of_week, start_hh, start_mm, end_hh, end_mm };
 }
 
-function getPrefs(sfi_id: string): Prefs {
-  const stored = allPrefs[sfi_id] ?? {} as Partial<Prefs>;
+async function getPrefs(): Promise<Prefs> {
+  let stored: Partial<Prefs> = {};
+  try { const op = await sessionKv.get("prefs"); if (op?.value) stored = JSON.parse(op.value); } catch { /* unreadable → defaults */ }
   const events = Array.isArray(stored.events)
     ? (stored.events.map(sanitizeEvent).filter((e): e is WeeklyEvent => e !== null))
     : [];
@@ -85,9 +83,8 @@ function getPrefs(sfi_id: string): Prefs {
   };
 }
 
-function setPrefs(sfi_id: string, next: Prefs): void {
-  allPrefs[sfi_id] = next;
-  saveJsonFile(import.meta.url, "prefs.json", allPrefs);
+async function setPrefs(next: Prefs): Promise<void> {
+  await sessionKv.put("prefs", JSON.stringify(next));
 }
 
 // ----- Weather: shared 15-minute cache keyed by location string -------------------------
@@ -416,7 +413,7 @@ type MutResult = { status: number; body: Record<string, unknown> };
 
 // Editor-only. Never gate on is_sfi_member — a Viewer-role member would slip through and
 // be able to rewrite the market.
-function mutSave(sfi_id: string, v: { location?: unknown; events?: unknown } | null, peer: MutPeer): MutResult {
+async function mutSave(sfi_id: string, v: { location?: unknown; events?: unknown } | null, peer: MutPeer): Promise<MutResult> {
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
   if (!v) return { status: 400, body: { error: "invalid JSON" } };
   // Events: drop anything that doesn't sanitize cleanly, cap the list at 32 so a
@@ -428,16 +425,16 @@ function mutSave(sfi_id: string, v: { location?: unknown; events?: unknown } | n
     location: sanitizeText(v.location, 120),
     events,
   };
-  setPrefs(sfi_id, next);
+  await setPrefs(next);
   pushToInstance(sfi_id, { type: "settings_changed" });
   return { status: 200, body: { prefs: next } };
 }
 
-onUiMessage((sfiId, data, peer) => {
+onUiMessage(async (sfiId, data, peer) => {
   if (!sfiId || typeof data !== "object" || data === null) return;
   const d = data as Record<string, unknown>;
   if (d.op !== "save") return;
-  const r = mutSave(sfiId, d, peer);
+  const r = await mutSave(sfiId, d, peer);
   if (r.status !== 200) log(`market weather: bus op save → ${r.status} (${JSON.stringify(r.body)})`);
 });
 
@@ -464,7 +461,7 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cook
   }
 
   if (reqPath === "/api/state" && method === "GET") {
-    const prefs = getPrefs(peer.sfi_id);
+    const prefs = await getPrefs();
     const weather = prefs.location ? await fetchWeather(prefs.location) : null;
     const readings = weather ? scoreForecast(weather) : [];
     return jsonReply(replyPort, 200, {
@@ -479,7 +476,7 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cook
 
   if (reqPath === "/api/save" && method === "POST") {
     const v = parseJsonBody<{ location?: unknown; events?: unknown }>(body);
-    const r = mutSave(peer.sfi_id, v, peer);
+    const r = await mutSave(peer.sfi_id, v, peer);
     return jsonReply(replyPort, r.status, r.body);
   }
 

@@ -1,14 +1,8 @@
 // ----------------------------------------------------------------------------------------
 // This frame is a weather info/forecast app using the open-meteo keyless API.
-// Location is supplied per-request; data fields and units come from settings.json.
+// Location is supplied per-request; the fields and units are the ones the page draws.
 // ----------------------------------------------------------------------------------------
-import { log, serveFileAtPath, osConfig, contentType, extname, loadJsonFile } from "@frame-core"; // must include @frame-core for tandem frame.
-
-// Settings live in data/settings.json, but the data dir may be empty on a fresh install.
-// loadJsonFile returns the fallback ({}) when the file is missing or malformed, so the
-// per-field `?? default` coalescing below supplies sensible defaults either way. Never read
-// the data dir directly at module scope — a rejected top-level await would crash the worker.
-const settings = loadJsonFile<Record<string, string | number>>(import.meta.url, "settings.json", {});
+import { log, serveFileAtPath } from "@frame-core"; // must include @frame-core for tandem frame.
 
 // ----------------------------------------------------------------------------------------
 // WEATHER FETCH + PER-LOCATION 5-MINUTE CACHE
@@ -30,21 +24,19 @@ async function fetchWeather(locationQuery: string): Promise<WeatherData> {
   if (!geoRes.ok) throw new Error(`Geocoding request failed: ${geoRes.status}`);
   const geoJson = await geoRes.json();
   const loc = geoJson.results?.[0];
-  if (!loc) throw new Error(`Location not found: "${locationQuery}"`);
+  if (!loc) throw Object.assign(new Error(`Location not found: "${locationQuery}"`), { status: 404 });
   const { latitude, longitude, name, country, admin1 } = loc;
-  // Step 2: Fetch weather using fields and units from settings.json.
+  // Step 2: Fetch weather: every field the page renders, in the units it labels.
   const params = new URLSearchParams({
     latitude: String(latitude),
     longitude: String(longitude),
-    // Defaults must cover every field the UI renders — on a fresh install there is no
-    // settings.json (the data dir ships empty), so these fallbacks are what actually run.
-    current:            settings.current            ?? "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m",
-    daily:              settings.daily              ?? "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum",
-    temperature_unit:   settings.temperature_unit   ?? "fahrenheit",
-    wind_speed_unit:    settings.wind_speed_unit    ?? "mph",
-    precipitation_unit: settings.precipitation_unit ?? "inch",
-    timezone:           settings.timezone           ?? "auto",
-    forecast_days:      String(settings.forecast_days ?? 5),
+    current:            "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m",
+    daily:              "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum",
+    temperature_unit:   "fahrenheit",
+    wind_speed_unit:    "mph",
+    precipitation_unit: "inch",
+    timezone:           "auto",
+    forecast_days:      "5",
   });
   const weatherUrl = `https://api.open-meteo.com/v1/forecast?${params}`;
   const weatherRes = await fetch(weatherUrl);
@@ -73,8 +65,10 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
       replyPort.postMessage({ status: 200, contentType: "application/json", body: JSON.stringify(data) });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      log("fetchWeather error: " + msg);
-      replyPort.postMessage({ status: 500, contentType: "application/json", body: JSON.stringify({ error: msg }) });
+      // An unknown place is the asker's miss (404); anything else is open-meteo's (502).
+      const status = (e as { status?: number })?.status ?? 502;
+      if (status !== 404) log("fetchWeather error: " + msg);
+      replyPort.postMessage({ status, contentType: "application/json", body: JSON.stringify({ error: msg }) });
     }
     return;
   }

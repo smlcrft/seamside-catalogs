@@ -1,16 +1,17 @@
 // ----------------------------------------------------------------------------------------
 // API:
-//   bus op "roll"    — roll for this placement (frame.busSend; POST /api/roll kept as the
-//                      HTTP fallback); the result is pushed via BusFrameToUi to every live
-//                      viewer of the placement (pushToInstance keyed by sfi_id).
-//   GET  /api/state  — return the last roll for this placement { value, sides }
+//   bus op "roll"    — roll for this space (frame.busSend; POST /api/roll kept as the
+//                      HTTP fallback); the result is pushed to every live viewer of the
+//                      space (pushToInstance keyed by sfi_id). Editors roll; others watch.
+//   GET  /api/state  — the space's last roll { value, sides, can_roll } (held in memory:
+//                      a restarted worker starts at "?")
 // ----------------------------------------------------------------------------------------
-import { log, serveFileAtPath, pushToInstance, parsePeerInfo, jsonReply, loadJsonFile, onUiMessage } from "@frame-core";
+import { log, serveFileAtPath, pushToInstance, parsePeerInfo, jsonReply, onUiMessage } from "@frame-core";
 // --
-const settings = { roll_time_ms: 1000, sides: 6, ...loadJsonFile<Partial<{ roll_time_ms: number; sides: number }>>(import.meta.url, "settings.json", {}) };
+const settings = { roll_time_ms: 1000, sides: 6 };
 // --
-const lastRoll = new Map<string, number>(); // Per-placement last-roll value (keyed by sfi_id).
-// Perform a roll for a placement and push the animated result to every viewer of it.
+const lastRoll = new Map<string, number>(); // Per-space last-roll value (keyed by sfi_id).
+// Perform a roll for a space and push the animated result to every viewer of it.
 // Shared by the bus dispatcher and the HTTP fallback; rolling is a write, so it gates
 // on the sender's editor role.
 function doRoll(sfi_id: string, peer: ReturnType<typeof parsePeerInfo>): boolean {
@@ -32,7 +33,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     if (doRoll(peer.sfi_id, peer)) replyPort.postMessage({ status: 204, contentType: "text/plain", body: null });
     else jsonReply(replyPort, 403, { error: "editor only" });
   } else if (reqPath === "/api/state" && method === "GET") {
-    jsonReply(replyPort, 200, { value: lastRoll.get(peer.sfi_id) ?? 0, sides: settings.sides });
+    jsonReply(replyPort, 200, { value: lastRoll.get(peer.sfi_id) ?? 0, sides: settings.sides, can_roll: peer.is_sfi_editor });
   } else if (method === "GET") {
     serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
   } else {

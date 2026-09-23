@@ -1,6 +1,6 @@
 {
     "name": "Habit Tracker",
-    "description": "One line per habit, one square per day, filled in when you did it. The grid runs right up to today and stretches as far back as the frame is wide, so a narrow tile shows the last fortnight and a wide one shows months — the same picture either way, just more of it. Tap today's square to mark it, or tap back a few days if you forgot to. Each habit keeps a current run and its best run, and the run is the point: the grid makes a gap visible in a way a checkbox never does. Space editors mark and edit; everyone else, including anyone the frame is shared with publicly, sees the same grid live. Habits and their marks live in encrypted LocalTables scoped to the placement.",
+    "description": "One line per habit, a fortnight of squares, filled in when you did it. Tap today's check to mark it, or tap back a few days if you forgot; each habit shows its current run and its best, and a gap is visible in a way a checkbox never shows. Collaborators add, mark, rename and remove habits; viewers and anyone the frame is published to see the same grid live. Habits and their marks are the space's habits and habit_marks tables, synced with the space.",
     "frame_type": "Tandem",
     "tags": ["everyday", "habits", "health"],
     "permissions": {
@@ -9,9 +9,11 @@
     "default_width_px": 560,
     "default_height_px": 420,
     "created_at": "2026-08-10T00:00:00Z",
-    "modified_at": "2026-08-10T00:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T05:04:06Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:chart-line-up",
+    "color": "c1"
 }

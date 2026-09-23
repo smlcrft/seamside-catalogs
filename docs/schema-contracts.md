@@ -7,17 +7,34 @@ versioned column schema that more than one frame declares verbatim. One frame
 contract role documents). This is what makes a "set" of frames cheap: swap the
 frame, keep the data.
 
-The mechanics are the ones already shipped: LocalTables by default, per-placement
-graduation to shared tables ([table-graduation.md](table-graduation.md)), and the
-platform's binding picker. A contract adds only discipline: exact schemas, who
-writes what, and rules for evolving them.
+The mechanics are Seamside v1's: a table is a file of the space
+(`<name>.table.jsonl` at its root), shared by name by every frame in that space.
+Two frames that name the same contract in one space are already working on the
+same rows — there is no local twin and no graduation (v0's mechanism is kept for
+the record in [table-graduation.md](table-graduation.md)).
+
+**A contract may have several lists in one space.** A compound suffix is a subtype:
+`members.table.jsonl`, `club.members.table.jsonl` and `choir.members.table.jsonl`
+all speak `members`. A frame that speaks a contract with more than one natural list
+(`members`, `wishes`) binds **one per session**: the table name, kept in the
+session's own keys (`sessionKv` `bound/<contract>`), chosen by an editor from the
+space's matching tables (or a new one) and always confirmed, never guessed. It
+declares `"opens": ["<contract>.table.jsonl"]` so the space offers it on those files.
+Companions agree by the person choosing the same list in each. Worked example:
+`frames/member_manager` with `public/members_list.js`.
+
+A contract adds only discipline: exact schemas, who writes what, and rules for
+evolving them. The flip side: a table name is shared whether you meant it or not,
+so a frame's private table must be named for the frame (`kanban_cards`, not
+`cards`).
 
 ## When NOT to write a contract
 
 A contract is a cost before it is a feature. It buys a real thing — swap the frame,
-keep the data — but it charges the user ceremony to get there: graduate this
-table, link that one, pick the right one out of a list, and understand why any
-of that was necessary. Most frames should never ask for that.
+keep the data — but it is a promise every frame naming it must keep forever: the
+schema only grows, every writer stays in its role, and any frame in the space
+that names the table sees and can change its rows. Most frames should keep their
+rows under a name of their own.
 
 Share a table only when **two frames a person would genuinely place in the same
 space need to act on the same rows**, and the second frame's job is not just to
@@ -27,7 +44,7 @@ across three frames that people really do run side by side.
 
 It fails when the "set" is actually one frame cut into pieces. A course list, an
 assignment tracker and a semester dashboard sharing a `courses` table is three
-installs, two link steps and a table picker to arrive at what one assignment
+installs and a frozen schema to arrive at what one assignment
 tracker models on its own — the courses are that frame's own data, not a
 commons. Ratified 2026-08-08: **the study set ships as standalone frames.** If a
 frame's contract exists mainly so another frame can re-render the same rows,
@@ -40,8 +57,8 @@ Rules of thumb:
   should just be a view inside the writer.
 - Splitting an entity into its own frame "for reuse" that nothing else reuses
   is the most common false positive.
-- A link unit is cheaper than a shared owned table, but it is not free — it
-  still costs a picker and an explanation.
+- Reading a contract is cheaper than owning one, but it is not free — the reader
+  is bound to the schema and must degrade when the owner is absent.
 
 ## Conventions (all contracts)
 
@@ -72,32 +89,16 @@ Rules of thumb:
   Everything still goes through the frame's own editor gate
   (`peer.is_sfi_editor`) — a contract never loosens access.
 
-## Link units (consuming another frame's contract)
+## Reading another frame's contract
 
-A frame that consumes a contract it doesn't own declares a **link unit**: an
-adopt-only graduation unit (see "Graduation units" in table-graduation.md).
-
-- Lazily declare `<contract>_shared` with the verbatim contract schema; never a
-  local twin (there is nothing to convert — the data lives with the owning
-  frame's table).
-- **Links live in the data drawer, not in the header.** A frame with several data
-  units (its own, plus each link) lists them all inside the one drawer button
-  described in table-graduation.md: `frame.choose` with a row per unit, the
-  unit's state as the detail line ("in a shared table" / "linked to a shared
-  table" / "not linked"), and picking one opens that unit's actions. Owner-only.
-  A link unit's actions are `frame.confirm("Link a shared <x> table?")` → the
-  standard graduate-with-adopt path → the platform's table picker, or, when
-  linked, an unlink confirm that says the frame keeps working without it.
-  (Ratified 2026-08-06: per-unit header chips do not scale — three units meant
-  three chips shouting a setting nobody touches.)
-- Settings use the multi-unit shape: `{ <unit>: { backend, pending_graduation } }`
-  where a link unit's `backend` is `"none" | "shared"`.
-- Unlinking just clears the unit back to `"none"` (the platform binding remains
-  and is harmless); the frame returns to its standalone behavior. This is safe
-  precisely because a link unit owns no data.
-- A linked table can be missing/unbound on a fresh host exactly like any
-  graduated unit: degrade to the standalone behavior rather than a blocking
-  waiting state, since the frame works without it.
+A frame that consumes a contract it doesn't own declares the contract table by
+its name, with the verbatim schema, and reads (or writes, as its role line
+allows) whatever rows the space holds. When the owning frame is not in the
+space the table is simply empty or absent, and the consumer degrades to its
+standalone behaviour (the planner falls back to freeform meals) — never a
+blocking waiting state. Rows another frame writes do not raise this frame's
+`pushToInstance`; a consumer that must redraw live watches the table from the
+page (`seamside.data.kv.watch('t/<contract>/', …)`) or re-reads on focus.
 
 ## Contract: `recipes` v1
 
@@ -189,6 +190,7 @@ const CHORES_SCHEMA = [
   { name: "last_done_ms", col_type: "integer" as const, nullable: false, default_val: "0" },
   { name: "last_done_by", col_type: "text"    as const, nullable: false, default_val: "" },
   { name: "streak",       col_type: "integer" as const, nullable: false, default_val: "0" },
+  { name: "best_streak",  col_type: "integer" as const, nullable: false, default_val: "0" },
   { name: "sort_order",   col_type: "integer" as const, nullable: false, default_val: "0" },
   { name: "notes",        col_type: "text"    as const, nullable: false, default_val: "" },
 ];
@@ -211,6 +213,7 @@ const CHORES_SCHEMA = [
 - `streak` counts consecutive completed periods: it advances only when the
   previous period was also done, and re-ticking inside the same period is a
   no-op rather than a second count.
+- `best_streak` is the longest `streak` ever reached (append-only addition, 2026-09-23).
 - `last_done_by` is the display name of whoever ticked it, a snapshot like any
   other cross-reference text.
 - Roles: Chore Chart full CRUD.
@@ -229,16 +232,36 @@ const WISHES_SCHEMA = [
   { name: "claimed_by",    col_type: "text"    as const, nullable: false, default_val: "" },
   { name: "claimed_by_id", col_type: "text"    as const, nullable: false, default_val: "" },
   { name: "added_ms",      col_type: "integer" as const, nullable: false, default_val: "0" },
+  { name: "claimed",       col_type: "integer" as const, nullable: false, default_val: "0" }, // appended 2026-09-23
 ];
 ```
 
+- **Names (subtypes).** A `wishes` table is `wishes.table.jsonl` or any
+  `<name>.wishes.table.jsonl` (`christmas.wishes`, `birthday-2026.wishes`): the name
+  matches `/^([a-z0-9][a-z0-9_-]*\.)*wishes$/`. A space may hold several; each
+  session of a frame speaking `wishes` binds one (Gift List: `sessionKv`
+  `bound/wishes`, chosen and confirmed by an editor), so two sessions can hold two
+  lists, and companions agree by the person choosing the same list in each.
+- **Who claimed never enters the table; that something is claimed does (append-only addition, 2026-09-23).** A
+  table is readable by every member of the space and syncs to their copies, so a name
+  written there reaches the person the wish is for. The holder lives in Gift List's
+  worker, `data/claims.json`, keyed by space and list (on the keeper's device, not
+  synced, not served by the door — the door's `SRC` refuses `data/`), and
+  `claimed_by` / `claimed_by_id` stay empty in the table; the columns stay in the
+  schema so the contract does not change shape. `claimed` (0/1) is set on claim and
+  cleared on release, so a claim outlives the loss of `data/` as "claimed by
+  someone". **Accepted cost:** anyone who opens the table file — the person the wish
+  is for included — can read *that* a wish is claimed, never by whom.
+- A claim whose row says `claimed = 1` but whose holder is not known (data/ lost) is
+  shown as "claimed" to everyone but the person it is for, and any editor may release
+  it, since nobody can prove they hold it.
 - **This contract carries a secret, and the secret is a SERVER concern.** A frame speaking
   `wishes` MUST strip `claimed_by` and `claimed_by_id` from the payload before sending it
   to the person the wish is for — not hide them in the UI. A frontend that receives the
   claim and declines to draw it has not kept the secret; it is one devtools panel away
   from ruining the surprise.
-- Strip the fields entirely rather than blanking them, and send **no** substitute boolean.
-  "Something on your list is claimed" is enough to spoil a one-item list, so a recipient's
+- Strip the fields (`claimed` included) entirely rather than blanking them, and send
+  **no** substitute boolean. "Something on your list is claimed" is enough to spoil a one-item list, so a recipient's
   row must look identical whether or not anyone has claimed it.
 - Identify the recipient by `for_user_id` when present (exact) and by a loosened name
   comparison otherwise (trim / lowercase / collapse spaces, plus a first-name match). Err
@@ -246,22 +269,21 @@ const WISHES_SCHEMA = [
   showing one to the recipient is the single thing this contract exists to prevent.
 - `for_who` is a free-text household name, like `chores.assignee`; colour-code it from a
   hash of the name so every device agrees.
-- Only the holder of a claim may release it, or one relative could quietly take over
-  another's gift with nobody told.
+- Only the holder of a claim may release it whenever the holder is known, or one
+  relative could quietly take over another's gift with nobody told.
 - Roles: Gift List full CRUD.
 
 ## The household kitchen set (worked example)
 
 Three frames, each standing alone, composing when linked:
 
-- **Recipe Box** owns `recipes` (local by default; graduation makes it a shared
-  table others can bind).
-- **Meal Planner** owns `meal_plan`, links `recipes` (recipe picker + per-day
-  plan) and `grocery` (send a day or week's ingredients to the list).
+- **Recipe Box** owns `recipes`.
+- **Meal Planner** owns `meal_plan`, reads `recipes` (recipe picker + per-day
+  plan) and inserts into `grocery` (send a day or week's ingredients to the list).
 - **Grocery List** owns `grocery` (the realtime shared list).
 
-Set-up story the catalog should demonstrate: place all three in a family space;
-graduate Recipe Box's table ("convert"); in Meal Planner, link recipes
-("adopt", pick the same table) and link grocery after graduating Grocery List
-the same way. Nothing breaks when a link is absent — the planner falls back to
-freeform meals, the list is just a list.
+Set-up story the catalog demonstrates: place all three in one family space and
+they compose at once — a recipe saved in Recipe Box is in the planner's picker,
+and "send to grocery list" lands its ingredients on the open list. Nothing breaks
+when one is absent — the planner falls back to freeform meals, the list is just a
+list. (Tested end to end on Seamside v1.0.0, 2026-09-23.)

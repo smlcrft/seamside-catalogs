@@ -8,22 +8,17 @@ Where this frame could grow:
 - **Inline text editing on the canvas.** Double-click currently opens the inspector textarea; a `contenteditable` overlay positioned inside the scaled stage would let authors type directly on the slide. Watch out: htm/Preact + `contenteditable` + the CSS `transform: scale()` interact awkwardly, which is why the inspector approach was chosen first.
 - **Speaker notes & per-slide transitions.** A `notes` field per slide (shown only to the presenter) and a simple fade/slide transition between slides in present mode.
 - **Export.** "Download as images / PDF" by rendering each slide stage to a canvas at full logical resolution.
-- **Conflict-aware editing.** Saves are last-write-wins with a live `deck_changed` push; two editors dragging the same element at once can clobber. A per-element revision or operation-based merge would harden multi-editor sessions (still without a SyncTable — the JSON doc stays the source of truth).
+- **Conflict-aware editing.** Saves are last-write-wins with a live `deck_changed` push; two editors dragging the same element at once can clobber. A per-element revision or operation-based merge would harden multi-editor sessions (the JSON doc stays the source of truth).
 
 ## Host notes — uploads & images
 
 **Uploads (frame-side).** Modeled on the `file_folder` frame: the image is validated to be an
 image, resized client-side via a `<canvas>` so its longest edge is ≤ 2048 px (originals already
 within limits and of a known type are uploaded untouched to preserve animated GIFs / PNG
-transparency), then sent as an in-memory `ArrayBuffer` body — NOT a `File` object. WebKit reads
-`File`/`Blob` bodies asynchronously and the `axum://` custom-scheme bridge captures the request
-before that read finishes, so a `File` body arrives empty. The backend re-checks the extension,
+transparency), then sent as an in-memory `ArrayBuffer` body — NOT a `File` object. The backend re-checks the extension,
 byte size, and a magic-byte signature before writing.
 
-**Image storage & GC.** Uploaded images live in `data/shows/<sfi_slug>/images/<uuid>.<ext>`
-beside the deck's `show.json`. On every save, images no longer referenced by any element are
-deleted — except files modified within the last 5 minutes, so an image uploaded just before its
-element is saved isn't swept out from under a concurrent editor.
+**Image storage & GC.** The deck is a file of the space, `Slideshow/slides.json`, and uploaded images are `Slideshow/images/<uuid>.<ext>` beside it (synced with the space, served by the worker to whoever sees the deck). On every save, images no longer referenced by any element are deleted — except an upload this worker received in the last 5 minutes that no saved deck has placed yet, so an image uploaded just before its element is saved isn't swept out from under a concurrent editor. The live present position is the space's `slideshow_present` frameSettings key.
 
 **Present mode & fullscreen.** Entering present mode attempts `requestFullscreen()` on the
 document; if the sandboxed iframe isn't granted fullscreen it falls back to filling the frame

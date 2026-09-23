@@ -4,19 +4,11 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members get a live read-only view;
 //                                           space editors manage the collection.
-//   data_storage:   storage-graduating   — starts as LocalTables (encrypted at rest on
-//                                           the host, zero ceremony); the OWNER can
-//                                           graduate THIS placement's recipes to a shared
-//                                           SyncTable so other frames bind the same rows
-//                                           (the Meal Planner's recipe picker). Other
-//                                           placements stay local. This is the
-//                                           per-placement graduation pattern — see
-//                                           docs/table-graduation.md in this repo.
+//   data_storage:   the space's table    — `recipes.table.jsonl` at the space's root,
+//                                           synced with the space; the Meal Planner in
+//                                           the same space reads the same rows.
 //   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so all viewers of the placement refresh live;
-//                                           graduated placements also refresh on foreign
-//                                           writes via table onChange.
-//   settings_scope: settings-per-sfi      — backend choice + bindings are keyed by sfi_id.
+//                                           so every viewer refreshes live.
 //
 // Recipe Box OWNS the `recipes` v1 contract (docs/schema-contracts.md): the schema below
 // is the contract constant, declared verbatim. Linked frames read these rows; this frame
@@ -24,11 +16,11 @@
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
-  declareTables, ensureTables, table,
+  pushToInstance, sanitizeText,
+  declareTables, table,
 } from "@frame-core";
 
-// ----- Schema (contract `recipes` v1 — one source of truth for local AND shared) --------
+// ----- Schema (contract `recipes` v1, verbatim) -----------------------------------------
 const RECIPES_SCHEMA = [
   { name: "title",            col_type: "text"    as const, nullable: false, default_val: "" },
   { name: "ingredients_lines", col_type: "text"   as const, nullable: false, default_val: "" },
@@ -40,116 +32,13 @@ const RECIPES_SCHEMA = [
   { name: "photo",            col_type: "text"    as const, nullable: false, default_val: "" },
 ];
 
-// ----- LocalTables (the install-time default: encrypted, per-placement, zero ceremony) --
+// ----- The space's `recipes` table (the contract name: every kitchen frame in the space reads it)
 declareTables([
-  { key: "recipes", title: "Recipes", description: "Recipes for this placement's recipe box.", local: true, schema: RECIPES_SCHEMA },
+  { key: "recipes", title: "Recipes", description: "The recipe box of this space.", schema: RECIPES_SCHEMA },
 ]);
-
-// Shared decls are registered LAZILY — declaring a synced table up-front would pop the
-// owner's binding modal on frame start (the host refires bindings for every missing
-// non-local decl). Only a placement that graduated (or is graduating) registers them.
-let sharedDeclsRegistered = false;
-function ensureSharedDecls(): void {
-  if (sharedDeclsRegistered) return;
-  sharedDeclsRegistered = true;
-  declareTables([
-    {
-      key: "recipes_shared", title: "Recipes",
-      description: "Recipes of a shared recipe box. Create a new table, or pick the one other frames should read.",
-      schema: RECIPES_SCHEMA,
-    },
-  ]);
-}
-
-// ----- Per-placement settings: which backend this placement runs on ---------------------
-// pending_graduation modes: "convert" copies this placement's local rows into the freshly
-// bound shared table; "adopt" just binds an existing shared table (no copy — the box
-// shows whatever it contains). Local rows are untouched either way.
-type Backend = "local" | "shared";
-type GradMode = "convert" | "adopt";
-type SfiSettings = { backend: Backend; pending_graduation?: GradMode };
-const allSettings: Record<string, SfiSettings> = loadJsonFile(import.meta.url, "settings.json", {});
-function getSettings(sfiId: string): SfiSettings {
-  return { backend: "local", ...(allSettings[sfiId] ?? {}) as Partial<SfiSettings> };
-}
-function saveSettings(sfiId: string, s: SfiSettings): void {
-  allSettings[sfiId] = s;
-  saveJsonFile(import.meta.url, "settings.json", allSettings);
-}
 
 type Tbl = ReturnType<typeof table>;
 type Peer = ReturnType<typeof parsePeerInfo>;
-
-/** The placement's data table, resolved through its backend choice. Same handle API
- * either way — everything below this line is backend-agnostic. */
-function dataTable(sfiId: string, s: SfiSettings): Tbl {
-  return table(s.backend === "shared" ? "recipes_shared" : "recipes", sfiId);
-}
-
-/** True when the shared binding exists for this placement (post-graduation). */
-function sharedBound(sfiId: string): boolean {
-  try { table("recipes_shared", sfiId); return true; } catch { return false; }
-}
-
-/** ensureTables, but QUIET and with the local table awaited.
- * Quiet: is_owner stripped, so a missing shared binding never fires the owner's binding
- * modal from a passive path (once one placement graduates, the shared decls exist
- * worker-globally — a plain ensureTables(owner) would pop the picker on every OTHER
- * placement). Only the explicit graduate/waiting paths call ensureTables with owner
- * privilege. Awaited: a fresh placement's local self-ensure is async, so touch a missing
- * local table with a no-op query, then re-read. */
-async function readyLocalTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  if (!r.byKey["recipes"]) {
-    try { await table("recipes", peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`recipe_box: ensure "recipes" failed: ${e}`); }
-    r = ensureTables(quiet);
-  }
-  return !!r.byKey["recipes"];
-}
-
-// ----- Graduation: flip this placement to the freshly bound shared table ----------------
-// "convert" first copies the local rows in. Row ids are PRESERVED (upsert(localRowId, …)
-// creates with that id), which keeps references from linked frames (meal_plan.recipe_id)
-// stable and makes a rerun after a partial copy an idempotent overwrite.
-// pending_graduation is only cleared after a full pass.
-async function runGraduation(sfiId: string, settings: SfiSettings): Promise<void> {
-  const mode = settings.pending_graduation!;
-  let copied = "";
-  if (mode === "convert") {
-    const shared = table("recipes_shared", sfiId);
-    const { rows } = await table("recipes", sfiId).query({});
-    for (const r of rows) {
-      await shared.upsert(r._row_id, {
-        title: r.title, ingredients_lines: r.ingredients_lines, steps_lines: r.steps_lines,
-        servings: r.servings, tags: r.tags, notes: r.notes, created_ms: r.created_ms,
-        photo: r.photo ?? "",
-      });
-    }
-    copied = ` (${rows.length} recipes copied)`;
-  }
-
-  settings.backend = "shared";
-  delete settings.pending_graduation;
-  saveSettings(sfiId, settings);
-  wireSharedListeners(sfiId);
-  pushToInstance(sfiId, { type: "recipes_changed" });
-  log(`recipe_box: placement ${sfiId} moved to shared tables (${mode})${copied}`);
-}
-
-// Foreign writes to a graduated placement's table (another frame bound to the same
-// table, a peer device) should refresh viewers just like our own writes do. Our own
-// writes also fire this — the extra refresh is cheap and keeps the wiring simple.
-const wiredShared = new Set<string>();
-function wireSharedListeners(sfiId: string): void {
-  if (wiredShared.has(sfiId)) return;
-  wiredShared.add(sfiId);
-  try {
-    table("recipes_shared", sfiId).onChange(() => notify(sfiId));
-  } catch {
-    wiredShared.delete(sfiId); // not bound yet — rewired after graduation completes
-  }
-}
 
 // ----- Field normalization --------------------------------------------------------------
 /** Comma-separated lowercase tag list (contract format), each tag sanitized. */
@@ -203,30 +92,7 @@ function notify(sfiId: string) {
 type WriteResult = { status: number; body: unknown };
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const settings = getSettings(sfiId);
-
-  // Re-register the shared decls for placements that graduated or are mid-graduation
-  // (decls don't survive worker restarts; bindings do).
-  if (settings.backend === "shared" || settings.pending_graduation) ensureSharedDecls();
-
-  // Finish a pending graduation the moment the shared binding exists.
-  if (settings.pending_graduation && sharedBound(sfiId)) {
-    try { await runGraduation(sfiId, settings); } catch (e) { log(`recipe_box: graduation failed (will retry): ${e}`); }
-  }
-
-  // Graduated placement whose binding is missing (fresh worker on a new host, or the
-  // owner closed the picker mid-graduation recovery): every write waits.
-  if (settings.backend === "shared" && !sharedBound(sfiId)) {
-    return { status: 503, body: { error: "table not bound" } };
-  }
-  if (settings.backend === "shared") wireSharedListeners(sfiId);
-
-  // The local table resolves with zero ceremony; awaiting keeps a fresh placement's first
-  // request from racing the self-ensure. Quiet — see readyLocalTables.
-  if (settings.backend === "local" && !(await readyLocalTables(peer))) {
-    return { status: 503, body: { error: "table not ready" } };
-  }
-  const recipes = dataTable(sfiId, settings);
+  const recipes = table("recipes", sfiId);
 
   // Every op below mutates state and is editor-only. Non-members AND Viewer-role
   // members are rejected with the same gate (never gate writes on is_sfi_member —
@@ -237,25 +103,6 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     notify(sfiId);
     return { status: 200, body: { recipes: await recipesData(recipes) } };
   };
-
-  // --- Data backend (owner-only): per-placement graduation local → shared -------------
-  if (op === "data/graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    if (settings.backend === "shared") return { status: 400, body: { error: "already shared" } };
-    settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";
-    saveSettings(sfiId, settings);
-    ensureSharedDecls();
-    ensureTables(peer); // fires the owner's binding modal (the recipes table)
-    notify(sfiId);
-    return { status: 200, body: { waiting: true } };
-  }
-  if (op === "data/cancel_graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    delete settings.pending_graduation;
-    saveSettings(sfiId, settings);
-    notify(sfiId);
-    return { status: 200, body: { ok: true } };
-  }
 
   // --- Recipes --------------------------------------------------------------------------
   if (op === "recipe") {
@@ -343,56 +190,13 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, r.status, r.body);
   }
 
-  const settings = getSettings(sfiId);
+  const recipes = table("recipes", sfiId);
 
-  // Re-register the shared decls for placements that graduated or are mid-graduation
-  // (decls don't survive worker restarts; bindings do).
-  if (settings.backend === "shared" || settings.pending_graduation) ensureSharedDecls();
-
-  // Finish a pending graduation the moment the shared binding exists.
-  if (settings.pending_graduation && sharedBound(sfiId)) {
-    try { await runGraduation(sfiId, settings); } catch (e) { log(`recipe_box: graduation failed (will retry): ${e}`); }
-  }
-  // Mid-graduation and the picker was dismissed (or the app restarted): the owner's
-  // next look at the box brings it back. Pending is an explicit owner-initiated
-  // state, so the auto-refire is wanted here, unlike the quiet passive paths.
-  if (settings.pending_graduation && peer.is_owner && !sharedBound(sfiId)
-      && reqPath === "/api/recipes" && method === "GET") {
-    ensureTables(peer);
-  }
-
-  // Graduated placement whose binding is missing (fresh worker on a new host, or the
-  // owner closed the picker mid-graduation recovery): every data route waits; the main
-  // route re-fires the owner's binding modal so they can finish.
-  if (settings.backend === "shared" && !sharedBound(sfiId)) {
-    if (reqPath === "/api/recipes" && method === "GET") {
-      if (peer.is_owner) ensureTables(peer);
-      return jsonReply(replyPort, 200, {
-        waiting_for_binding: true, is_owner: peer.is_owner,
-        storage: { backend: settings.backend, pending: false, can_manage: peer.is_owner },
-      });
-    }
-    return jsonReply(replyPort, 503, { error: "table not bound" });
-  }
-  if (settings.backend === "shared") wireSharedListeners(sfiId);
-
-  // The local table resolves with zero ceremony; awaiting keeps a fresh placement's first
-  // request from racing the self-ensure. Quiet — see readyLocalTables.
-  if (settings.backend === "local" && !(await readyLocalTables(peer))) {
-    return jsonReply(replyPort, 503, { error: "table not ready" });
-  }
-  const recipes = dataTable(sfiId, settings);
-
-  // Read — open to everyone (non-members get a read-only view of this placement's
+  // Read — open to everyone (non-members get a read-only view of the
   // collection). Never seeded: an empty box renders its own empty state.
   if (reqPath === "/api/recipes" && method === "GET") {
     return jsonReply(replyPort, 200, {
       recipes: await recipesData(recipes),
-      storage: {
-        backend: settings.backend,
-        pending: !!settings.pending_graduation,
-        can_manage: peer.is_owner,
-      },
     });
   }
 

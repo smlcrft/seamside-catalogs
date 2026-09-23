@@ -64,31 +64,6 @@
     .iconbtn:active { transform: scale(0.92); }
     .iconbtn:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
 
-    /* the data drawer — ONE quiet button for a configuration most people never touch.
-       Owner-only (nobody else sees it), no state text at rest: where the rows live is
-       not news, it's a setting. Everything (storage state, graduation) lives behind it.
-       The glyph is the platform's Tables icon (ph-dresser, the pivot-nav rail) so the
-       frame and the OS say "tables" the same way. See docs/table-graduation.md. */
-    .drawer {
-      flex: 0 0 auto; position: relative;
-      width: 24px; height: 24px; padding: 0;
-      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
-      display: inline-flex; align-items: center; justify-content: center;
-      color: var(--os-text-subtle); font-size: 16px; line-height: 1;
-      transition: color 150ms, background 150ms;
-    }
-    .drawer:hover { color: var(--os-text); background: var(--os-bg-subtle); }
-    .drawer:active { transform: scale(0.92); }
-    .drawer:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
-    /* the ONE ambient signal, and it is rare: a channel dot while a move is unfinished */
-    .drawer.pending::after {
-      content: ""; position: absolute; top: 0; right: 0;
-      width: 5px; height: 5px; border-radius: var(--os-radius-full); background: var(--ch);
-      animation: drawer-breathe 2s ease-in-out infinite;
-    }
-    @keyframes drawer-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-    @media (prefers-reduced-motion: reduce) { .drawer.pending::after { animation: none; } }
-
     .banner {
       display: flex; align-items: center; gap: var(--os-sp-xs); flex: 0 0 auto;
       background: var(--os-bg-inset); border-radius: var(--os-radius-md);
@@ -216,15 +191,6 @@
     .notice h2 { margin: 0; font-size: var(--os-fs-md); font-weight: var(--os-weight-semibold); }
     .notice p { margin: 0 0 var(--os-sp-sm); font-size: var(--os-fs-sm); color: var(--os-text-secondary); max-width: 380px; }
 
-    .data-ghost {
-      font: inherit; font-size: var(--os-fs-sm); cursor: pointer;
-      background: transparent; border: 1px solid var(--os-border-color);
-      color: var(--os-text-secondary); border-radius: var(--os-radius-sm);
-      padding: calc(var(--os-sp-xs) + 1px) var(--os-sp-md);
-      transition: color 150ms, border-color 150ms;
-    }
-    .data-ghost:hover { color: var(--os-text); border-color: var(--os-text-subtle); }
-
     .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-lg); flex: 1; }
 
     /* ---- recipe detail: the cooking view ------------------------------------------- */
@@ -295,7 +261,7 @@
 
     /* ---- edit modals (kanban's .ed idiom) ------------------------------------------ */
     .ed { display: flex; flex-direction: column; gap: var(--os-sp-md); min-width: min(420px, 78vw); }
-    .ed label {
+    .ed label:not(.pf-btn) {
       display: block; font-size: 11px; font-weight: var(--os-weight-semibold);
       text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted);
       margin-bottom: var(--os-sp-sm);
@@ -358,8 +324,6 @@
       const [me, setMe]             = useState(null);
       const [recipes, setRecipes]   = useState(null);   // null until the first load lands
       const [recipeId, setRecipeId] = useState(NAV.recipeId);
-      const [storage, setStorage]   = useState(null);   // { backend, pending, can_manage }
-      const [waiting, setWaiting]   = useState(false);  // graduated placement, binding missing
       const [search, setSearch]     = useState("");
       const [activeTag, setActiveTag] = useState(null);
       const [creating, setCreating] = useState(false);
@@ -371,8 +335,6 @@
       async function refresh() {
         const r = await frame.api("api/recipes").catch(() => null);
         if (!r) return;
-        if (r.storage) setStorage(r.storage);
-        setWaiting(!!r.waiting_for_binding);
         if (r.recipes) {
           setRecipes(r.recipes);
           if (NAV.recipeId && !r.recipes.some((x) => x.id === NAV.recipeId)) {
@@ -433,36 +395,6 @@
         write("api/recipe/" + r.id + "/delete", {}).catch(() => {});
       }
 
-      // ---- the data drawer (owner-only) ------------------------------------------------
-      // One button, one surface: the frame says nothing about storage at rest, and every
-      // data action lives here. Single call site so #755 (frame-chrome data controls) can
-      // replace this wholesale. See docs/table-graduation.md.
-      async function onDrawer() {
-        if (storage.pending) {
-          const stop = await frame.confirm("Stop the move to a shared table?", {
-            title: "Recipe data", okLabel: "Stop", cancelLabel: "Keep going",
-          });
-          if (stop) { await write("api/data/cancel_graduate", {}).catch(() => null); refresh(); }
-          return;
-        }
-        if (storage.backend === "shared") {
-          await frame.alert("These recipes live in a shared table, so other frames in this space can work with the same rows.", { title: "Recipe data" });
-          return;
-        }
-        const mode = frame.choose
-          ? await frame.choose("These recipes live on this device.", {
-              title: "Recipe data",
-              options: [
-                { id: "convert", label: "Move to a shared table", icon: "ph-dresser",
-                  detail: "Copies these recipes so other frames can use them" },
-                { id: "adopt", label: "Use an existing shared table", icon: "ph-plugs-connected",
-                  detail: "Point this recipe box at a table you already have" },
-              ],
-            })
-          : ((await frame.confirm("Move this recipe box's data to a shared table?", { title: "Recipe data", okLabel: "Move" })) ? "convert" : null);
-        if (mode) { await write("api/data/graduate", { mode }).catch(() => null); refresh(); }
-      }
-
       const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
 
       // ---- shared chrome ---------------------------------------------------------------
@@ -472,23 +404,6 @@
           ${me.is_sfi_member
             ? html`You have viewer-only access. Ask the owner to raise your role to edit these recipes.`
             : html`You're viewing this recipe box publicly. Join this space to add and edit recipes.`}
-        </div>` : null;
-
-      const storageChip = storage && storage.can_manage ? html`
-        <button class=${"drawer" + (storage.pending ? " pending" : "")}
-          title=${storage.pending ? "Finishing a move to a shared table" : "Recipe data"}
-          onClick=${onDrawer}>
-          <i class="ph-light ph-dresser"></i>
-        </button>` : null;
-
-      const waitingNotice = waiting ? html`
-        <div class="notice">
-          <i class="ph-light ph-table"></i>
-          <h2>Almost there</h2>
-          <p>${me.is_owner
-            ? html`Pick the recipes table to finish.`
-            : html`The owner is finishing this recipe box's move to shared tables.`}</p>
-          ${me.is_owner ? html`<button class="data-ghost" onClick=${refresh}>Open the picker again</button>` : null}
         </div>` : null;
 
       const photoField = (value, onSet) => html`
@@ -558,7 +473,7 @@
 
       // ---- level 2: the cooking view ---------------------------------------------------
       const cur = recipeId && recipes ? recipes.find((x) => x.id === recipeId) : null;
-      if (cur && !waiting) {
+      if (cur) {
         const ing = lines(cur.ingredients_lines);
         const steps = lines(cur.steps_lines);
         const subParts = [];
@@ -693,13 +608,11 @@
             <i class="ph-light ph-cooking-pot brand"></i>
             <div class="titles"><h1 class="t-title"><span class="static">Recipe Box</span></h1></div>
             <span class="mode">${mode}</span>
-            ${storageChip}
           </div>
 
           ${banner}
 
-          ${waitingNotice
-          ?? (recipes === null ? null
+          ${recipes === null ? null
           : recipes.length === 0
             ? (isEditor ? html`
                 <div class="notice">
@@ -749,7 +662,7 @@
               ${isEditor ? html`
                 <button class="new-recipe" onClick=${() => setCreating(true)}>
                   <i class="ph-light ph-plus"></i>New recipe
-                </button>` : null}`)}
+                </button>` : null}`}
 
           ${createModal}
         </main>

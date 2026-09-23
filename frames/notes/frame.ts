@@ -4,10 +4,10 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members read the stream live; space editors
 //                                           write.
-//   data_storage:   storage-local        — a LocalTable and no contract. Nobody else acts
-//                                           on these rows, so making the owner graduate and
-//                                           bind a table would charge ceremony for nothing
-//                                           (docs/schema-contracts.md, "When NOT to write a
+//   data_storage:   the space's table    — `notes.table.jsonl` at the space's root, synced
+//                                           with the space to every member and openable in any
+//                                           table tool. No contract: nobody else acts on these
+//                                           rows (docs/schema-contracts.md, "When NOT to write a
 //                                           contract").
 //   view_realtime:  view-collaborative    — every write pushes; a note typed on a phone is
 //                                           on the desk machine before you look up.
@@ -20,7 +20,7 @@
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, declareTables, ensureTables, table,
+  pushToInstance, sanitizeText, declareTables, table,
 } from "@frame-core";
 
 const NOTES_SCHEMA = [
@@ -34,7 +34,7 @@ const NOTES_SCHEMA = [
 ];
 
 declareTables([
-  { key: "notes", title: "Notes", description: "Notes captured in this placement's stream.", local: true, schema: NOTES_SCHEMA },
+  { key: "notes", title: "Notes", description: "Notes captured in this space's stream.", local: true, schema: NOTES_SCHEMA },
 ]);
 
 type Peer = ReturnType<typeof parsePeerInfo>;
@@ -58,16 +58,6 @@ function extractTags(body: string): string {
   return found.join(",");
 }
 
-async function readyTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  if (!r.byKey["notes"]) {
-    try { await table("notes", peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`notes: ensure failed: ${e}`); }
-    r = ensureTables(quiet);
-  }
-  return !!r.byKey["notes"];
-}
-
 async function listNotes(t: Tbl) {
   // Newest first. Pinned notes are lifted client-side rather than sorted here, so the
   // stream's underlying order stays purely chronological.
@@ -89,7 +79,6 @@ function notify(sfiId: string) {
 }
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  if (!(await readyTables(peer))) return { status: 503, body: { error: "table not ready" } };
   const t = table("notes", sfiId);
 
   // Never gate writes on is_sfi_member — a Viewer-role member would slip through.
@@ -172,8 +161,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
     return jsonReply(replyPort, r.status, r.body);
   }
-
-  if (!(await readyTables(peer))) return jsonReply(replyPort, 503, { error: "table not ready" });
 
   if (reqPath === "/api/list" && method === "GET") {
     return jsonReply(replyPort, 200, { notes: await listNotes(table("notes", sfiId)) });

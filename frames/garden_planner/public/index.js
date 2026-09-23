@@ -1,4 +1,5 @@
-import { frame } from "./lib/js/framelib.js";
+import { frame, html, render } from "./lib/js/framelib.js";
+import { ListLine, chooseList, settleList } from "./members_list.js";
 
 const urlSfi = new URLSearchParams(location.search).get('sfi') || '';
 const withSfi = (url) => urlSfi ? url + (url.includes('?') ? '&' : '?') + 'sfi=' + encodeURIComponent(urlSfi) : url;
@@ -46,9 +47,8 @@ const canvasEl = document.getElementById('canvas');
 const emptyEl = document.getElementById('empty');
 
 // ----- Fetching ---------------------------------------------------------------------
-// The /api/plots route returns 503 ("tables not yet bound") which we surface as a
-// {__waiting: true} sentinel, so we keep the raw-Response wrapper (frame.fetch)
-// instead of frame.api (which throws on non-2xx).
+// A raw-Response wrapper (frame.fetch) rather than frame.api, which throws on non-2xx:
+// a 503 comes back as a {__waiting: true} sentinel and the page says so.
 async function fetchJSON(url, opts) {
   const r = await frame.fetch(withSfi(url), opts);
   if (r.status === 503) return { __waiting: true };
@@ -83,12 +83,6 @@ async function loadState() {
   // Header rail: one word, three outcomes.
   document.getElementById('role-label').textContent =
     state.viewer.is_owner ? 'owner' : state.can_edit ? 'editor' : 'viewer';
-  const stor = state.storage;
-  const dataBtn = document.getElementById('data-btn');
-  dataBtn.classList.toggle('hidden', !(stor && stor.can_manage));
-  // A unit still mid-flow is the only ambient signal the drawer ever shows.
-  const anyPending = !!(stor && stor.units.some((u) => u.pending));
-  dataBtn.title = anyPending ? 'Finishing a change to the garden data' : 'Garden data';
 
   // Header actions visibility.
   document.getElementById('settings-btn').classList.toggle('hidden', !state.viewer.is_owner);
@@ -110,7 +104,41 @@ async function loadState() {
   }
 
   applyCanvasSize();
+  drawListLine();
+  watchRoster();
   return true;
+}
+
+// ----- Which members list (the roster plots are assigned from) ---------------------------
+async function bind(list) {
+  const r = await frame.fetch(withSfi('./api/bind'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ list }),
+  });
+  if (!r.ok) await frame.alert((await r.json().catch(() => null))?.error || 'failed');
+  await loadState(); await loadMembers(); await loadPlots();
+}
+
+function drawListLine() {
+  render(html`<${ListLine} bound=${state.bound} canBind=${state.can_bind}
+    onChoose=${async () => { const n = await chooseList(state.bound); if (n && n !== state.bound) await bind(n); }} />`,
+    document.getElementById('list-line'));
+}
+
+// The bound list is Member Manager's table, written from its own frame, whose pushes never
+// reach this page: watch the table itself (members only — the roster is theirs).
+let rosterWatch = null, rosterWatched = '';
+function watchRoster() {
+  const want = state.bound && !state.viewer.is_anon ? state.bound : '';
+  if (want === rosterWatched || !window.seamside?.kv?.watch) return;
+  rosterWatch?.close();
+  rosterWatch = null;
+  rosterWatched = want;
+  if (!want) return;
+  let soon = 0;
+  rosterWatch = window.seamside.kv.watch(`t/${want}/`, () => {
+    clearTimeout(soon);
+    soon = setTimeout(async () => { await loadMembers(); await loadPlots(); }, 300);
+  });
 }
 
 function applyCanvasSize() {
@@ -681,80 +709,9 @@ document.getElementById('settings-save').addEventListener('click', async () => {
   settingsOverlay.classList.add('hidden');   // the settings_changed push reloads everything
 });
 
-// ----- The data drawer (owner-only) --------------------------------------------------
-// ONE button, ONE surface. The frame says nothing about storage at rest; every data
-// action for every unit lives behind here, listing each unit with its state as the
-// detail line. Single call site so #755 (frame-chrome data controls) can replace it
-// wholesale. See docs/table-graduation.md.
-const UNIT_STATE_TEXT = {
-  local:  'on this device',
-  shared: 'in a shared table',
-  none:   'not linked',
-};
-
-document.getElementById('data-btn').addEventListener('click', async () => {
-  const stor = state.storage;
-  if (!stor || !stor.can_manage) return;
-
-  const pending = stor.units.find((u) => u.pending);
-  if (pending) {
-    const stop = await frame.confirm(`Stop the change to ${pending.label.toLowerCase()}?`, {
-      title: 'Garden data', okLabel: 'Stop', cancelLabel: 'Keep going',
-    });
-    if (stop) await write('data/cancel_graduate', { unit: pending.unit });
-    return;
-  }
-
-  const unit = stor.units.length === 1 ? stor.units[0].unit : await frame.choose('Which data?', {
-    title: 'Garden data',
-    options: stor.units.map((u) => ({
-      id: u.unit, label: u.label,
-      icon: u.unit === 'members' ? 'ph-users' : 'ph-dresser',
-      detail: UNIT_STATE_TEXT[u.backend] || u.backend,
-    })),
-  });
-  if (!unit) return;
-  const u = stor.units.find((x) => x.unit === unit);
-  if (!u) return;
-
-  // The roster is a link unit — adopt-only, and unlinking loses nothing because it owns
-  // no data. The plots unit is ours, so it offers the full convert-or-adopt choice.
-  if (u.kind === 'link') {
-    if (u.backend === 'shared') {
-      const off = await frame.confirm(
-        'Unlink the member roster? Plots keep the names already on them, and you can type names in by hand.',
-        { title: u.label, okLabel: 'Unlink' });
-      if (off) await write('data/unlink', { unit });
-      return;
-    }
-    const on = await frame.confirm(
-      'Link a shared member roster? Pick the table your members live in — the schema matches Member Manager.',
-      { title: u.label, okLabel: 'Link' });
-    if (on) await write('data/graduate', { unit, mode: 'adopt' });
-    return;
-  }
-
-  if (u.backend === 'shared') {
-    await frame.alert('These plots live in a shared table, so other frames in this space can work with the same rows.',
-      { title: u.label });
-    return;
-  }
-  const mode = await frame.choose('These plots live on this device.', {
-    title: u.label,
-    options: [
-      { id: 'convert', label: 'Move to a shared table', icon: 'ph-dresser',
-        detail: 'Copies this garden so other frames can use it' },
-      { id: 'adopt', label: 'Use an existing shared table', icon: 'ph-plugs-connected',
-        detail: 'Point this garden at a table you already have' },
-    ],
-  });
-  if (mode) await write('data/graduate', { unit, mode });
-});
-
 // ----- Live updates -----------------------------------------------------------------
 window.addEventListener('message', async (e) => {
   if (e.data?.type === 'plots_changed') loadPlots();
-  else if (e.data?.type === 'members_changed') { await loadMembers(); }
   else if (e.data?.type === 'settings_changed') { await loadState(); await loadMembers(); await loadPlots(); }
 });
 
@@ -766,11 +723,12 @@ setInterval(() => { if (!document.hidden) { loadState().then(() => loadPlots());
   const ok = await loadState();
   if (!ok) {
     emptyEl.classList.remove('hidden');
-    document.getElementById('empty-text').textContent = 'Waiting for the space owner to bind SyncTables for the garden…';
+    document.getElementById('empty-text').textContent = 'The garden could not be loaded. Try again in a moment.';
     return;
   }
   await loadMembers();
   await loadPlots();
+  await settleList(state, bind);
   // First-time setup: if the owner just placed this frame and hasn't picked a location
   // yet, drop them straight into settings. Stress can't be computed without weather, so
   // the location is the one piece of config that actually blocks the frame from being

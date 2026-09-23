@@ -99,7 +99,7 @@ body {
 
 /* ----- Plant cards (dashboard grid) -----
  * Cards flow into auto-fill columns of at least 220px so a ten-plant garden lays
- * out as 1 column on phones, 2-3 columns on a typical tandem placement, and a
+ * out as 1 column on phones, 2-3 columns in a typical frame pane, and a
  * full dashboard on a wide screen. Within each card the spectrum sits below the
  * label so it always has the full card width to draw the analog markers on.
  */

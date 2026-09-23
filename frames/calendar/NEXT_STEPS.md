@@ -33,7 +33,7 @@ A few directions this frame could grow, roughly in order of value:
 This frame used to carry a per-instance `settings.isPublic` that gated the read side for
 non-members. It has been removed, and an earlier version of this note proposed promoting that
 "owner-flips-public-visibility" pattern into a jig — don't. Public access is decided by the
-**platform** (public sharing on the placement), not by the frame. A frame that keeps its own
+**platform** (the space's tier and whether the frame is published), not by the frame. A frame that keeps its own
 gate produces the bug this pattern always produced: you share the frame publicly, the visitor
 opens the link, and the frame tells them it's private because its own flag defaulted to off.
 

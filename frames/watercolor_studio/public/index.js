@@ -17,7 +17,7 @@
 // Color is chosen from a tray of real watercolor pans, mixed SUBTRACTIVELY in a mixing well
 // (weighted geometric mean of reflectance — blue + yellow → green, complements → mud).
 //
-// Read-only viewers (anon FAT + Viewer-role members) replay the painting and receive live
+// Read-only viewers (anonymous link visitors + Viewer-role members) replay the painting and receive live
 // updates, but no /api/* mutation fires.
 // ----------------------------------------------------------------------------------------
 import { frame, applyChannel } from "./lib/js/framelib.js";
@@ -170,6 +170,8 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   let mix = [];                 // [{ id, parts }]
   let activeHex = null;
 
+  let sheetDir = null;          // the sheet's folder in the space, once it has one
+
   let tmpCounter = 0;
   const myStack = [];           // own stroke ids (for undo)
 
@@ -187,8 +189,9 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
       </div>
 
       <div class="ws-utility" id="ws-utility">
-        <input class="ws-title-input" id="ws-title-input" type="text" maxlength="80" placeholder="Watercolor Studio" ${canEdit ? "" : "disabled"} />
+        <input class="ws-title-input" id="ws-title-input" type="text" maxlength="80" placeholder="Watercolor Studio" ${isOwner ? "" : "disabled"} />
         <span class="ws-meta" id="ws-meta"></span>
+        <button class="ws-util-btn" id="ws-save-btn" title="Save the picture" hidden><i class="ph-light ph-download-simple"></i></button>
         <button class="ws-util-btn" id="ws-settings-btn" title="Settings" hidden><i class="ph-light ph-dots-three"></i></button>
       </div>
       <div class="ws-settings-pop" id="ws-settings-pop"></div>
@@ -212,6 +215,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   const titleInput = document.getElementById("ws-title-input");
   const metaEl = document.getElementById("ws-meta");
   const settingsBtn = document.getElementById("ws-settings-btn");
+  const saveBtn = document.getElementById("ws-save-btn");
   const settingsPop = document.getElementById("ws-settings-pop");
   const toolsEl = document.getElementById("ws-tools");
   const paletteEl = document.getElementById("ws-palette");
@@ -623,11 +627,9 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   // API helper
   // --------------------------------------------------------------------------------------
   async function api(method, path, body) {
-    // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
-    // dropped on Android (issue #750), the tether carries them everywhere. Fire-and-
-    // forget — resulting state arrives via the ws_* pushes below (the sender's own
-    // stroke reconciles by seed there). Feature-detect: an older viewer build has no
-    // busSend — fall back to the HTTP write it was using before.
+    // Writes go over frame.busSend, fire-and-forget — resulting state arrives via the ws_*
+    // pushes below (the sender's own stroke reconciles by seed there). A framelib without
+    // busSend falls back to the HTTP write.
     if ((method === "POST" || method === "PUT") && typeof frame.busSend === "function") {
       frame.busSend({ op: path.replace(/^\/api\//, ""), ...(body || {}) });
       return {};
@@ -650,6 +652,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
     try {
       const res = await api("POST", "/api/stroke/add", payload);
       if (res.stroke && res.stroke.id) reconcileId(tempId, res.stroke.id);
+      schedulePicture();
     } catch (e) {
       removeStroke(tempId);
       const si = myStack.indexOf(tempId);
@@ -679,9 +682,53 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
     } else {
       removeStroke(id);   // buried under later strokes — full (chunked) repaint
     }
-    try { await api("POST", "/api/stroke/delete", { ids: [id] }); }
+    try { await api("POST", "/api/stroke/delete", { ids: [id] }); schedulePicture(); }
     catch (e) { toast("undo failed"); }
   }
+
+  // --------------------------------------------------------------------------------------
+  // The picture — painting.png beside the strokes in the space, rendered at a fixed size by
+  // the page that made a change, a moment after its last one.
+  // --------------------------------------------------------------------------------------
+  const PICTURE_LONG_SIDE = 1600;
+  let pictureTimer = 0;
+  function schedulePicture() {
+    if (!canEdit) return;
+    clearTimeout(pictureTimer);
+    pictureTimer = setTimeout(sendPicture, 2000);
+  }
+  async function sendPicture() {
+    const last = order[order.length - 1];
+    if (!last) return;
+    if (last.startsWith("tmp_")) { schedulePicture(); return; }
+    const ar = ASPECTS[prefs.aspect] || ASPECTS.landscape;
+    const w = ar >= 1 ? PICTURE_LONG_SIDE : Math.round(PICTURE_LONG_SIDE * ar);
+    const h = ar >= 1 ? Math.round(PICTURE_LONG_SIDE / ar) : PICTURE_LONG_SIDE;
+    const layer = document.createElement("canvas");
+    layer.width = w; layer.height = h;
+    const lctx = layer.getContext("2d");
+    for (const id of order) { const s = strokes.get(id); if (s) renderStroke(lctx, s, false); }
+    const pic = document.createElement("canvas");
+    pic.width = w; pic.height = h;
+    const pctx = pic.getContext("2d");
+    pctx.fillStyle = (PAPERS[prefs.paper] || PAPERS.coldpress).bg;
+    pctx.fillRect(0, 0, w, h);
+    pctx.drawImage(layer, 0, 0);
+    const blob = await new Promise((r) => pic.toBlob(r, "image/png"));
+    if (!blob) return;
+    // 409: the sheet moved on while this rendered; whoever moved it sends the next picture.
+    await frame.fetch(`api/picture?last=${encodeURIComponent(last)}`, { method: "POST", body: await blob.arrayBuffer() }).catch(() => {});
+  }
+
+  saveBtn.addEventListener("click", async () => {
+    const res = await frame.fetch("api/picture").catch(() => null);
+    if (!res || !res.ok) { toast("no picture yet"); return; }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url; a.download = `${prefs.title || "Watercolor"}.png`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  });
 
   // --------------------------------------------------------------------------------------
   // Toast
@@ -701,6 +748,8 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
 
   function renderMeta() {
     titleInput.value = prefs.title;
+    saveBtn.hidden = !order.length;
+    metaEl.title = sheetDir ? `Kept in this space at ${sheetDir}/` : "";
     metaEl.textContent = canEdit
       ? `${order.length} stroke${order.length === 1 ? "" : "s"}`
       : "view only";
@@ -1030,6 +1079,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   function saveSettings(patch) {
     const next = { title: prefs.title, paper: prefs.paper, guide: prefs.guide, aspect: prefs.aspect, ...patch };
     api("POST", "/api/settings", next).catch((e) => toast("settings failed"));
+    if (patch.paper || patch.aspect) schedulePicture();
   }
 
   settingsBtn.addEventListener("click", () => {
@@ -1075,6 +1125,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
     const d = e.data || {};
     if (d.sfi_id && mySfi && d.sfi_id !== mySfi) return;
     if (d.type === "ws_add" && d.stroke) {
+      if (d.sheet) sheetDir = d.sheet;
       const dup = strokes.has(d.stroke.id) ? strokes.get(d.stroke.id) : strokeBySeed(d.stroke.seed);
       if (dup) {
         // our own optimistic echo — adopt the authoritative id if we still hold a temp
@@ -1108,6 +1159,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
     try {
       const data = await api("GET", "/api/state");
       prefs = data.prefs || prefs;
+      sheetDir = data.sheet || null;
       const list = Array.isArray(data.strokes) ? data.strokes : [];
       strokes.clear(); order = [];
       for (const s of list) { strokes.set(s.id, s); order.push(s.id); }

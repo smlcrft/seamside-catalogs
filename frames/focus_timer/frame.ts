@@ -4,27 +4,26 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members watch the same countdown; space
 //                                           editors drive it.
-//   data_storage:   storage-none         — deliberately NOT a table frame. A timer has one
+//   data_storage:   storage-session      — deliberately NOT a table frame. A timer has one
 //                                           state, not a collection of rows: there is
 //                                           nothing to list, nothing another frame would
-//                                           want to bind, and nothing to graduate. State
-//                                           lives in the per-placement settings file on the
-//                                           host, so this frame has no data drawer at all
-//                                           and its header rail carries only the role.
+//                                           want to share. It is this session's own key
+//                                           (`timer` in sessionKv), so two timers in one
+//                                           space run apart and it travels with the space.
 //   view_realtime:  view-collaborative    — every change calls pushToInstance(sfi_id, …) so
 //                                           all viewers re-read at once.
-//   settings_scope: settings-per-sfi      — keyed by sfi_id like every other placement.
+//   settings_scope: settings-per-session  — one timer per session of the frame.
 //
 // THE CLOCK RUNS NOWHERE. A frame has no scheduler, and a timer that depended on one would
-// silently stop on a sleeping device and disagree with every other viewer. So the host
-// stores only `ends_at_ms` — the wall-clock instant the session is over — and each client
+// silently stop on a sleeping device and disagree with every other viewer. So the keeper's
+// device stores only `ends_at_ms` — the wall-clock instant the session is over — and each client
 // subtracts. Everyone agrees without anything ticking, a paused timer keeps whole seconds
 // rather than a running deadline, and a device that slept through the end wakes up showing
 // "done" instead of a stale number.
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
+  pushToInstance, sanitizeText, sessionKv,
 } from "@frame-core";
 
 const MIN_MINUTES = 1;
@@ -43,13 +42,14 @@ const DEFAULT_SESSION: Session = {
   duration_s: 25 * 60, ends_at_ms: 0, paused_left_s: 0, label: "", started_by: "",
 };
 
-const allSessions: Record<string, Session> = loadJsonFile(import.meta.url, "sessions.json", {});
-function getSession(sfiId: string): Session {
-  return { ...DEFAULT_SESSION, ...(allSessions[sfiId] ?? {}) };
+async function getSession(): Promise<Session> {
+  const op = await sessionKv.get("timer");
+  let saved: Partial<Session> = {};
+  try { if (op?.value) saved = JSON.parse(op.value); } catch { /* a bad value reads as the default */ }
+  return { ...DEFAULT_SESSION, ...saved };
 }
-function saveSession(sfiId: string, s: Session): void {
-  allSessions[sfiId] = s;
-  saveJsonFile(import.meta.url, "sessions.json", allSessions);
+async function saveSession(s: Session): Promise<void> {
+  await sessionKv.put("timer", JSON.stringify(s));
 }
 
 type Peer = ReturnType<typeof parsePeerInfo>;
@@ -81,12 +81,12 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   // Viewer-role member would slip through.
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
 
-  const s = getSession(sfiId);
+  const s = await getSession();
   const now = Date.now();
   const running = s.ends_at_ms > now;
 
-  const ok = (): WriteResult => {
-    saveSession(sfiId, s);
+  const ok = async (): Promise<WriteResult> => {
+    await saveSession(s);
     notify(sfiId);
     return { status: 200, body: { session: view(s) } };
   };
@@ -97,7 +97,7 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     if (running) return { status: 409, body: { error: "running" } };
     s.duration_s = clampMinutes(v?.minutes) * 60;
     s.paused_left_s = 0;   // a fresh dial setting replaces whatever was left over
-    return ok();
+    return await ok();
   }
 
   if (op === "start") {
@@ -107,8 +107,9 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     if (left <= 0) return { status: 400, body: { error: "nothing to run" } };
     s.ends_at_ms = now + left * 1000;
     s.paused_left_s = 0;
-    s.started_by = sanitizeText(peer.user_name, 60);
-    return ok();
+    // The keeper has no roster name; name them as the owner rather than leave it blank.
+    s.started_by = sanitizeText(peer.user_name, 60) || (peer.is_owner ? "the owner" : "");
+    return await ok();
   }
 
   if (op === "pause") {
@@ -116,7 +117,7 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     // Keep whole seconds, not a deadline: a paused timer must not drift while it waits.
     s.paused_left_s = Math.max(1, Math.round((s.ends_at_ms - now) / 1000));
     s.ends_at_ms = 0;
-    return ok();
+    return await ok();
   }
 
   // Back to the top of the dial — also how you clear a finished session.
@@ -124,12 +125,12 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     s.ends_at_ms = 0;
     s.paused_left_s = 0;
     s.started_by = "";
-    return ok();
+    return await ok();
   }
 
   if (op === "label") {
     s.label = sanitizeText(v?.label, MAX_LABEL);
-    return ok();
+    return await ok();
   }
 
   return { status: 404, body: { error: "not found" } };
@@ -172,7 +173,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
 
   // Read — open to everyone, including anon viewers watching the room's countdown.
   if (reqPath === "/api/state" && method === "GET") {
-    return jsonReply(replyPort, 200, { session: view(getSession(sfiId)) });
+    return jsonReply(replyPort, 200, { session: view(await getSession()) });
   }
 
   return jsonReply(replyPort, 404, { error: "not found" });

@@ -1,15 +1,17 @@
 {
     "name": "Community Home",
-    "description": "A minimal website builder for a community home page. Admins configure the title, color, sections, and links; anonymous visitors see the published public page.",
+    "description": "A simple home page for a community. Editors set the title and tagline and add sections (plain text or HTML), links and links to public frames, in any order, and preview what visitors see; everyone else \u2014 viewers, and anyone the frame is published to \u2014 sees the page, updated live. Links open in the visitor's own browser tab. The page is the space's own table (community_home_blocks) plus a few settings rows.",
     "frame_type": "Tandem",
     "tags": ["community", "website"],
     "permissions": {
         "net": []
     },
     "created_at": "2026-04-23 00:00:00.000000 UTC",
-    "modified_at": "2026-08-04T21:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T14:20:00Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:browsers",
+    "color": "c1"
 }

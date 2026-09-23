@@ -4,14 +4,12 @@
 // Design axes:
 //   privacy:        privacy-public-view  — a study group sees the same board; space editors
 //                                           add and tick.
-//   data_storage:   storage-local        — LocalTables, and NO shared courses table. The
-//                                           plan originally had this catalog share `courses`
-//                                           across three frames; that was dropped, because
-//                                           nothing MOVES between them — courses are this
-//                                           frame's own data, and splitting them out costs
-//                                           three installs and two link steps to reach what
-//                                           one frame models on its own. See "When NOT to
-//                                           write a contract" in docs/schema-contracts.md.
+//   data_storage:   the space's tables   — `assignments.table.jsonl` (the work) and
+//                                           `assignments_courses.table.jsonl`, files at the
+//                                           space's root, synced with it. Named for this frame:
+//                                           courses are its own data, not a contract other
+//                                           frames share (see "When NOT to write a contract"
+//                                           in docs/schema-contracts.md).
 //   view_realtime:  view-collaborative    — every write pushes.
 //   settings_scope: settings-per-sfi
 //
@@ -24,6 +22,9 @@ import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
   pushToInstance, sanitizeText, declareTables, ensureTables, table,
 } from "@frame-core";
+
+const COURSES = "assignments_courses";
+const WORK = "assignments";
 
 const COURSES_SCHEMA = [
   { name: "name",       col_type: "text"    as const, nullable: false, default_val: "" },
@@ -47,8 +48,8 @@ const WORK_SCHEMA = [
 ];
 
 declareTables([
-  { key: "courses", title: "Courses", description: "Courses tracked in this placement.", local: true, schema: COURSES_SCHEMA },
-  { key: "work",    title: "Assignments", description: "Assignments for this placement's courses.", local: true, schema: WORK_SCHEMA },
+  { key: COURSES, title: "Courses", description: "Courses tracked in this space.", local: true, schema: COURSES_SCHEMA },
+  { key: WORK,    title: "Assignments", description: "Assignments for this space's courses.", local: true, schema: WORK_SCHEMA },
 ]);
 
 type Peer = ReturnType<typeof parsePeerInfo>;
@@ -115,18 +116,18 @@ function gradeCourse(work: WorkRow[]) {
 async function readyTables(peer: Peer): Promise<boolean> {
   const quiet = { ...peer, is_owner: false } as Peer;
   let r = ensureTables(quiet);
-  for (const key of ["courses", "work"]) {
+  for (const key of [COURSES, WORK]) {
     if (!r.byKey[key]) {
       try { await table(key, peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`assignments: ensure "${key}" failed: ${e}`); }
       r = ensureTables(quiet);
     }
   }
-  return !!r.byKey["courses"] && !!r.byKey["work"];
+  return !!r.byKey[COURSES] && !!r.byKey[WORK];
 }
 
 async function readAll(sfiId: string) {
-  const { rows: crows } = await table("courses", sfiId).query({ order_by: [{ col: "sort_order" }] });
-  const { rows: wrows } = await table("work", sfiId).query({ limit: 2000 });
+  const { rows: crows } = await table(COURSES, sfiId).query({ order_by: [{ col: "sort_order" }] });
+  const { rows: wrows } = await table(WORK, sfiId).query({ limit: 2000 });
 
   const work: WorkRow[] = wrows.map((r) => ({
     id: r._row_id, course_id: String(r.course_id || ""), title: String(r.title || ""),
@@ -172,8 +173,8 @@ function notify(sfiId: string) {
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
   if (!(await readyTables(peer))) return { status: 503, body: { error: "tables not ready" } };
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  const courses = table("courses", sfiId);
-  const work = table("work", sfiId);
+  const courses = table(COURSES, sfiId);
+  const work = table(WORK, sfiId);
 
   const ok = async (): Promise<WriteResult> => { notify(sfiId); return { status: 200, body: { ok: true } }; };
 

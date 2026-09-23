@@ -4,15 +4,13 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members get a live read-only view;
 //                                           space editors get the interactive UI.
-//   data_storage:   storage-local-db     — a LocalTable: encrypted at rest on the host
-//                                           device, scoped per placement so each placement
-//                                           is its own independent list. NOT shared
-//                                           peer-to-peer; collaboration happens at the
-//                                           frontend layer (all viewers talk to this one
-//                                           backend and re-fetch on push).
+//   data_storage:   the space's table    — `checklist.table.jsonl` at the space's root:
+//                                           one list per space, synced with it to every
+//                                           member, openable in any table tool. Every
+//                                           checklist session in the space shows it.
 //   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so all viewers of the placement refresh live.
-//   settings_scope: settings-per-sfi      — the table binding is keyed by peer.sfi_id.
+//                                           so every viewer refreshes live.
+//   settings_scope: settings-per-sfi      — peer.sfi_id (in v1, the space being served).
 //
 // Each item has a 3-state status: 0 = unstarted, 1 = in-progress, 2 = complete.
 // ----------------------------------------------------------------------------------------
@@ -22,11 +20,11 @@ import {
   declareTables, ensureTables, table,
 } from "@frame-core";
 
-// ----- LocalTable (encrypted, per-placement — no sfi_id column needed) ------------------
+// ----- The space's table (named for this frame, so no other frame's rows land in it) ------
 declareTables([{
-  key: "items",
+  key: "checklist",
   title: "Checklist Items",
-  description: "Tasks for this placement's checklist.",
+  description: "Tasks on this space's checklist.",
   local: true,
   schema: [
     { name: "text",       col_type: "text",    nullable: false, default_val: "" },
@@ -76,7 +74,7 @@ async function handleWrite(
   const tables = ensureTables(peer);
   if (!tables.ready) return { status: 503, body: { error: "table not bound" } };
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  const items = table("items", sfiId);
+  const items = table("checklist", sfiId);
 
   // Add a new item in the last slot.
   if (op === "add") {
@@ -89,8 +87,7 @@ async function handleWrite(
     return { status: 200, body: { items: await listItems(items) } };
   }
 
-  // Update one item's state and/or text. The table is placement-scoped, so an
-  // id from another placement simply doesn't exist here. Guard with get() —
+  // Update one item's state and/or text. Guard with get() —
   // upsert(unknownId) would otherwise create a phantom row.
   if (op.startsWith("item/")) {
     const id = op.slice("item/".length);
@@ -113,10 +110,10 @@ async function handleWrite(
     return { status: 200, body: { items: await listItems(items) } };
   }
 
-  // Reorder — carries the full ordered list of item ids for this placement.
+  // Reorder — carries the full ordered list of item ids.
   if (op === "reorder") {
     const ids = Array.isArray(v?.ids) ? v.ids.filter((x): x is string => typeof x === "string" && !!x) : [];
-    // Only touch ids that actually exist in this placement (never phantom-create).
+    // Only touch ids that actually exist (never phantom-create).
     const { rows } = await items.query({});
     const known = new Set(rows.map((r) => r._row_id));
     for (let i = 0; i < ids.length; i++) {
@@ -177,9 +174,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   const tables = ensureTables(peer);
   if (!tables.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
 
-  // Read — open to everyone (non-members get a read-only view of this placement's list).
+  // Read — open to everyone (non-members get a read-only view of the list).
   if (reqPath === "/api/list" && method === "GET") {
-    return jsonReply(replyPort, 200, { items: await listItems(table("items", peer.sfi_id)) });
+    return jsonReply(replyPort, 200, { items: await listItems(table("checklist", peer.sfi_id)) });
   }
 
   // Writes — kept as HTTP arms for older viewers; same shared logic as the bus dispatcher.

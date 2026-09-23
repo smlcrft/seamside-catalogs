@@ -1,6 +1,6 @@
 {
     "name": "Grocery List",
-    "description": "The realtime shared shopping list, unique per placement. Space editors add items with a quantity and an aisle category, tick things off as they land in the cart, and sweep everything bought with one clear. Everyone else, including anyone the frame is shared with publicly, sees the same list live and read-only. Items live in an encrypted LocalTable scoped to the placement, and every check is pushed instantly to all viewers. The owner can move the list to a shared space table, after which the Meal Planner can send a week's ingredients straight into the same list.",
+    "description": "The realtime shopping list for a space. Collaborators add items with a quantity and an aisle, tick things off as they land in the cart, and sweep everything bought with one clear. Everyone else, including anyone the frame is published to, sees the same list live and read-only. The list is the space's grocery table (grocery.table.jsonl), synced with the space; a Meal Planner in the same space sends a week's recipe ingredients straight into it.",
     "frame_type": "Tandem",
     "tags": ["household", "kitchen"],
     "permissions": {
@@ -9,9 +9,11 @@
     "default_width_px": 520,
     "default_height_px": 560,
     "created_at": "2026-08-04T23:00:00Z",
-    "modified_at": "2026-08-04T23:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T04:26:06Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:basket",
+    "color": "c1"
 }

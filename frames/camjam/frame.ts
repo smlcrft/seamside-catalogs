@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------------------
-// CamJam — one member at a time shares a tiny webcam still with the placement.
+// CamJam — one member at a time shares a tiny webcam still with the space.
 //
 // Design axes:
 //   privacy:        privacy-space-users  — only space MEMBERS can share a camera. WATCHING
@@ -7,22 +7,23 @@
 //   data_storage:   (none) + settings-per-sfi — the live still is deliberately EPHEMERAL:
 //                                          it lives in a module-level Map on the host and is
 //                                          never written to disk. Only the rung and the
-//                                          title persist, in `frameSettings(sfi_id)`.
+//                                          title persist, as `camjam.*` keys of
+//                                          `frameSettings(sfi_id)` (a table every frame in
+//                                          the space shares, hence the prefix).
 //   view_realtime:  view-collaborative   — every new still pushes a tick to all viewers.
-//   settings_scope: settings-per-sfi     — each placement is its own independent feed.
+//   settings_scope: settings-per-sfi     — each space is its own independent feed.
 //
-// WHO CAN WATCH — the host's frame-sharing toggle, not a setting in here
-//   Anyone who can load this frame may see the feed. That is not laxity: an anonymous or
-//   bookmark-only viewer reaches this frame ONLY through the anon-sfi path, which the
-//   host's own `public_sharing_enabled` flag live-gates (clearing it revokes on the next
-//   auth resolution). Everyone else is a space member. So by the time a request lands
-//   here, the platform has already answered "is this frame public?" — and re-asking it
-//   with a second in-frame toggle would just mean two switches that both have to be on,
-//   and a frame the owner has marked public that still shows nothing.
+// WHO CAN WATCH — the space's own sharing, not a setting in here
+//   Anyone who can load this frame may see the feed. That is not laxity: someone off the
+//   roster reaches this frame only where the space lets strangers in and the frame is
+//   published, and unpublishing it shuts them out. Everyone else is a space member. So by
+//   the time a request lands here, the platform has already answered "is this frame
+//   public?" — and re-asking it with a second in-frame toggle would just mean two switches
+//   that both have to be on, and a published frame that still shows nothing.
 //
 // CAMERA CONSENT
 //   `permissions.camera` in frame.json only makes the iframe ELIGIBLE for `allow="camera"`;
-//   each viewer answers the host's own consent prompt on their own device. This frame calls
+//   each viewer answers the browser's own consent prompt on their own device. This frame calls
 //   `getUserMedia()` only when a member explicitly presses "share" — a viewer who never
 //   shares never has their camera opened.
 // ----------------------------------------------------------------------------------------
@@ -98,9 +99,9 @@ type Live = {
   stale_ms: number; // silence after which this holder loses the slot (rung-derived)
   max_b64: number;  // biggest still this holder may send (rung-derived)
 };
-const live = new Map<string, Live>();   // sfi_id → the placement's current broadcast
+const live = new Map<string, Live>();   // sfi_id → the space's current broadcast
 
-/** The placement's live broadcast, or null if there is none / the sharer went quiet. */
+/** The space's live broadcast, or null if there is none / the sharer went quiet. */
 function current(sfiId: string): Live | null {
   const l = live.get(sfiId);
   if (!l) return null;
@@ -112,28 +113,25 @@ function tick(sfiId: string, seq: number): void {
   pushToInstance(sfiId, { type: "cam_tick", seq });
 }
 
-// ----- Persisted prefs (per placement) ---------------------------------------------------
+// ----- Persisted prefs (per space) -------------------------------------------------------
 // The rung and the title are the ONLY things this frame persists. Who may watch is
-// deliberately not among them: an anonymous or bookmark-only viewer can only reach this
-// frame through the anon-sfi path, which the host's own frame-sharing toggle
-// (`public_sharing_enabled`) already live-gates. A second in-frame switch behind that one
-// would only give the owner two things to turn on, and a way to have a "public" frame
-// nobody can see.
+// deliberately not among them: that is the space's sharing (see WHO CAN WATCH above).
 const DEFAULT_TITLE = "My CamJam Feed";
+const KEY_INTERVAL = "camjam.interval_ms";
+const KEY_TITLE = "camjam.title";
 const MAX_TITLE = 80;
 
 async function readPrefs(sfiId: string): Promise<{ step: Step; title: string }> {
   const s = frameSettings(sfiId);
   const [ms, title] = await Promise.all([
-    s.get<number>("interval_ms"),
-    s.get<string>("title"),
+    s.get<number>(KEY_INTERVAL),
+    s.get<string>(KEY_TITLE),
   ]);
   return { step: stepFor(ms), title: sanitizeText(title, MAX_TITLE) || DEFAULT_TITLE };
 }
 
 // ----- UI writes (BusUiToFrame — the still-frame path) -----------------------------------
-// Reads stay on HTTP GETs; every write arrives here so it works on Android too, and so the
-// per-second still never rides an HTTP body.
+// Reads stay on HTTP GETs; every write, the per-second still included, arrives here.
 onUiMessage(async (sfiId, data, peer: Peer) => {
   if (!sfiId || typeof data !== "object" || data === null) return;
   const d = data as Record<string, unknown>;
@@ -173,22 +171,22 @@ onUiMessage(async (sfiId, data, peer: Peer) => {
     return tick(sfiId, holder.seq + 1);
   }
 
-  // Rename the placement. MEMBER-gated, not owner-gated: the title is a label on shared
+  // Rename the feed. MEMBER-gated, not owner-gated: the title is a label on shared
   // furniture, in the same class as claiming the camera, and it edits in place in the
   // header rather than hiding in the owner's settings sheet. Blank resets to the default
   // at read time rather than being rejected, so clearing the field is a real gesture.
   if (d.op === "title") {
     if (!peer.is_sfi_member) return;
-    await frameSettings(sfiId).set("title", sanitizeText(d.title, MAX_TITLE));
+    await frameSettings(sfiId).set(KEY_TITLE, sanitizeText(d.title, MAX_TITLE));
     return tick(sfiId, current(sfiId)?.seq ?? 0);
   }
 
-  // Owner-only placement settings.
+  // Owner-only settings.
   if (d.op === "settings") {
     if (!peer.is_owner) return;
     // Snapped to a rung on the way in, so the stored value is always on the ladder.
     if (d.interval_ms === undefined) return;
-    await frameSettings(sfiId).set("interval_ms", stepFor(d.interval_ms).ms);
+    await frameSettings(sfiId).set(KEY_INTERVAL, stepFor(d.interval_ms).ms);
     // A live sharer's limits were sized from the OLD rung. Re-derive both, or moving to a
     // slower rung would evict them before their next still lands, and moving to a wider
     // one would bounce every still for being over the previous rung's cap.
@@ -213,8 +211,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
 
   // The one read endpoint: identity + the rung + the current still. Re-fetched on every
   // cam_tick, so it is deliberately small and self-contained. Reaching this at all means
-  // the platform already admitted the caller (member, or anon via the host's live-gated
-  // frame-sharing toggle), so the still is not gated again here — only SHARING is.
+  // the platform already admitted the caller (member, or a stranger to a published frame),
+  // so the still is not gated again here — only SHARING is.
   if (reqPath === "/api/state" && method === "GET") {
     const { step, title } = await readPrefs(peer.sfi_id);
     const l = current(peer.sfi_id);

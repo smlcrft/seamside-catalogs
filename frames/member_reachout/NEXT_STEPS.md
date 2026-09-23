@@ -1,13 +1,14 @@
 # Next steps
 
-Member Reachout is intentionally lean: it reads the **shared `members` SyncTable** (bind it
-to the same table the Member Manager frame uses) and keeps a local JSON log of every send.
+Member Reachout is intentionally lean: it reads a **`members` list** of the space (the rows
+Member Manager keeps; each session is bound to one) and logs every send as a row of the
+space's `reachout_sent` table, naming the list and the sender.
 Sending itself happens OS-side via `mailto:` (everyone bcc'd) and per-person `sms:` links.
 
 Ideas to grow it:
 
 1. **Message templates** — let editors save reusable drafts (welcome note, weekly update) in
-   the per-sfi settings JSON, and start a new message from one.
+   the session's settings, and start a new message from one.
 2. **Scheduling / reminders** — record a "send again on" date per entry and surface a gentle
    nudge in the header when one is due (still hand-confirmed; no background sending).
 3. **Read/links tracking** — append a short tracking token to a link in the body so the log
@@ -18,8 +19,8 @@ Ideas to grow it:
    and pre-select the matching send button.
 6. **Audience presets** — named groups that span roles (e.g. "Leadership" = Admin + Owner)
    saved in settings, so common sends are one tap.
-7. **Export the log** — a download of the sent history (CSV/JSON) for record-keeping, since
-   the log is device-local and not synced.
+7. **Export the log** — the sent history is already a table file of the space
+   (`reachout_sent.table.jsonl`); a one-tap CSV download of it would suit record-keeping.
 8. **Smarter text run** — remember the last position in a long texting run across reloads via
    `frame.localStorageSetItem`, so an interrupted send can resume where it left off.
 

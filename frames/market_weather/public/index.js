@@ -3,6 +3,7 @@ import { frame } from "./lib/js/framelib.js";
 (function () {
   const peer = window.__peer || {};
   const isAnon = !!peer.is_anon || !peer.user_id;
+  const isEditor = !!peer.is_sfi_editor;
 
   const $ = (id) => document.getElementById(id);
 
@@ -88,7 +89,9 @@ import { frame } from "./lib/js/framelib.js";
     const txt  = $("setup-text");
     if (!state.prefs.location) {
       note.classList.remove("hidden");
-      txt.textContent = "Set your market's location in settings to see the turnout forecast.";
+      txt.textContent = isEditor
+        ? "Set your market's location in settings to see the turnout forecast."
+        : "No market location yet — an editor of this space sets it.";
     } else if (!state.weather) {
       note.classList.remove("hidden");
       txt.textContent = 'Couldn\'t find weather for "' + state.prefs.location + '". Try a different city or zip.';
@@ -1028,6 +1031,8 @@ import { frame } from "./lib/js/framelib.js";
     }
   }
 
+  // Viewers read the forecast; only editors change the market (the worker refuses them anyway).
+  if (!isEditor) $("settings-btn").classList.add("hidden");
   $("settings-btn").addEventListener("click", openSettings);
   $("settings-close").addEventListener("click", closeSettings);
   $("settings-cancel").addEventListener("click", closeSettings);

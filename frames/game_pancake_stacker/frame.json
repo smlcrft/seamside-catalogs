@@ -1,5 +1,5 @@
 {
-    "app_version_min": "0.2.5",
+    "app_version_min": "1.0.0",
     "attribution_log": [
         {
             "first_mod_epoch": 1780704417,
@@ -16,24 +16,25 @@
     "default_height_px": 640.0,
     "default_width_px": 400.0,
     "depends_on_capabilities": [],
-    "description": "Simple solo arcade game. A pancake swings back and forth at the top of the griddle \u2014 tap, click, or hit space to drop it onto the stack. Each pancake trims to the overlap with the one below, so the tower narrows as you climb. Miss entirely and the stack topples. High score per placement.",
+    "description": "Simple solo arcade game. A pancake swings back and forth at the top of the griddle \u2014 tap, click, or hit space to drop it onto the stack. Each pancake trims to the overlap with the one below, so the tower narrows as you climb. Miss entirely and the stack topples. Everyone plays their own game; an editor's finished game is recorded and can set the space's high score, which every open page sees at once. Scores are the space's pancake_scores table, one row per player's best, so every Pancake Stacker in the space shares one board and members can read it.",
     "dir_id": "",
     "frame_type": "Tandem",
     "tags": ["play", "games", "arcade"],
     "hosted_build_cmd": "",
     "hosted_start_cmd": "",
-    "icon": "",
+    "icon": "ph:stack",
     "images_b64": null,
     "inputs": [],
     "licensed_under_cc0": true,
     "min_height_px": 0.0,
     "min_width_px": 0.0,
-    "modified_at": "2026-08-04T21:00:00Z",
+    "modified_at": "2026-09-23T14:06:14Z",
     "name": "Pancake Stacker",
     "needs_reviewed": false,
     "outputs": [],
     "permissions": {
         "net": []
     },
-    "prompt_history": []
+    "prompt_history": [],
+    "color": "c8"
 }

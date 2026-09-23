@@ -1,6 +1,6 @@
 {
     "name": "Assignments",
-    "description": "What's due, and where you stand. Add your courses with their credit weight, then put each piece of work in with its due date and what fraction of the grade it carries. The frame opens on the work: overdue first, then this week, then later, with the nearest deadline counted in days rather than dates. Tick something off and it lifts out of the list. The other half is the arithmetic students do on the back of an envelope — each course's weighted grade so far, computed from what has actually been marked, and a GPA across courses by credit. Space editors add and tick; everyone else, including a study group the frame is shared with, sees the same board live. Courses and work live in encrypted LocalTables scoped to the placement.",
+    "description": "What's due, and where you stand. Add your courses with their credit weight, then put each piece of work in with its due date and what fraction of the grade it carries. The frame opens on the work: overdue first, then this week, then later, with the nearest deadline counted in days rather than dates. Tick something off and it lifts out of the list. The other half is the arithmetic students do on the back of an envelope \u2014 each course's weighted grade so far, computed from what has actually been marked, and a GPA across courses by credit. Editors add, score and tick; viewers and anyone the space is shared with see the same board live, read-only. Courses and work are the space's own tables, assignments_courses.table.jsonl and assignments.table.jsonl, so they sync with the space and open in any table tool.",
     "frame_type": "Tandem",
     "tags": ["study", "school", "grades", "deadlines"],
     "permissions": {
@@ -9,9 +9,11 @@
     "default_width_px": 640,
     "default_height_px": 600,
     "created_at": "2026-08-10T00:00:00Z",
-    "modified_at": "2026-08-10T00:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T05:07:29Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:graduation-cap",
+    "color": "c1"
 }

@@ -1,17 +1,20 @@
 {
     "name": "Watercolor Studio",
-    "description": "A quiet, beautiful place to paint with watercolors. Each placement is its own sheet of textured paper. Pigments are real watercolor pans \u2014 pick one, or add bits of several into the mixing well and they blend subtractively the way paint actually does (blue plus yellow makes green, complements make mud). A range of brushes (broad wash, round, flat, dry-brush, fine detail) lay translucent washes that pool, bleed, and darken at their edges; layered strokes glaze over one another. A clean-water Lift brush pulls pigment back out. Optional thin guide outlines (a pear, a teacup, a koi, a mountain lake\u2026) sit faintly beneath the paint so new painters can trace as they learn. Editors in the space paint together in real time; anonymous viewers watch read-only. The whole painting is stored as deterministic vector strokes in a single JSON file per placement \u2014 no database, no network.",
+    "description": "A quiet, beautiful place to paint with watercolors, one sheet of textured paper per session of the frame. Pigments are real watercolor pans: pick one, or add bits of several into the mixing well and they blend subtractively the way paint does (blue plus yellow makes green, complements make mud). A range of brushes (broad wash, round, flat, dry-brush, fine detail) lay translucent washes that pool, bleed and darken at their edges; layered strokes glaze over one another, and a clean-water Lift brush pulls pigment back out. Optional faint guide outlines (a pear, a teacup, a koi, a mountain lake\u2026) sit beneath the paint for new painters to trace. Editors paint together in real time and undo their own strokes; the owner sets the title, paper, sheet shape and guide, and can clear the sheet; viewers and anonymous visitors watch read-only and can save the picture. The painting is files of the space, in its own folder under \"Watercolor Studio/\": painting.png, a picture anyone in the space can open, and strokes.json, the vector strokes the frame replays and keeps editing. No network.",
     "frame_type": "Tandem",
     "tags": ["studio", "art"],
-    "app_version_min": "0.2.5",
+    "app_version_min": "1.0.0",
     "permissions": {
         "net": []
     },
+    "data": "write",
     "depends_on_capabilities": [],
     "default_width_px": 760,
     "default_height_px": 560,
     "created_at": "2026-06-22T00:00:00Z",
-    "modified_at": "2026-08-04T21:00:00Z",
+    "modified_at": "2026-09-23T14:10:10Z",
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:paint-brush",
+    "color": "c1"
 }

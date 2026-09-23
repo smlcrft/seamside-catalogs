@@ -16,7 +16,8 @@ const peer = window.__peer || {};
 if (peer.space_color) applyChannel(document.body, peer.space_color);
 const urlSfi = new URLSearchParams(location.search).get("sfi") || "";
 const me = {
-  is_anon: peer.is_anon || !peer.user_id,
+  is_anon: peer.is_anon || !peer.user_id,   // v1: is_anon = not on the space's roster
+  can_edit: !!peer.is_sfi_editor,           // members read the inbox; editors work it
   sfi_id: peer.sfi_id || urlSfi || "",
   user_name: peer.user_name || "",
 };
@@ -74,10 +75,15 @@ function AnonForm() {
     setErr("");
     setSubmitting(true);
     try {
-      await write("./api/submit", { email: email.trim(), fields: values });
+      // HTTP, not the bus: a visitor needs to hear a refused field, not "sent".
+      await api("./api/submit", { email: email.trim(), fields: values });
       setSentTo(email.trim());
     } catch (e2) {
-      setErr(e2.message || String(e2));
+      // frame.api's message ends in the worker's JSON body: show its `error`.
+      const body = /: (\{.*\})$/.exec(e2.message || "");
+      let why = e2.message || String(e2);
+      try { why = JSON.parse(body[1]).error || why; } catch { /* not JSON */ }
+      setErr(why);
     } finally {
       setSubmitting(false);
     }
@@ -218,19 +224,19 @@ function Submission({ s, fields, isOpen, isHighlight, notes, onToggle, onSetStat
           </${Fragment}>`}
       <div class="hd-sub-actions">
         <label style="font-size: var(--os-fs-sm); color: var(--os-text-muted);">Status</label>
-        <select value=${s.status} onChange=${(e) => onSetStatus(s.id, e.target.value)}>
+        ${me.can_edit ? html`<select value=${s.status} onChange=${(e) => onSetStatus(s.id, e.target.value)}>
           ${["new", "in_progress", "resolved", "archived"].map((st) => html`<option key=${st} value=${st}>${st.replace("_", " ")}</option>`)}
-        </select>
+        </select>` : html`<span class="hd-status-pill">${s.status.replace("_", " ")}</span>`}
         <a class="hd-mail-btn" href=${`mailto:${encodeURIComponent(s.email)}?subject=${encodeURIComponent("Re: your message")}`}>
           <i class="ph-light ph-envelope-simple icon-sm"></i> Reply via email
         </a>
         <span class="spacer" style="flex:1;"></span>
-        <button class="ghost" onClick=${() => onDelete(s.id)}><i class="ph-light ph-trash icon-sm"></i></button>
+        ${me.can_edit && html`<button class="ghost" onClick=${() => onDelete(s.id)}><i class="ph-light ph-trash icon-sm"></i></button>`}
       </div>
       <div>
         <div class="muted" style="font-size: var(--os-fs-xs); margin-bottom: var(--os-sp-xs);">Internal notes</div>
         <${NotesPanel} submissionId=${s.id} notes=${notes} />
-        <${AddNoteForm} onSubmit=${(body) => onAddNote(s.id, body)} />
+        ${me.can_edit && html`<${AddNoteForm} onSubmit=${(body) => onAddNote(s.id, body)} />`}
       </div>
     </div>`}
   </article>`;
@@ -276,7 +282,7 @@ function InboxView({ submissions, fields, openId, highlightId, notesBySub, setOp
   if (submissions.length === 0) {
     return html`<div class="hd-inbox-empty">
       <i class="ph-light ph-tray icon-lg"></i>
-      <p>No messages yet. When anonymous visitors submit the form, they'll show up here in realtime.</p>
+      <p>No messages yet. When visitors submit the form, they'll show up here in realtime.</p>
     </div>`;
   }
   const nNew = submissions.filter((s) => s.status === "new").length;
@@ -315,7 +321,7 @@ function FieldsView({ fields, onCreate, onSetRequired, onDelete, toast }) {
   return html`<div class="hd-fields">
     <div>
       <h2>Form Fields</h2>
-      <p class="muted">Anonymous visitors always fill in <strong>Email</strong>. The <em>Message</em> field below is included by default — remove it if another field fits better, or keep and mark required.</p>
+      <p class="muted">Visitors always fill in <strong>Email</strong>. The <em>Message</em> field below is included by default — remove it if another field fits better, or keep and mark required.</p>
     </div>
     <div class="hd-field-row fixed">
       <span class="label">Email</span>
@@ -329,11 +335,11 @@ function FieldsView({ fields, onCreate, onSetRequired, onDelete, toast }) {
       ${f.type === "dropdown" && html`<span class="options">options: ${(f.options || []).join(", ")}</span>`}
       <span class="spacer"></span>
       <label class="required-toggle">
-        <input type="checkbox" checked=${f.required} onChange=${(e) => onSetRequired(f.id, e.target.checked)} /> required
+        <input type="checkbox" checked=${f.required} disabled=${!me.can_edit} onChange=${(e) => onSetRequired(f.id, e.target.checked)} /> required
       </label>
-      <button class="ghost" title="Remove field" onClick=${() => onDelete(f.id)}><i class="ph-light ph-trash icon-sm"></i></button>
+      ${me.can_edit && html`<button class="ghost" title="Remove field" onClick=${() => onDelete(f.id)}><i class="ph-light ph-trash icon-sm"></i></button>`}
     </div>`)}
-    <form class="hd-add-form" onSubmit=${submit}>
+    ${me.can_edit && html`<form class="hd-add-form" onSubmit=${submit}>
       <div class="row">
         <input class="grow" type="text" placeholder="Field label (e.g. Phone number)" required
           value=${label} onInput=${(e) => setLabel(e.target.value)} />
@@ -354,7 +360,7 @@ function FieldsView({ fields, onCreate, onSetRequired, onDelete, toast }) {
       <div class="row" style="justify-content: flex-end;">
         <button type="submit"><i class="ph-light ph-plus icon-sm"></i> Add field</button>
       </div>
-    </form>
+    </form>`}
   </div>`;
 }
 
@@ -396,18 +402,25 @@ function AdminView() {
   useFramePush((d) => {
     if (typeof d.type !== "string") return;
     if (d.sfi_id && d.sfi_id !== stateRef.current.sfi_id) return;
-    if (d.type === "hd_new_submission" && d.submission) {
-      setSubmissions((prev) => [d.submission, ...prev]);
-      setHighlightId(d.submission.id);
-      setTimeout(() => setHighlightId(null), 1200);
-      toast(`New message from ${d.submission.email}`);
+    if (d.type === "hd_new_submission" && d.id) {
+      // The push says only that something arrived; the inbox reads it through its gated route.
+      api("./api/admin/messages").then((r) => {
+        const list = r.submissions || [];
+        setSubmissions(list);
+        const sub = list.find((x) => x.id === d.id);
+        setHighlightId(d.id);
+        setTimeout(() => setHighlightId(null), 1200);
+        if (sub) toast(`New message from ${sub.email}`);
+      }).catch(() => {});
     } else if (d.type === "hd_submission_updated") {
       setSubmissions((prev) => prev.map((s) => s.id === d.id ? { ...s, status: d.status } : s));
     } else if (d.type === "hd_submission_deleted") {
       setSubmissions((prev) => prev.filter((s) => s.id !== d.id));
       if (stateRef.current.openId === d.id) setOpenId(null);
     } else if (d.type === "hd_note_added") {
-      setNotesBySub((prev) => { const m = new Map(prev); m.set(d.submission_id, d.notes || []); return m; });
+      api(`./api/admin/messages/${d.submission_id}/notes`).then(({ notes }) => {
+        setNotesBySub((prev) => { const m = new Map(prev); m.set(d.submission_id, notes || []); return m; });
+      }).catch(() => {});
     } else if (d.type === "hd_fields_changed") {
       loadFields().catch(() => {});
     } else if (d.type === "hd_title_changed") {
@@ -433,7 +446,7 @@ function AdminView() {
     } catch (e) { toast(e.message || "delete failed"); }
   };
   // No response over the bus — the hd_note_added push (which reaches the sender too)
-  // delivers the refreshed notes list.
+  // has the notes re-read.
   const addNote = async (id, body) => {
     try {
       await write(`./api/admin/messages/${id}/notes`, { body });
@@ -469,7 +482,7 @@ function AdminView() {
     <header class="hd-admin-header">
       <h1>
         <i class="ph-light ph-lifebuoy icon-md"></i>
-        <div class="hd-title-edit"><input value=${deskTitle} maxlength="120" placeholder="Send us a message"
+        <div class="hd-title-edit"><input value=${deskTitle} maxlength="120" placeholder="Send us a message" disabled=${!me.can_edit}
           onBlur=${(e) => saveTitle(e.target.value)}
           onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} /></div>
       </h1>

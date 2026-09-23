@@ -426,7 +426,7 @@
                     ? html`<span class="note">${live.user_name} is sharing. This takes over.</span>`
                     : html`<span class="note">A ${stillW}px still, every ${secs(intervalMs)}. No audio.</span>`}`}
               ${err ? html`<span class="note bad">${err}</span>` : null}
-              ${/* The way back from "not now". The host forgets this placement's
+              ${/* The way back from "not now". The host forgets this frame's
                    remembered answer and reloads the frame, so the consent prompt runs
                    again — meaning this click tears down the current document, by design.
                    Feature-detected: framelib is served by the VIEWING device, so an
@@ -456,7 +456,7 @@
                 </div>
                 ${/* Not a control: wayfinding. An owner opens settings looking for "who
                      can see this", and the answer lives in the frame's own share key. */ ""}
-                <p class="sheet-note">Who can watch is set by the frame's sharing setting.
+                <p class="sheet-note">Who can watch follows the space's sharing.
                   Only members can start a feed.</p>
               </div>
             <//>` : null}

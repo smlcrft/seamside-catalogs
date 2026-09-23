@@ -1,8 +1,8 @@
 // ----------------------------------------------------------------------------------------
-// Garden Gnome — at-a-glance home garden helper. Per-placement prefs (location, soil,
-// chosen plants) live in a single JSON file keyed by sfi_id. Open-Meteo is hit at most
-// once every 15 minutes per location and the result is shared across all placements
-// pointing at the same place. Each ticked plant gets three color-coded dots on a +/-
+// Garden Gnome — at-a-glance home garden helper. Each session's prefs (location, soil,
+// chosen plants) are its own `prefs` key (sessionKv), so two gardens in one space keep
+// their own and they travel with the space. Open-Meteo is hit at most once every 15 minutes per location, shared by every
+// space pointing at the same place. Each ticked plant gets three color-coded dots on a +/-
 // spectrum (water, temperature, sunlight) so the gardener can see at a glance whether
 // nature is doing the work or whether the plant needs a hand.
 //
@@ -25,7 +25,7 @@
 import {
   log, parsePeerInfo, serveFileAtPath, serveHtmlShell,
   jsonReply, parseJsonBody, sanitizeText, pushToInstance, onUiMessage,
-  loadJsonFile, saveJsonFile,
+  sessionKv,
 } from "@frame-core";
 
 // ----- Plant catalog --------------------------------------------------------------------
@@ -112,7 +112,7 @@ const SOIL_TYPES: { key: SoilKey; label: string; description: string; retention_
   { key: "chalky", label: "Chalky", description: "Stony, alkaline, drains quickly",                     retention_factor: 0.7 },
 ];
 
-// ----- Per-placement preferences (single JSON file) -------------------------------------
+// ----- Per-session preferences (the session's `prefs` key) ------------------------------
 type Prefs = {
   location: string;
   soil: SoilKey;
@@ -121,15 +121,12 @@ type Prefs = {
 
 const DEFAULT_PREFS: Prefs = { location: "", soil: "loamy", plants: [] };
 
-const allPrefs: Record<string, Prefs> = loadJsonFile(
-  import.meta.url, "prefs.json", {} as Record<string, Prefs>,
-);
-
 const PLANT_KEY_SET = new Set<string>(PLANT_TYPES.map((p) => p.key));
 const SOIL_KEY_SET  = new Set<string>(SOIL_TYPES.map((s) => s.key));
 
-function getPrefs(sfi_id: string): Prefs {
-  const stored = allPrefs[sfi_id] ?? {} as Partial<Prefs>;
+async function getPrefs(): Promise<Prefs> {
+  let stored: Partial<Prefs> = {};
+  try { const op = await sessionKv.get("prefs"); if (op?.value) stored = JSON.parse(op.value); } catch { /* unreadable → defaults */ }
   const soilRaw = typeof stored.soil === "string" ? stored.soil : DEFAULT_PREFS.soil;
   const soil: SoilKey = SOIL_KEY_SET.has(soilRaw) ? (soilRaw as SoilKey) : DEFAULT_PREFS.soil;
   const plants: PlantKey[] = Array.isArray(stored.plants)
@@ -142,9 +139,8 @@ function getPrefs(sfi_id: string): Prefs {
   };
 }
 
-function setPrefs(sfi_id: string, next: Prefs): void {
-  allPrefs[sfi_id] = next;
-  saveJsonFile(import.meta.url, "prefs.json", allPrefs);
+async function setPrefs(next: Prefs): Promise<void> {
+  await sessionKv.put("prefs", JSON.stringify(next));
 }
 
 // ----- Weather: shared 15-minute cache keyed by location string -------------------------
@@ -502,7 +498,7 @@ type MutResult = { status: number; body: Record<string, unknown> };
 
 // Editor-only. Never gate on is_sfi_member — a Viewer-role member would slip through and
 // be able to rewrite the garden.
-function mutSave(sfi_id: string, v: { location?: unknown; soil?: unknown; plants?: unknown } | null, peer: MutPeer): MutResult {
+async function mutSave(sfi_id: string, v: { location?: unknown; soil?: unknown; plants?: unknown } | null, peer: MutPeer): Promise<MutResult> {
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
   if (!v) return { status: 400, body: { error: "invalid JSON" } };
   const location = sanitizeText(v.location, 120);
@@ -520,16 +516,16 @@ function mutSave(sfi_id: string, v: { location?: unknown; soil?: unknown; plants
     }
   }
   const next: Prefs = { location, soil, plants };
-  setPrefs(sfi_id, next);
+  await setPrefs(next);
   pushToInstance(sfi_id, { type: "settings_changed" });
   return { status: 200, body: { prefs: next } };
 }
 
-onUiMessage((sfiId, data, peer) => {
+onUiMessage(async (sfiId, data, peer) => {
   if (!sfiId || typeof data !== "object" || data === null) return;
   const d = data as Record<string, unknown>;
   if (d.op !== "save") return;
-  const r = mutSave(sfiId, d, peer);
+  const r = await mutSave(sfiId, d, peer);
   if (r.status !== 200) log(`garden gnome: bus op save → ${r.status} (${JSON.stringify(r.body)})`);
 });
 
@@ -549,11 +545,11 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cook
   }
 
   // Reads are open to every viewer who reaches the frame — whether a non-member can reach it
-  // at all is the platform's call (public sharing on the placement), never the frame's.
+  // at all is the platform's call (the space's tier, publishing the frame), never the frame's.
   // Non-members get the same garden with the raw location withheld: the derived weather and
   // plant statuses stay, the town they were computed for does not.
   if (reqPath === "/api/state" && method === "GET") {
-    const prefs = getPrefs(peer.sfi_id);
+    const prefs = await getPrefs();
     const soilDef = SOIL_TYPES.find((s) => s.key === prefs.soil) ?? SOIL_TYPES[1];
     const weather = prefs.location ? await fetchWeather(prefs.location) : null;
     const statuses: PlantStatus[] = weather
@@ -566,7 +562,8 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cook
       has_location: !!prefs.location,
       soil_types: SOIL_TYPES,
       plant_types: PLANT_TYPES,
-      weather,
+      // The resolved place name is the location by another name: withheld alike.
+      weather: weather && !peer.is_sfi_member ? { ...weather, resolved_name: "" } : weather,
       statuses,
       can_edit: peer.is_sfi_editor,
       is_owner: isOwner,
@@ -576,7 +573,7 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cook
 
   if (reqPath === "/api/save" && method === "POST") {
     const v = parseJsonBody<{ location?: unknown; soil?: unknown; plants?: unknown }>(body);
-    const r = mutSave(peer.sfi_id, v, peer);
+    const r = await mutSave(peer.sfi_id, v, peer);
     return jsonReply(replyPort, r.status, r.body);
   }
 

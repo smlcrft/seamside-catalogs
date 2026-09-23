@@ -22,6 +22,17 @@
     .header { display: flex; align-items: center; gap: var(--os-sp-sm); }
     .header > i { font-size: 20px; color: var(--ch); }
     .header h1 { margin: 0; font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); flex: 1; }
+    .where {
+      display: flex; align-items: center; gap: var(--os-sp-xs); margin-top: calc(-1 * var(--os-sp-sm));
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted); min-width: 0;
+    }
+    .where i { font-size: 14px; }
+    .where .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .where button {
+      background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--os-text-secondary);
+      text-decoration: underline; text-underline-offset: 2px;
+    }
+    .where button:hover { color: var(--ch); }
     .header .mode {
       font-size: var(--os-fs-2xs); color: var(--os-text-muted);
       font-feature-settings: 'tnum' 1; text-transform: lowercase; white-space: nowrap;
@@ -129,10 +140,9 @@
       return p;
     }
 
-    // JSON writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
-    // dropped on Android, and the folder_changed push — which reaches the sender too — is
-    // the confirmation the UI renders from. Feature-detect: an older viewer's framelib has
-    // no busSend, so fall back to the HTTP write it was using before.
+    // JSON writes go over frame.busSend; the folder_changed push — which reaches the sender
+    // too — is the confirmation the UI renders from. A framelib without busSend falls back
+    // to the HTTP write.
     function write(path, body) {
       if (typeof frame.busSend === "function") {
         frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
@@ -193,8 +203,29 @@
         const s = await frame.api("api/state").catch(() => null);
         if (s) setSt(s);
       }
-      useEffect(() => { refresh(); }, []);
+      useEffect(() => {
+        refresh();
+        // A person may add or remove files from the space page too: look again on return.
+        const again = () => { if (document.visibilityState === "visible") refresh(); };
+        document.addEventListener("visibilitychange", again);
+        window.addEventListener("focus", again);
+        return () => { document.removeEventListener("visibilitychange", again); window.removeEventListener("focus", again); };
+      }, []);
       useFramePush({ folder_changed: refresh });
+
+      // Opened on a folder of the space (the space offers this frame on one): an editor is
+      // asked to show it here; anyone else is told whose call that is.
+      const [openedOn, setOpenedOn] = useState(null);
+      const asked = useRef(false);
+      useEffect(() => {
+        if (!st || asked.current) return;
+        asked.current = true;
+        const at = String(window.seamside?.data?.open || "").replace(/^\/+|\/+$/g, "");
+        if (!at || at === st.folder) return;
+        if (!st.can_move) { setOpenedOn(at); return; }
+        frame.confirm(`Show the folder “${at}” in this File Folder? It shows “${st.folder}” now.`, { title: "Use this folder", okLabel: "Use it" })
+          .then((yes) => { if (yes) write("api/folder", { folder: at }); });
+      }, [st]);
 
       if (!st) return html`<div></div>`;
       const { me, prefs, can_add, files } = st;
@@ -222,9 +253,7 @@
               await frame.alert(`"${f.name}" is larger than the ${prefs.max_size_mb} MB limit.`);
               continue;
             }
-            // Send the file's bytes already resolved into memory (ArrayBuffer), NOT the
-            // File object: the axum:// custom-scheme webview bridge captures the request
-            // before an async Blob/File read finishes, so a File body arrives empty.
+            // The raw bytes are the body; the name rides in ?name=.
             const buf = await f.arrayBuffer();
             const res = await frame.fetch(withSfi("api/upload?name=" + encodeURIComponent(f.name)), { method: "POST", body: buf });
             if (!res.ok) {
@@ -238,7 +267,7 @@
 
       async function download(f) {
         try {
-          const res = await frame.fetch(withSfi("api/download/" + f.id));
+          const res = await frame.fetch(withSfi("api/download/" + encodeURIComponent(f.id)));
           if (!res.ok) { await frame.alert("Download failed (" + res.status + ")"); return; }
           const blob = await res.blob();
           const url = URL.createObjectURL(blob);
@@ -258,7 +287,12 @@
           return;
         }
         disarm();
-        write("api/delete/" + f.id, {}).catch(() => {});
+        write("api/delete/" + encodeURIComponent(f.id), {}).catch(() => {});
+      }
+
+      async function changeFolder() {
+        const next = await frame.prompt("Which folder of this space should File Folder show? It is made when the first file lands.", { title: "Folder", defaultValue: st.folder, okLabel: "Use it" });
+        if (next && next.trim() && next.trim() !== st.folder) write("api/folder", { folder: next.trim() });
       }
 
       const mode = me.is_owner ? "owner" : me.is_sfi_editor ? "editor" : "viewer";
@@ -274,6 +308,11 @@
                 <i class="ph-light ph-gear-six"></i>
               </button>` : null}
           </div>
+          <div class="where">
+            <i class="ph-light ph-folder-open"></i><span class="path">${st.folder}/</span>
+            ${st.can_move ? html`<button class="move" onClick=${changeFolder}>Change</button>` : null}
+          </div>
+          ${openedOn ? html`<div class="empty">Opened on “${openedOn}”. An editor can point this File Folder there.</div>` : null}
 
           ${me.is_owner && showCfg ? html`
             <div class="settings">
@@ -291,8 +330,8 @@
               <div class="limits">
                 <div class="field">
                   <label>Max size (MB)</label>
-                  <input type="number" min="1" max="1024" value=${prefs.max_size_mb}
-                    onChange=${(e) => savePrefs({ max_size_mb: Math.max(1, Math.min(1024, parseInt(e.target.value) || 100)) })} />
+                  <input type="number" min="1" max="8" value=${prefs.max_size_mb}
+                    onChange=${(e) => savePrefs({ max_size_mb: Math.max(1, Math.min(8, parseInt(e.target.value) || 8)) })} />
                 </div>
                 <div class="field">
                   <label>Max files</label>
@@ -327,7 +366,7 @@
                     <button class="iconbtn dl" title="Download" onClick=${() => download(f)}>
                       <i class="ph-light ph-download-simple"></i>
                     </button>
-                    ${can_add ? html`
+                    ${can_add && !f.link ? html`
                       <button class=${"iconbtn del" + (armed === f.id ? " armed" : "")}
                         title=${armed === f.id ? "Click again to delete" : "Delete"}
                         onClick=${() => del(f)} onBlur=${disarm}>

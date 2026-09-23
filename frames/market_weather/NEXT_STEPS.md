@@ -16,17 +16,15 @@ Ideas worth chasing once the v1 lands in vendors' hands and we get feedback:
 - **Vendor "tip line".** A small free-text journal where vendors can record actual
   turnout vs. predicted ("Sat felt like 80%, predicted 65 — bring more eggs next
   cool morning"). Over enough Saturdays, that history could re-tune the weights
-  per-placement.
+  per market.
 
 - **Multi-day comparison.** Side-by-side bar of "expected total turnout" per day
   for the next 7 days, to support the question "should I do Saturday OR Sunday
   this weekend?" not just "what does Saturday look like?"
 
-- **Push to a shared SyncTable** so a multi-vendor market can subscribe one shared
-  forecast and overlay each booth's own attendance log on top — the current frame
-  is per-placement-prefs only, which means each booth has to enter the location
-  again. Worth doing once we have more than one or two vendors per market actually
-  using it.
+- **A shared market table** so a multi-vendor market can share one forecast and overlay
+  each booth's own attendance log on top. Today each session keeps its own location and
+  events (its own state in the space), so each booth enters the location again.
 
 - **Severe-weather alarms.** A real "DON'T BOTHER OPENING" flag for sustained
   rain >0.25 in/hr, sustained wind >30 mph, lightning probability, etc. Right now

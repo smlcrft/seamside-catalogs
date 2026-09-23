@@ -321,7 +321,7 @@
           ],
         });
         if (what === "rename") {
-          const v = await frame.prompt("Deck name", { title: "Rename", value: d.name, okLabel: "Save" });
+          const v = await frame.prompt("Deck name", { title: "Rename", defaultValue: d.name, okLabel: "Save" });
           if (v && v.trim()) write("api/deck/" + d.id, { name: v.trim() });
         } else if (what === "remove") {
           if (await frame.confirm(`Remove "${d.name}" and its ${d.total} card${d.total === 1 ? "" : "s"}?`, { title: "Deck", okLabel: "Remove" }))

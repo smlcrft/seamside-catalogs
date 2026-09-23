@@ -10,7 +10,7 @@ Where this frame could grow:
 - **Shuffle.** A `shuffle` setting that permutes the order with a seed stored beside the anchor.
   It has to be a stored seed rather than a live `Math.random()`, or the clients would each
   compute a different "current" photo and the shared display would come apart.
-- **Albums.** A grouping column plus a picker, so one placement can hold several sets and the
+- **Albums.** A grouping column plus a picker, so one space can hold several sets and the
   slideshow can be scoped to one of them.
 - **OS-level fullscreen.** Single mode fills the frame tile today. `slideshow`'s present mode
   shows the pattern for going further: attempt `requestFullscreen()` on the document and fall
@@ -22,7 +22,7 @@ Where this frame could grow:
 
 ## Host notes
 
-**The shared display.** `{mode, current_photo_id}` in `frameSettings` IS the frame's display
+**The shared display.** `{mode, current_photo_id}` in the session's own keys (`display/<field>`, so two picture frames in one space share the photos and each keeps its own wall) IS the frame's display
 state — restoring it on load is what brings the frame back to the same photo after a restart, and
 there is no separate "remember where I was" mechanism to keep in sync with it. Editors drive that
 state; Viewer-role members and anonymous visitors browse in local frontend state that is cleared
@@ -54,17 +54,15 @@ is already within limits and is a PNG, GIF, or WebP, which go up untouched becau
 round-trip would cost transparency and animation. A second 480px copy is uploaded as the grid
 thumbnail (PNG when the source is PNG, so transparency doesn't turn black).
 
-Bytes are sent as an in-memory `ArrayBuffer`, **not** a `File`: WebKit reads `File`/`Blob` bodies
-asynchronously and the `axum://` custom-scheme bridge captures the request before that read
-finishes, so a `File` body arrives empty. Don't "simplify" this back.
+Bytes are sent as an in-memory `ArrayBuffer`. A request past 8 MiB never reaches the worker, so
+that is the per-photo cap after the downscale.
 
 The backend re-checks the mime, byte size, and a magic-byte signature before writing, and inserts
 the row *before* the file so a failed byte-write can be undone rather than stranding a row that
 points at nothing.
 
-**Image storage.** Full images live at `data/photos/<sfi_slug>/<photo_id>` with thumbnails at
-`<photo_id>.thumb` beside them. Both are served with a long `immutable` cache header — photo ids
-are UUIDs and a photo's bytes never change — which is what keeps a looping slideshow from
+**Image storage.** Rows are `picture_frame_photos.table.jsonl` at the space's root; each photo is a file of the space at `Picture Frame/<photo_id>/<name>` (the row's `path`, synced with the space) with its grid thumbnail beside it (`thumbnail.jpg|png`, the row's `thumb_path`). Both are served with a long `immutable` cache header — a photo id
+is never reused and a photo's bytes never change — which is what keeps a looping slideshow from
 re-fetching over the bridge. A missing thumbnail falls back to the full image, so a failed thumb
 write degrades quietly rather than leaving a hole in the grid. Deleting a photo removes the row
 and both files, then repairs the display state so the frame is never left pointing at something

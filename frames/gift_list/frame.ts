@@ -5,14 +5,20 @@
 //   privacy:        privacy-public-view  — non-members see the wishes (so relatives with no
 //                                           account can still read the list); space editors
 //                                           add and claim.
-//   data_storage:   storage-graduating   — LocalTable by default, owner can graduate this
-//                                           placement to a shared SyncTable. See
-//                                           docs/table-graduation.md.
+//   data_storage:   a `wishes` list of the space (wishes.table.jsonl, or a subtype such as
+//                                           christmas.wishes.table.jsonl), one bound per session in
+//                                           `sessionKv` `bound/wishes`; WHO claimed is not in it.
 //   view_realtime:  view-collaborative    — every mutation pushes, so two aunts cannot both
 //                                           claim the same thing.
-//   settings_scope: settings-per-sfi
 //
-// THE SECRET IS KEPT ON THE SERVER. The whole point of this frame is that the person a gift
+// WHO CLAIMED IS KEPT ON THE SERVER, and so never in the table. A table is a file of the
+// space: every member reads it, through the door or in their synced replica, so a name
+// written there would reach the very person it hides from. Holders live in this worker's
+// `data/claims.json` on the keeper's device, keyed by space and list, which the space does
+// not sync and the door does not serve; `claimed_by`/`claimed_by_id` stay empty. The row
+// keeps only `claimed` (0/1), so a claim outlives the loss of data/ as "claimed by someone"
+// — which anyone who opens the table file can read (the keeper accepted that).
+// The whole point of this frame is that the person a gift
 // is for cannot see who claimed it — so the claim fields are STRIPPED from the payload
 // before it is sent to them, never merely hidden in the frontend. A frontend that receives
 // the secret and declines to draw it has not kept it: it is one devtools panel, one saved
@@ -32,7 +38,7 @@
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
   pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
-  declareTables, ensureTables, table,
+  declareTables, table, sessionKv,
 } from "@frame-core";
 
 // ----- Schema (the `wishes` v1 contract — declared verbatim, one source of truth) -------
@@ -45,55 +51,32 @@ const WISHES_SCHEMA = [
   { name: "claimed_by",    col_type: "text"    as const, nullable: false, default_val: "" },
   { name: "claimed_by_id", col_type: "text"    as const, nullable: false, default_val: "" },
   { name: "added_ms",      col_type: "integer" as const, nullable: false, default_val: "0" },
+  { name: "claimed",       col_type: "integer" as const, nullable: false, default_val: "0" },
 ];
 
 declareTables([
-  { key: "wishes", title: "Gift List", description: "Wishes for this placement's gift list.", local: true, schema: WISHES_SCHEMA },
+  { key: "wishes", title: "Gift List", description: "Wishes on this space's gift list.", schema: WISHES_SCHEMA },
 ]);
-
-let sharedDeclsRegistered = false;
-function ensureSharedDecls(): void {
-  if (sharedDeclsRegistered) return;
-  sharedDeclsRegistered = true;
-  declareTables([
-    {
-      key: "wishes_shared", title: "Gift List",
-      description: "Wishes of a shared gift list. Create a new table, or pick the one other frames should read.",
-      schema: WISHES_SCHEMA,
-    },
-  ]);
-}
-
-type Backend = "local" | "shared";
-type GradMode = "convert" | "adopt";
-type SfiSettings = { backend: Backend; pending_graduation?: GradMode };
-const allSettings: Record<string, SfiSettings> = loadJsonFile(import.meta.url, "settings.json", {});
-function getSettings(sfiId: string): SfiSettings {
-  return allSettings[sfiId] ?? { backend: "local" };
-}
-function saveSettings(sfiId: string, s: SfiSettings): void {
-  allSettings[sfiId] = s;
-  saveJsonFile(import.meta.url, "settings.json", allSettings);
-}
 
 type Tbl = ReturnType<typeof table>;
 type Peer = ReturnType<typeof parsePeerInfo>;
 
-function dataTable(sfiId: string, s: SfiSettings): Tbl {
-  return table(s.backend === "shared" ? "wishes_shared" : "wishes", sfiId);
-}
-function sharedBound(sfiId: string): boolean {
-  try { table("wishes_shared", sfiId); return true; } catch { return false; }
+// ----- Which list: `wishes` or a subtype `<name>.wishes`, bound per session ------------------
+const LIST_NAME = /^([a-z0-9][a-z0-9_-]*\.)*wishes$/;
+const validList = (n: unknown): n is string => typeof n === "string" && n.length <= 64 && LIST_NAME.test(n);
+async function boundList(): Promise<string | null> {
+  const v = (await sessionKv.get("bound/wishes"))?.value;
+  return validList(v) ? v : null;
 }
 
-async function readyLocalTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  if (!r.byKey["wishes"]) {
-    try { await table("wishes", peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`gift_list: ensure "wishes" failed: ${e}`); }
-    r = ensureTables(quiet);
-  }
-  return !!r.byKey["wishes"];
+// ----- Claims: the holder, off the table ---------------------------------------------------
+type Claim = { by: string; by_id: string };
+const claims: Record<string, Record<string, Claim>> = loadJsonFile(import.meta.url, "claims.json", {});
+const claimsOf = (sfiId: string, list: string): Record<string, Claim> => (claims[`${sfiId}:${list}`] ??= {});
+function setClaim(sfiId: string, list: string, wishId: string, c: Claim | null): void {
+  const m = claimsOf(sfiId, list);
+  if (c) m[wishId] = c; else delete m[wishId];
+  saveJsonFile(import.meta.url, "claims.json", claims);
 }
 
 // ----- Who is this wish for? -------------------------------------------------------------
@@ -116,46 +99,12 @@ function isRecipient(row: Record<string, unknown>, peer: Peer): boolean {
   return rk.split(" ")[0] === pk.split(" ")[0];
 }
 
-// ----- Graduation ------------------------------------------------------------------------
-async function runGraduation(sfiId: string, settings: SfiSettings): Promise<void> {
-  const mode = settings.pending_graduation!;
-  let copied = "";
-  if (mode === "convert") {
-    const shared = table("wishes_shared", sfiId);
-    const { rows } = await table("wishes", sfiId).query({});
-    for (const r of rows) {
-      await shared.upsert(r._row_id, {
-        item: r.item, for_who: r.for_who, for_user_id: r.for_user_id,
-        url: r.url, notes: r.notes,
-        claimed_by: r.claimed_by, claimed_by_id: r.claimed_by_id, added_ms: r.added_ms,
-      });
-    }
-    copied = ` (${rows.length} wishes copied)`;
-  }
-  settings.backend = "shared";
-  delete settings.pending_graduation;
-  saveSettings(sfiId, settings);
-  wireSharedListeners(sfiId);
-  notify(sfiId);
-  log(`gift_list: placement ${sfiId} moved to shared tables (${mode})${copied}`);
-}
-
-const wiredShared = new Set<string>();
-function wireSharedListeners(sfiId: string): void {
-  if (wiredShared.has(sfiId)) return;
-  wiredShared.add(sfiId);
-  try {
-    table("wishes_shared", sfiId).onChange(() => notify(sfiId));
-  } catch {
-    wiredShared.delete(sfiId);
-  }
-}
-
 // ----- Queries ---------------------------------------------------------------------------
 /** The list AS THIS VIEWER MAY SEE IT. The strip happens here, at the one place rows turn
  * into a payload, so no route can accidentally serve an unredacted wish. */
-async function listRows(t: Tbl, peer: Peer) {
+async function listRows(t: Tbl, sfiId: string, list: string, peer: Peer) {
   const { rows } = await t.query({ order_by: [{ col: "for_who" }, { col: "added_ms" }] });
+  const held = claimsOf(sfiId, list);
   return rows.map((r) => {
     const mine = isRecipient(r, peer);
     const base = {
@@ -171,11 +120,15 @@ async function listRows(t: Tbl, peer: Peer) {
     // The recipient's copy carries no claim information of any kind — not a name, not an
     // id, not a boolean. Their row looks identical whether or not it has been claimed.
     if (mine) return base;
+    const c = held[r._row_id];
     return {
       ...base,
-      claimed_by: r.claimed_by,
-      claimed_by_id: r.claimed_by_id,
-      claimed_by_me: !!r.claimed_by_id && r.claimed_by_id === peer.user_id,
+      // `claimed` without a holder: the row says so but data/ lost who — "claimed by someone".
+      claimed: !!c || Number(r.claimed) === 1,
+      holder_known: !!c,
+      claimed_by: c?.by ?? "",
+      claimed_by_id: c?.by_id ?? "",
+      claimed_by_me: !!c?.by_id && c.by_id === peer.user_id,
     };
   });
 }
@@ -188,46 +141,25 @@ function notify(sfiId: string) {
 type WriteResult = { status: number; body: unknown };
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const settings = getSettings(sfiId);
-  if (settings.backend === "shared" || settings.pending_graduation) ensureSharedDecls();
-  if (settings.pending_graduation && sharedBound(sfiId)) {
-    try { await runGraduation(sfiId, settings); } catch (e) { log(`gift_list: graduation failed (will retry): ${e}`); }
-  }
-  if (settings.backend === "shared" && !sharedBound(sfiId)) {
-    return { status: 503, body: { error: "table not bound" } };
-  }
-  if (settings.backend === "shared") wireSharedListeners(sfiId);
-  if (settings.backend === "local" && !(await readyLocalTables(peer))) {
-    return { status: 503, body: { error: "table not ready" } };
-  }
-  const t = dataTable(sfiId, settings);
-
   // Never gate writes on is_sfi_member — a Viewer-role member would slip through.
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
 
+  if (op === "bind") {
+    const name = v?.list;
+    if (!validList(name)) return { status: 400, body: { error: "a wishes list is named wishes or <name>.wishes" } };
+    await sessionKv.put("bound/wishes", name);
+    notify(sfiId);
+    return { status: 200, body: { bound: name } };
+  }
+
+  const list = await boundList();
+  if (!list) return { status: 409, body: { error: "no list chosen yet" } };
+  const t = table(list, sfiId);
+
   const ok = async (): Promise<WriteResult> => {
     notify(sfiId);
-    return { status: 200, body: { wishes: await listRows(t, peer) } };
+    return { status: 200, body: { wishes: await listRows(t, sfiId, list, peer) } };
   };
-
-  // --- Data backend (owner-only) ------------------------------------------------------
-  if (op === "data/graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    if (settings.backend === "shared") return { status: 400, body: { error: "already shared" } };
-    settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";
-    saveSettings(sfiId, settings);
-    ensureSharedDecls();
-    ensureTables(peer);
-    notify(sfiId);
-    return { status: 200, body: { waiting: true } };
-  }
-  if (op === "data/cancel_graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    delete settings.pending_graduation;
-    saveSettings(sfiId, settings);
-    notify(sfiId);
-    return { status: 200, body: { ok: true } };
-  }
 
   // --- Wishes --------------------------------------------------------------------------
   if (op === "wish") {
@@ -244,7 +176,7 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
       for_user_id: mineByName ? String(peer.user_id ?? "") : "",
       url: sanitizeText(v?.url, 500),
       notes: sanitizeText(v?.notes, 300),
-      claimed_by: "", claimed_by_id: "", added_ms: Date.now(),
+      claimed_by: "", claimed_by_id: "", added_ms: Date.now(), claimed: 0,
     });
     return ok();
   }
@@ -254,31 +186,37 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     const row = id ? await t.get(id) : null;
     if (!row) return { status: 400, body: { error: "bad id" } };
 
+    // You cannot claim or release a gift meant for you: you would never be shown the
+    // result. Refused before the claim is looked at, so the answer says nothing about it.
+    if ((action === "claim" || action === "unclaim") && isRecipient(row, peer)) {
+      return { status: 400, body: { error: "that one is for you" } };
+    }
+
     if (action === "claim") {
-      // You cannot claim a gift meant for you: you would never be shown the result, so the
-      // button would appear to do nothing. Refuse it plainly instead.
-      if (isRecipient(row, peer)) return { status: 400, body: { error: "that one is for you" } };
-      if (row.claimed_by_id) return { status: 409, body: { error: "already claimed" } };
-      await t.upsert(id, {
-        claimed_by: sanitizeText(peer.user_name, 60),
-        claimed_by_id: String(peer.user_id ?? ""),
-      });
+      if (claimsOf(sfiId, list)[id] || Number(row.claimed) === 1) return { status: 409, body: { error: "already claimed" } };
+      // A claim needs someone to hold it: an unnamed caller could never release it.
+      if (!peer.user_id) return { status: 403, body: { error: "sign in to claim" } };
+      setClaim(sfiId, list, id, { by: sanitizeText(peer.user_name, 60), by_id: String(peer.user_id) });
+      await t.upsert(id, { claimed: 1 });
       return ok();
     }
 
     if (action === "unclaim") {
       // Only the person holding the claim may release it — otherwise one relative could
-      // quietly take over another's gift, and neither would be told.
-      if (!row.claimed_by_id) return ok();
-      if (String(row.claimed_by_id) !== String(peer.user_id ?? "")) {
+      // quietly take over another's gift, and neither would be told. A claim whose holder
+      // was lost with data/ is nobody's to prove, so any editor may let it go.
+      const c = claimsOf(sfiId, list)[id];
+      if (c && c.by_id !== String(peer.user_id ?? "")) {
         return { status: 403, body: { error: "not your claim" } };
       }
-      await t.upsert(id, { claimed_by: "", claimed_by_id: "" });
+      if (c) setClaim(sfiId, list, id, null);
+      if (Number(row.claimed) === 1) await t.upsert(id, { claimed: 0 });
       return ok();
     }
 
     if (action === "delete") {
       await t.delete(id);
+      if (claimsOf(sfiId, list)[id]) setClaim(sfiId, list, id, null);
       return ok();
     }
     if (action) return { status: 404, body: { error: "not found" } };
@@ -329,40 +267,14 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, r.status, r.body);
   }
 
-  const settings = getSettings(sfiId);
-  if (settings.backend === "shared" || settings.pending_graduation) ensureSharedDecls();
-  if (settings.pending_graduation && sharedBound(sfiId)) {
-    try { await runGraduation(sfiId, settings); } catch (e) { log(`gift_list: graduation failed (will retry): ${e}`); }
-  }
-  if (settings.pending_graduation && peer.is_owner && !sharedBound(sfiId)
-      && reqPath === "/api/list" && method === "GET") {
-    ensureTables(peer);
-  }
-  if (settings.backend === "shared" && !sharedBound(sfiId)) {
-    if (reqPath === "/api/list" && method === "GET") {
-      if (peer.is_owner) ensureTables(peer);
-      return jsonReply(replyPort, 200, {
-        waiting_for_binding: true, is_owner: peer.is_owner,
-        storage: { backend: settings.backend, pending: false, can_manage: peer.is_owner },
-      });
-    }
-    return jsonReply(replyPort, 503, { error: "table not bound" });
-  }
-  if (settings.backend === "shared") wireSharedListeners(sfiId);
-  if (settings.backend === "local" && !(await readyLocalTables(peer))) {
-    return jsonReply(replyPort, 503, { error: "table not ready" });
-  }
-
   // Read — open to everyone, redacted per viewer by listRows.
   if (reqPath === "/api/list" && method === "GET") {
+    const list = await boundList();
     return jsonReply(replyPort, 200, {
-      wishes: await listRows(dataTable(sfiId, settings), peer),
+      bound: list,
+      can_bind: peer.is_sfi_editor,
+      wishes: list ? await listRows(table(list, sfiId), sfiId, list, peer) : [],
       me_name: peer.user_name,
-      storage: {
-        backend: settings.backend,
-        pending: !!settings.pending_graduation,
-        can_manage: peer.is_owner,
-      },
     });
   }
 

@@ -185,7 +185,7 @@
     // Must match the caps enforced in frame.ts.
     const MAX_EDGE = 2560;
     const THUMB_EDGE = 480;
-    const MAX_BYTES = 25 * 1024 * 1024;
+    const MAX_BYTES = 8 * 1024 * 1024;
     // Re-encoding these through a canvas would cost PNG transparency and GIF/WebP animation, so
     // originals that are already small enough go up untouched.
     const KEEP_ORIGINAL = new Set(["image/png", "image/gif", "image/webp"]);
@@ -200,10 +200,9 @@
       return p;
     }
 
-    // JSON writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
-    // dropped on Android, and the push (display_changed / photos_changed) — which reaches
-    // the sender too — is the confirmation the UI renders from. Feature-detect: an older
-    // viewer's framelib has no busSend, so fall back to the HTTP write it was using before.
+    // JSON writes go over frame.busSend; the push (display_changed / photos_changed) — which
+    // reaches the sender too — is the confirmation the UI renders from. A framelib without
+    // busSend falls back to the HTTP write.
     function write(path, body) {
       if (typeof frame.busSend === "function") {
         frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
@@ -382,8 +381,6 @@
             const { full, fullMime, thumb, w, h } = await prepare(f);
             if (!full) throw new Error(`Couldn't read "${f.name}".`);
             if (full.size > MAX_BYTES) throw new Error(`"${f.name}" is too large even after resizing.`);
-            // ArrayBuffer, never a File: WebKit reads File/Blob bodies asynchronously and the
-            // axum:// bridge captures the request before that read finishes, so a File arrives empty.
             const qs = `api/upload?name=${encodeURIComponent(f.name)}&mime=${encodeURIComponent(fullMime)}&w=${w}&h=${h}`;
             const res = await frame.fetch(withSfi(qs), { method: "POST", body: await full.arrayBuffer() });
             if (!res.ok) {

@@ -31,11 +31,7 @@
       font-feature-settings: 'tnum' 1; text-transform: lowercase; white-space: nowrap;
     }
 
-    /* the data drawer — ONE quiet button for a configuration most people never touch.
-       Owner-only (nobody else sees it), no state text at rest: where the rows live is
-       not news, it's a setting. Everything (storage state, graduation) lives behind it.
-       The glyph is the platform's Tables icon (ph-dresser, the pivot-nav rail) so the
-       frame and the OS say "tables" the same way. See docs/table-graduation.md. */
+    /* the quiet settings button in the header (the currency symbol) */
     .drawer {
       flex: 0 0 auto; position: relative;
       width: 24px; height: 24px; padding: 0;
@@ -44,21 +40,11 @@
       color: var(--os-text-subtle); font-size: 16px; line-height: 1;
       transition: color 150ms, background 150ms;
     }
-    /* the glyph must outrank the .header i channel-tint rule above, exactly as the
-       old storage chip's icon did: this button is neutral chrome, never channel. */
+    /* the glyph must outrank the .header i channel-tint rule above: neutral chrome, never channel. */
     .drawer i { font-size: 16px; line-height: 1; color: inherit; width: auto; height: auto; }
     .drawer:hover { color: var(--os-text); background: var(--os-bg-subtle); }
     .drawer:active { transform: scale(0.92); }
     .drawer:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
-    /* the ONE ambient signal, and it is rare: a channel dot while a move is unfinished */
-    .drawer.pending::after {
-      content: ""; position: absolute; top: 0; right: 0;
-      width: 5px; height: 5px; border-radius: var(--os-radius-full); background: var(--ch);
-      animation: drawer-breathe 2s ease-in-out infinite;
-    }
-    @keyframes drawer-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-    @media (prefers-reduced-motion: reduce) { .drawer.pending::after { animation: none; } }
-
     .banner {
       display: flex; align-items: center; gap: var(--os-sp-xs);
       background: var(--os-bg-inset); border-radius: var(--os-radius-md);
@@ -252,24 +238,6 @@
       .txlist { overflow-y: visible; }
     }
 
-    /* waiting-for-binding notice (graduated placement, bindings not resolved yet) */
-    .notice {
-      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: var(--os-sp-sm); text-align: center; padding: var(--os-sp-xl);
-    }
-    .notice i { font-size: 28px; color: var(--os-text-subtle); }
-    .notice h2 { margin: 0; font-size: var(--os-fs-md); font-weight: var(--os-weight-semibold); }
-    .notice p { margin: 0; font-size: var(--os-fs-sm); color: var(--os-text-secondary); max-width: 380px; }
-
-    .data-ghost {
-      font: inherit; font-size: var(--os-fs-sm); cursor: pointer;
-      background: transparent; border: 1px solid var(--os-border-color);
-      color: var(--os-text-secondary); border-radius: var(--os-radius-sm);
-      padding: calc(var(--os-sp-xs) + 1px) var(--os-sp-md);
-      transition: color 150ms, border-color 150ms;
-    }
-    .data-ghost:hover { color: var(--os-text); border-color: var(--os-text-subtle); background: transparent; opacity: 1; }
-
     /* ---- editor modals ---------------------------------------------------------------- */
     .ed { display: flex; flex-direction: column; gap: var(--os-sp-md); min-width: min(380px, 78vw); }
     .ed label {
@@ -337,8 +305,6 @@
       const [data, setData]       = useState(null);      // the /api/month payload
       const [month, setMonth]     = useState(curMonth());
       const [currency, setCurrency] = useState("$");
-      const [storage, setStorage] = useState(null);      // { backend, pending, can_manage }
-      const [waiting, setWaiting] = useState(false);     // graduated placement, binding missing
       const [editCat, setEditCat] = useState(null);      // category being edited
       const [catArmed, setCatArmed] = useState(false);
       const [editTx, setEditTx]   = useState(null);      // transaction being edited
@@ -353,8 +319,6 @@
       async function refresh() {
         const r = await frame.api("api/month?month=" + monthRef.current).catch(() => null);
         if (!r) return;
-        if (r.storage) setStorage(r.storage);
-        setWaiting(!!r.waiting_for_binding);
         if (r.settings) setCurrency(r.settings.currency || "$");
         if (r.categories) setData(r);
       }
@@ -464,36 +428,6 @@
         write("api/settings", { currency: c });
       }
 
-      // ---- the data drawer (owner-only) --------------------------------------------------
-      // One button, one surface: the frame says nothing about storage at rest, and every
-      // data action lives here. Single call site so #755 (frame-chrome data controls) can
-      // replace this wholesale. See docs/table-graduation.md.
-      async function onDrawer() {
-        if (storage.pending) {
-          const stop = await frame.confirm("Stop the move to a shared table?", {
-            title: "Budget data", okLabel: "Stop", cancelLabel: "Keep going",
-          });
-          if (stop) { await write("api/data/cancel_graduate", {}); refresh(); }
-          return;
-        }
-        if (storage.backend === "shared") {
-          await frame.alert("This budget's categories and transactions live in a shared table, so other frames in this space can work with the same rows.", { title: "Budget data" });
-          return;
-        }
-        const mode = frame.choose
-          ? await frame.choose("These categories and transactions live on this device.", {
-              title: "Budget data",
-              options: [
-                { id: "convert", label: "Move to a shared table", icon: "ph-dresser",
-                  detail: "Copies this budget so other frames can use it" },
-                { id: "adopt", label: "Use an existing shared table", icon: "ph-plugs-connected",
-                  detail: "Point this budget at tables you already have" },
-              ],
-            })
-          : ((await frame.confirm("Move this budget's data to a shared table?", { title: "Budget data", okLabel: "Move" })) ? "convert" : null);
-        if (mode) { await write("api/data/graduate", { mode }); refresh(); }
-      }
-
       const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
 
       // ---- derived view data -------------------------------------------------------------
@@ -557,12 +491,6 @@
             <i class="ph-light ph-wallet"></i>
             <h1>Family Budget</h1>
             <span class="mode">${mode}</span>
-            ${storage && storage.can_manage ? html`
-              <button class=${"drawer" + (storage.pending ? " pending" : "")}
-                title=${storage.pending ? "Finishing a move to a shared table" : "Budget data"}
-                onClick=${onDrawer}>
-                <i class="ph-light ph-dresser"></i>
-              </button>` : null}
             ${isEditor ? html`
               <button class="drawer" title="Budget settings" onClick=${onCurrencyClick}>
                 <i class="ph-light ph-gear-six"></i>
@@ -577,16 +505,7 @@
                 : html`You're viewing this budget publicly. Join this space to record income and expenses.`}
             </div>` : null}
 
-          ${waiting ? html`
-            <div class="notice">
-              <i class="ph-light ph-table"></i>
-              <h2>Almost there</h2>
-              <p>${me.is_owner
-                ? html`Pick the categories table, then the transactions table to finish.`
-                : html`The owner is finishing this budget's move to shared tables.`}</p>
-              ${me.is_owner ? html`<button class="data-ghost" onClick=${refresh}>Open the picker again</button>` : null}
-            </div>`
-          : !data ? html`<div></div>` : html`
+          ${!data ? html`<div></div>` : html`
             <div class="monthbar">
               <button class="mnav" title="Previous month" onClick=${() => setMonth(shiftMonth(month, -1))}>
                 <i class="ph-light ph-caret-left"></i>

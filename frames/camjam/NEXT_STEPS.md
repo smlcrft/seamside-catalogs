@@ -18,7 +18,7 @@ not a TODO — most of them would cost more error surface than they're worth.
   still as everyone else, which is honest but lags by up to one interval. A local
   `<video>` preview beside it would show both.
 - **Remember the chosen camera.** `frame.localStorageSetItem` could hold the last
-  `deviceId` per placement so a returning sharer doesn't re-pick.
+  `deviceId` per space so a returning sharer doesn't re-pick.
 
 ## Deliberately NOT here
 
@@ -33,6 +33,6 @@ not a TODO — most of them would cost more error surface than they're worth.
 ## Might be worth a jig
 
 There's no jig for **ephemeral host-memory state** — data that is deliberately never
-persisted, keyed per placement, with a self-expiring holder. This frame, a "who's typing"
+persisted, keyed per space, with a self-expiring holder. This frame, a "who's typing"
 indicator, and a presence roster all want the same shape. If a third one shows up, it
 belongs in `../jigs/` as `storage-ephemeral-memory`.

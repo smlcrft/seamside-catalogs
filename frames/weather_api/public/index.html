@@ -122,7 +122,7 @@
     function wmoIcon(code) {
       return '<i class="ph-light ' + (WMO_ICON[code] ?? "ph-thermometer") + '"></i>';
     }
-    // A weather field may be absent if the placement's settings.json trims it (or the API
+    // A weather field may be absent if the keeper's settings.json trims it (or the API
     // omits it). Coerce to a finite number, or null so callers can render a "—" placeholder.
     function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
     function dayName(isoDate) {
@@ -184,7 +184,9 @@
         clearTimeout(refreshTimer);
         refreshTimer = setTimeout(() => load(locationQuery), 5.01 * 60 * 1000);
       } catch (e) {
-        errorEl.textContent = e.message;
+        let msg = e.message;
+        try { msg = JSON.parse(e.body).error || msg; } catch (_) { /* not the worker's JSON */ }
+        errorEl.textContent = msg;
         errorEl.style.display = "block";
       }
     }

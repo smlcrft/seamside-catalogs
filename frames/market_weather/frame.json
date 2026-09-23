@@ -1,6 +1,6 @@
 {
     "name": "Market Weather",
-    "description": "A turnout forecaster for outdoor commerce — farmers markets, festivals, food trucks, street vendors, walkable storefronts. Set a location and Market Weather pulls 72 hours of weather from Open-Meteo (keyless), compares it against the last 30 days' local norms, and folds in temperature comfort, rain, UV, daylight, wind, weekend bonus, and time-of-day into a single composite turnout curve. The graph overlays each contributing factor as a faint band (daytime in pale yellow, rain in blue rising from the bottom, extreme heat/cold in red, weekend bonus in green) so you can see at a glance WHY the bold turnout line moves the way it does — and plan how much to stock, bake, or brew for the days ahead.",
+    "description": "A turnout forecaster for outdoor commerce \u2014 farmers markets, festivals, food trucks, street vendors, walkable storefronts. An editor of the space sets the market's location and its weekly events; the frame's server half pulls 72 hours of weather from Open-Meteo (keyless), compares it against the last 30 days' local norms, and folds temperature comfort, rain, UV, daylight, wind, weekend bonus and time of day into one turnout curve, with each factor drawn as a faint band so you can see WHY the line moves. Members of the space read the forecast (viewers cannot change the market); it is private to them, so an anonymous link-holder sees nothing. Each Market Weather keeps its location and events as its own session state in the space, so two in one space can forecast two markets.",
     "frame_type": "Tandem",
     "tags": ["smallbiz", "weather"],
     "permissions": {
@@ -12,9 +12,11 @@
     "default_width_px": 720,
     "default_height_px": 560,
     "created_at": "2026-05-20T14:40:14Z",
-    "modified_at": "2026-08-04T21:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T14:21:48Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:storefront",
+    "color": "c2"
 }

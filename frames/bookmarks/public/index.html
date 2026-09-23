@@ -254,13 +254,13 @@
           ],
         });
         if (what === "rename") {
-          const v = await frame.prompt("Title", { title: "Rename", value: b.title, okLabel: "Save" });
+          const v = await frame.prompt("Title", { title: "Rename", defaultValue: b.title, okLabel: "Save" });
           if (v && v.trim()) write("api/bookmark/" + b.id, { title: v.trim() });
         } else if (what === "tags") {
-          const v = await frame.prompt("Separate tags with spaces or commas.", { title: "Tags", value: b.tags.join(" "), okLabel: "Save" });
+          const v = await frame.prompt("Separate tags with spaces or commas.", { title: "Tags", defaultValue: b.tags.join(" "), okLabel: "Save" });
           if (v !== null) write("api/bookmark/" + b.id, { tags: v });
         } else if (what === "note") {
-          const v = await frame.prompt("A line about why you saved it.", { title: "Note", value: b.note, okLabel: "Save" });
+          const v = await frame.prompt("A line about why you saved it.", { title: "Note", defaultValue: b.note, okLabel: "Save" });
           if (v !== null) write("api/bookmark/" + b.id, { note: v });
         } else if (what === "copy") {
           await frame.alert(b.url, { title: b.domain });

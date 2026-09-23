@@ -111,26 +111,27 @@ function PublicBlock({ block: b }) {
     const label = (b.label || "").trim();
     const url = (b.url || "").trim();
     if (!label || !url) return null;
+    // A frame is sandboxed: the viewer opens the link (frame.openExternalUrl).
     return html`
-      <a class="ch-link" href=${url} target="_blank" rel="noopener noreferrer">
+      <a class="ch-link" href=${url} rel="noopener noreferrer"
+        onClick=${(e) => { e.preventDefault(); frame.openExternalUrl(url); }}>
         <span>${label}</span>
         <i class="ph-light ph-arrow-up-right icon-sm"></i>
       </a>
     `;
   }
+  // A public frame is shown as a link: a frame's page may embed nothing from another
+  // origin (v1's frame CSP), so the visitor opens it in its own tab.
   if (b.kind === "pub_frame") {
     const url = (b.url || "").trim();
     if (!url) return null;
     const title = (b.heading || "").trim();
-    const w = Number(b.width) || 320;
-    const h = Number(b.height) || 320;
     return html`
-      <div class="pub-frame-wrap" style=${`width: ${w}px;`}>
-        ${title && html`<div class="pub-frame-title">${title}</div>`}
-        <iframe src=${url} class="pub-frame" loading="lazy" referrerpolicy="no-referrer"
-          style=${`width: ${w}px; height: ${h}px;`}
-          sandbox="allow-scripts allow-forms allow-same-origin allow-popups"></iframe>
-      </div>
+      <a class="ch-link" href=${url} rel="noopener noreferrer"
+        onClick=${(e) => { e.preventDefault(); frame.openExternalUrl(url); }}>
+        <span>${title || "Open the public frame"}</span>
+        <i class="ph-light ph-browsers icon-sm"></i>
+      </a>
     `;
   }
   return null;
@@ -187,7 +188,7 @@ function AdminView({ page, onPreview, onError }) {
             <label>Page content</label>
             <div class="ch-blocks-editor">
               ${blocks.length === 0
-                ? html`<div class="muted ch-hint">Your page is empty. Use the buttons below to add sections, links, or embedded public frames in any order.</div>`
+                ? html`<div class="muted ch-hint">Your page is empty. Use the buttons below to add sections, links, or public frames in any order.</div>`
                 : blocks.map((b) => html`<${BlockRow} block=${b} key=${b.id} onSave=${saveBlock} onDelete=${deleteBlk} />`)}
             </div>
             <div class="ch-add-btns">
@@ -237,7 +238,7 @@ function BlockRow({ block: b, onSave, onDelete }) {
         <${Editable} tag="textarea" rows=${4} maxlength=${10000}
           class=${isHtml ? "ch-code" : ""} spellcheck=${!isHtml} placeholder=${placeholder}
           value=${b.body} onSave=${(v) => onSave(b.id, { body: v })} />
-        ${isHtml && html`<div class="ch-fmt-hint muted">Raw HTML is inserted verbatim. Anything you write here runs in the visitor's iframe — only paste code you trust.</div>`}
+        ${isHtml && html`<div class="ch-fmt-hint muted">Raw HTML is inserted verbatim — only paste code you trust. A frame has no network, so images, styles and scripts from other sites do not load.</div>`}
       </div>
     `;
   }
@@ -256,31 +257,19 @@ function BlockRow({ block: b, onSave, onDelete }) {
     `;
   }
   if (b.kind === "pub_frame") {
-    const w = Number(b.width) || 320;
-    const h = Number(b.height) || 320;
     return html`
       <div class="ch-row ch-pubframe-row">
         <div class="ch-row-head">
           <span class="ch-kind-tag"><i class="ph-light ph-browsers icon-sm"></i> public frame</span>
-          <${Editable} type="text" maxlength=${200} placeholder="Optional title shown above the embed"
+          <${Editable} type="text" maxlength=${200} placeholder="The link's label (optional)"
             value=${b.heading || ""} onSave=${(v) => onSave(b.id, { heading: v })} />
           <button type="button" class="ghost" title="Remove public frame" onClick=${() => onDelete(b.id)}>
             <i class="ph-light ph-trash icon-sm"></i>
           </button>
         </div>
-        <${Editable} type="url" maxlength=${2048} placeholder="https://seamside.com/go/#t=frame&l=…"
+        <${Editable} type="url" maxlength=${2048} placeholder="https://…"
           value=${b.url} onSave=${(v) => onSave(b.id, { url: v })} />
-        <div class="ch-pubframe-dims">
-          <label>Width
-            <${Editable} type="number" min=${80} max=${2000} step=${10}
-              value=${String(w)} onSave=${(v) => onSave(b.id, { width: Number(v) || 320 })} />
-          </label>
-          <label>Height
-            <${Editable} type="number" min=${80} max=${2000} step=${10}
-              value=${String(h)} onSave=${(v) => onSave(b.id, { height: Number(v) || 320 })} />
-          </label>
-          <span class="muted ch-fmt-hint">px — visitors see the iframe at this size.</span>
-        </div>
+        <div class="muted ch-fmt-hint">Visitors get a link that opens the frame in its own tab.</div>
       </div>
     `;
   }

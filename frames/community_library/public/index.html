@@ -11,10 +11,11 @@
 <div id="root"></div>
 <script type="module">
 import { frame, html, render, useState, useEffect, useFramePush, WAITING } from "./lib/js/framelib.js";
+import { ListLine, chooseList, settleList } from "./members_list.js";
 
 // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are dropped
 // on Android (issue #750), the tether carries them everywhere. Fire-and-forget — resulting
-// state arrives via the assets_changed / members_changed / settings_changed pushes below.
+// state arrives via the assets_changed / settings_changed pushes below.
 // Reads stay HTTP GETs. Feature-detect: an older viewer framelib has no busSend — fall
 // back to the HTTP write it was using before.
 const api = (path, body, method) => {
@@ -54,8 +55,7 @@ function App() {
   const [dialog, setDialog] = useState(null); // { kind, ...payload } | null
 
   // Returns the fetched state object so callers can read viewer without a
-  // second round-trip. "waiting" sentinel is returned when tables aren't
-  // bound yet (503), null only on hard error.
+  // second round-trip. "waiting" sentinel on a 503, null only on hard error.
   async function loadState() {
     const s = await api("api/state");
     if (s === WAITING || !s) { setState("waiting"); return null; }
@@ -75,20 +75,45 @@ function App() {
     setAssets(r.rows || []);
   }
 
+  async function bind(list) {
+    try {
+      await frame.api("api/bind", { list });
+    } catch (e) {
+      await frame.alert(e.message || "failed");
+    }
+    const s = await loadState();
+    if (s) await Promise.all([loadMembers(s.viewer), loadAssets()]);
+  }
+
   // Boot.
   useEffect(() => {
     (async () => {
       const s = await loadState();
       if (!s) return;
       await Promise.all([loadMembers(s.viewer), loadAssets()]);
+      await settleList(s, bind);
     })();
   }, []);
+
+  // The roster is the bound members list, which Member Manager writes from its own frame:
+  // watch the table itself so a change made there shows here too (members only — the
+  // roster is theirs).
+  const bound = state?.bound || "";
+  const watching = !!bound && !!state?.viewer && !state.viewer.is_anon;
+  useEffect(() => {
+    if (!watching || !window.seamside?.kv?.watch) return;
+    let soon = 0;
+    const w = window.seamside.kv.watch(`t/${bound}/`, () => {
+      clearTimeout(soon);
+      soon = setTimeout(() => { loadMembers(state.viewer); loadAssets(); }, 300);
+    });
+    return () => { clearTimeout(soon); w.close(); };
+  }, [bound, watching]);
 
   // Live updates from peers. useFramePush refreshes handlers each render, so
   // they always see the latest state?.viewer in their closure.
   useFramePush({
     assets_changed: () => loadAssets(),
-    members_changed: () => loadMembers(state?.viewer),
     settings_changed: async () => {
       const s = await loadState();
       if (!s) return;
@@ -109,7 +134,7 @@ function App() {
   }, []);
 
   if (state === null) return html`<div class="empty">Loading…</div>`;
-  if (state === "waiting") return html`<div class="empty">Waiting for the space owner to bind SyncTables for the library…</div>`;
+  if (state === "waiting") return html`<div class="empty">The library could not be loaded.</div>`;
 
   const { prefs, viewer, can_edit } = state;
   const closeDialog = () => setDialog(null);
@@ -128,6 +153,9 @@ function App() {
         `}
       </div>
     </header>
+
+    <${ListLine} bound=${state.bound} canBind=${state.can_bind}
+      onChoose=${async () => { const n = await chooseList(state.bound); if (n && n !== state.bound) await bind(n); }} />
 
     ${can_edit && html`<${AddRow} types=${prefs.item_types} reload=${loadAssets} />`}
 

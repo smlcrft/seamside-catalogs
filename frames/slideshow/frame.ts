@@ -1,21 +1,22 @@
 // ----------------------------------------------------------------------------------------
-// Slideshow — a simple presentation maker and presenter, one per placement (sfi_id).
+// Slideshow — a simple presentation maker and presenter, one per space (sfi_id).
 //
 // Design axes:
 //   privacy:        privacy-public-view  — editors build/edit the deck; viewers and anonymous
 //                                           link visitors get a read-only, browseable presentation.
-//   data_storage:   storage-simple-files — the whole deck lives in a single show.json under a
-//                                           per-sfi folder; uploaded images sit beside it in an
-//                                           images/ subfolder. No DB / SyncTable.
+//   data_storage:   storage-simple-files — the whole deck is one file of the space,
+//                                           Slideshow/slides.json, its uploaded images beside it
+//                                           in Slideshow/images/; the live present position is
+//                                           this frame's key in the space's frameSettings.
 //   view_realtime:  view-collaborative   — every save calls pushToInstance so all viewers of the
-//                                           placement refresh live; when "keep viewers in sync" is on,
+//                                           space refresh live; when "keep viewers in sync" is on,
 //                                           each slide advance also pushes present_changed so every
 //                                           viewer's presentation tracks the editor's current slide.
 //   settings_scope: settings-per-sfi     — everything is keyed by peer.sfi_id.
 // ----------------------------------------------------------------------------------------
 import {
   log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance, onUiMessage,
-  frameDataDir, serveFileAtPath, contentType, extname, path,
+  serveFileAtPath, contentType, extname, spaceFiles, frameSettings,
 } from "@frame-core";
 
 // ----- Deck shape -----------------------------------------------------------------------
@@ -43,7 +44,7 @@ const DEFAULT_SHOW: Show = {
   slides: [],
 };
 
-// Caps — keep disk + rendering bounded.
+// Caps — keep the space's files and rendering bounded.
 const MAX_SLIDES = 80;
 const MAX_ELEMENTS = 40;
 const MAX_TEXT = 4000;
@@ -51,53 +52,42 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const IMG_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 const KEEP_RECENT_IMG_MS = 5 * 60 * 1000; // don't GC images uploaded in the last 5 min
 
-// ----- Files on disk --------------------------------------------------------------------
-// data/shows/<sfi_slug>/show.json
-// data/shows/<sfi_slug>/images/<uuid>.<ext>
-// data/shows/<sfi_slug>/present.json   — the live shared present position (sync mode only)
-const SHOWS_DIR = path.join(frameDataDir(import.meta.url), "shows");
-
-function sfiSlug(sfiId: string): string {
-  return (sfiId || "").replace(/[^a-zA-Z0-9_-]/g, "_") || "default";
-}
-function showDir(sfiId: string): string { return path.join(SHOWS_DIR, sfiSlug(sfiId)); }
-function imagesDir(sfiId: string): string { return path.join(showDir(sfiId), "images"); }
-function showFile(sfiId: string): string { return path.join(showDir(sfiId), "show.json"); }
-function presentFile(sfiId: string): string { return path.join(showDir(sfiId), "present.json"); }
+// ----- Files of the space ---------------------------------------------------------------
+// Slideshow/slides.json          the deck
+// Slideshow/images/<uuid>.<ext>  its uploaded images, named by the elements' imageId
+const FOLDER = "Slideshow";
+const SHOW_FILE = `${FOLDER}/slides.json`;
+const IMAGES = `${FOLDER}/images`;
 
 const ID_RE = /^[0-9a-fA-F-]{8,64}$/;
 
-function loadShow(sfiId: string): Show {
+async function loadShow(): Promise<Show> {
   try {
-    const raw = Deno.readTextFileSync(showFile(sfiId));
-    return sanitizeShow(JSON.parse(raw));
+    const raw = await spaceFiles.read(SHOW_FILE);
+    return raw ? sanitizeShow(JSON.parse(new TextDecoder().decode(raw))) : structuredClone(DEFAULT_SHOW);
   } catch { return structuredClone(DEFAULT_SHOW); }
 }
-function saveShow(sfiId: string, show: Show): void {
-  Deno.mkdirSync(showDir(sfiId), { recursive: true });
-  Deno.writeTextFileSync(showFile(sfiId), JSON.stringify(show, null, 2));
+async function saveShow(show: Show): Promise<void> {
+  await spaceFiles.write(SHOW_FILE, JSON.stringify(show, null, 2));
 }
 
-// The live shared present position. Kept in its own file (not show.json) so that frequent
-// slide-advance writes never collide with editor deck saves or fire deck_changed refreshes.
-// Late joiners read it via /api/state so they land on the slide the presenter is currently on.
+// The live shared present position. Kept apart from the deck so that frequent slide-advance
+// writes never collide with editor deck saves or fire deck_changed refreshes. Late joiners
+// read it via /api/state so they land on the slide the presenter is currently on.
 type Present = { index: number };
-function loadPresent(sfiId: string): Present {
-  try {
-    const p = JSON.parse(Deno.readTextFileSync(presentFile(sfiId)));
-    return { index: num(p?.index, 0, 0, MAX_SLIDES) };
-  } catch { return { index: 0 }; }
+async function loadPresent(sfiId: string): Promise<Present> {
+  return { index: num(await frameSettings(sfiId).get<number>("slideshow_present"), 0, 0, MAX_SLIDES) };
 }
-function savePresent(sfiId: string, index: number): void {
-  Deno.mkdirSync(showDir(sfiId), { recursive: true });
-  Deno.writeTextFileSync(presentFile(sfiId), JSON.stringify({ index }));
+async function savePresent(sfiId: string, index: number): Promise<void> {
+  await frameSettings(sfiId).set("slideshow_present", index);
 }
 
 // ----- Viewer presence ------------------------------------------------------------------
 // Editors see a live "N watching" count of read-only viewers. Viewers ping every 10s; a
 // session is live until VIEWER_TTL_MS passes without one. In-memory only — a frame restart
-// resets the count until the next round of pings. The sweep interval re-broadcasts when a
-// viewer goes quiet (closing a tab sends no goodbye).
+// resets the count until the next round of pings. Every page pings, editors included, and
+// each ping re-broadcasts a changed count, which is how a viewer going quiet (closing a tab
+// sends no goodbye) is noticed: a worker has no instance to push to outside a request.
 const VIEWER_TTL_MS = 25_000;
 const _viewersBySfi = new Map<string, Map<string, number>>(); // sfi_id → session → lastSeen ms
 const _lastPushedViewerCount = new Map<string, number>();
@@ -119,7 +109,6 @@ function broadcastViewerCount(sfiId: string): void {
   _lastPushedViewerCount.set(sfiId, count);
   pushToInstance(sfiId, { type: "viewers_changed", count });
 }
-setInterval(() => { for (const sfiId of _viewersBySfi.keys()) broadcastViewerCount(sfiId); }, 10_000);
 
 // ----- Validation -----------------------------------------------------------------------
 function num(v: unknown, def: number, lo: number, hi: number): number {
@@ -182,33 +171,27 @@ function sanitizeShow(raw: any): Show {
   return { settings, slides };
 }
 
-// Remove image files no longer referenced by any element (skip very recent uploads).
-function gcImages(sfiId: string, show: Show): void {
+// Remove image files no longer referenced by any element, sparing an upload not yet placed
+// for a few minutes (it lands before the save that places it; once placed, it is spared no more).
+const recentUploads = new Map<string, number>(); // image id → uploaded at
+async function gcImages(show: Show): Promise<void> {
   const referenced = new Set<string>();
   for (const sl of show.slides) for (const el of sl.elements) if (el.imageId) referenced.add(el.imageId);
-  let entries: Deno.DirEntry[];
-  try { entries = [...Deno.readDirSync(imagesDir(sfiId))]; } catch { return; }
+  for (const id of referenced) recentUploads.delete(id);
   const now = Date.now();
-  for (const e of entries) {
-    if (!e.isFile) continue;
+  for (const [id, at] of recentUploads) if (now - at > KEEP_RECENT_IMG_MS) recentUploads.delete(id);
+  for (const e of await spaceFiles.list(IMAGES).catch(() => [])) {
     const id = e.name.replace(/\.[^.]+$/, "");
-    if (referenced.has(id)) continue;
-    const full = path.join(imagesDir(sfiId), e.name);
-    try {
-      const st = Deno.statSync(full);
-      if (st.mtime && now - st.mtime.getTime() < KEEP_RECENT_IMG_MS) continue;
-      Deno.removeSync(full);
-    } catch { /* already gone */ }
+    if (e.dir || e.link || referenced.has(id) || recentUploads.has(id)) continue;
+    await spaceFiles.remove(`${IMAGES}/${e.name}`).catch(() => { /* already gone */ });
   }
 }
 
-function imageFile(sfiId: string, id: string): { full: string; name: string } | null {
+async function imageFile(id: string): Promise<string | null> {
   if (!ID_RE.test(id)) return null;
-  try {
-    const kid = [...Deno.readDirSync(imagesDir(sfiId))].find((k) => k.isFile && k.name.replace(/\.[^.]+$/, "") === id);
-    if (!kid) return null;
-    return { full: path.join(imagesDir(sfiId), kid.name), name: kid.name };
-  } catch { return null; }
+  const kid = (await spaceFiles.list(IMAGES).catch(() => []))
+    .find((k) => !k.dir && k.name.replace(/\.[^.]+$/, "") === id);
+  return kid ? kid.name : null;
 }
 
 // Light magic-byte sniff so a non-image renamed to .png is rejected server-side.
@@ -223,15 +206,15 @@ function looksLikeImage(buf: Uint8Array): boolean {
   return false;
 }
 
-function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
+async function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
   return {
     me: {
       is_anon: peer.is_anon, is_sfi_member: peer.is_sfi_member,
       is_sfi_editor: peer.is_sfi_editor, is_owner: peer.is_owner,
       user_name: peer.user_name, space_color: peer.space_color,
     },
-    show: loadShow(peer.sfi_id),
-    present: loadPresent(peer.sfi_id),
+    show: await loadShow(),
+    present: await loadPresent(peer.sfi_id),
     viewers: viewerCount(peer.sfi_id),
   };
 }
@@ -243,47 +226,46 @@ type MutPeer = ReturnType<typeof parsePeerInfo>;
 type MutResult = { status: number; body: unknown };
 
 // Save the whole deck — editors only. Last-write-wins; viewers refresh on the push.
-function mutSave(sfiId: string, v: { show?: any; by?: string } | null, peer: MutPeer): MutResult {
+async function mutSave(sfiId: string, v: { show?: any; by?: string } | null, peer: MutPeer): Promise<MutResult> {
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
   const show = sanitizeShow(v?.show);
-  saveShow(sfiId, show);
-  gcImages(sfiId, show);
+  await saveShow(show);
+  await gcImages(show);
   pushToInstance(sfiId, { type: "deck_changed", by: str(v?.by, 64) });
   return { status: 200, body: { ok: true } };
 }
 
 // Advance the live shared presentation — editors only (they are the presenters). The new
-// index is persisted and pushed to EVERY viewer of the placement: peers AND our own sibling
+// index is persisted and pushed to EVERY viewer of the space: peers AND our own sibling
 // devices both receive it via pushToInstance, so a follower's present view tracks the presenter.
-function mutPresent(sfiId: string, v: { index?: number; by?: string } | null, peer: MutPeer): MutResult {
+async function mutPresent(sfiId: string, v: { index?: number; by?: string } | null, peer: MutPeer): Promise<MutResult> {
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  const show = loadShow(sfiId);
+  const show = await loadShow();
   const index = num(v?.index, 0, 0, Math.max(0, show.slides.length - 1));
-  savePresent(sfiId, index);
+  await savePresent(sfiId, index);
   pushToInstance(sfiId, { type: "present_changed", index, by: str(v?.by, 64) });
   return { status: 200, body: { ok: true } };
 }
 
-// Viewer presence ping — read-only viewers announce themselves so editors can see a live
-// "N watching" count. Editors are never counted, so this is deliberately not editor-gated;
+// Presence ping — read-only viewers announce themselves so editors can see a live
+// "N watching" count. Editors are never counted, but their pings sweep out quiet viewers;
 // it only touches the in-memory viewer map (broadcastViewerCount pushes on change).
 function mutViewerPing(sfiId: string, v: { by?: string } | null, peer: MutPeer): MutResult {
-  if (!peer.is_sfi_editor) {
-    const sid = str(v?.by, 64);
-    if (sid) { recordViewer(sfiId, sid); broadcastViewerCount(sfiId); }
-  }
+  const sid = str(v?.by, 64);
+  if (!peer.is_sfi_editor && sid) recordViewer(sfiId, sid);
+  broadcastViewerCount(sfiId);
   return { status: 200, body: { ok: true } };
 }
 
 // Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame). `peer` is the
 // sender's platform-resolved identity, same shape as parsePeerInfo; role gates live inside
 // the mutation functions. Denials are logged, not answered.
-onUiMessage((sfiId, data, peer) => {
+onUiMessage(async (sfiId, data, peer) => {
   if (!sfiId || typeof data !== "object" || data === null) return;
   const d = data as Record<string, unknown>;
   const r =
-    d.op === "save"          ? mutSave(sfiId, d as { show?: any; by?: string }, peer)
-    : d.op === "present"     ? mutPresent(sfiId, d as { index?: number; by?: string }, peer)
+    d.op === "save"          ? await mutSave(sfiId, d as { show?: any; by?: string }, peer)
+    : d.op === "present"     ? await mutPresent(sfiId, d as { index?: number; by?: string }, peer)
     : d.op === "viewer_ping" ? mutViewerPing(sfiId, d as { by?: string }, peer)
     : null;
   if (r && r.status !== 200) log(`slideshow: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
@@ -300,18 +282,18 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
 
   // Full deck + identity in one round trip. Readable by everyone (public view).
   if (reqPath === "/api/state" && method === "GET") {
-    return jsonReply(replyPort, 200, stateFor(peer));
+    return jsonReply(replyPort, 200, await stateFor(peer));
   }
 
   // HTTP arms kept for API compatibility (older viewers, web viewer fallback); the frame's
   // own UI writes over the bus (see the dispatcher above). Same functions, same gates.
   if (reqPath === "/api/save" && method === "POST") {
-    const r = mutSave(peer.sfi_id, parseJsonBody<{ show?: any; by?: string }>(body), peer);
+    const r = await mutSave(peer.sfi_id, parseJsonBody<{ show?: any; by?: string }>(body), peer);
     return jsonReply(replyPort, r.status, r.body);
   }
 
   if (reqPath === "/api/present" && method === "POST") {
-    const r = mutPresent(peer.sfi_id, parseJsonBody<{ index?: number; by?: string }>(body), peer);
+    const r = await mutPresent(peer.sfi_id, parseJsonBody<{ index?: number; by?: string }>(body), peer);
     return jsonReply(replyPort, r.status, r.body);
   }
 
@@ -332,18 +314,17 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     const bytes = new Uint8Array(body);
     if (!looksLikeImage(bytes)) return jsonReply(replyPort, 415, { error: "file is not an image" });
     const id = crypto.randomUUID();
-    Deno.mkdirSync(imagesDir(peer.sfi_id), { recursive: true });
-    Deno.writeFileSync(path.join(imagesDir(peer.sfi_id), id + "." + ext), bytes);
+    recentUploads.set(id, Date.now());
+    await spaceFiles.write(`${IMAGES}/${id}.${ext}`, bytes);
     return jsonReply(replyPort, 200, { imageId: id });
   }
 
   // Image fetch — readable by everyone who can see the deck.
   if (reqPath.startsWith("/api/image/") && method === "GET") {
-    const found = imageFile(peer.sfi_id, reqPath.slice("/api/image/".length));
-    if (!found) return jsonReply(replyPort, 404, { error: "not found" });
-    let buf: Uint8Array;
-    try { buf = Deno.readFileSync(found.full); } catch { return jsonReply(replyPort, 404, { error: "not found" }); }
-    const mime = contentType(extname(found.name)) || "application/octet-stream";
+    const name = await imageFile(reqPath.slice("/api/image/".length));
+    const buf = name ? await spaceFiles.read(`${IMAGES}/${name}`).catch(() => null) : null;
+    if (!name || !buf) return jsonReply(replyPort, 404, { error: "not found" });
+    const mime = contentType(extname(name)) || "application/octet-stream";
     return replyPort.postMessage({
       status: 200, body: buf, contentType: mime,
       headers: { "Cache-Control": "private, max-age=300" },

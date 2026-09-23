@@ -4,29 +4,22 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members get a live read-only view;
 //                                           space editors get the interactive board.
-//   data_storage:   storage-graduating   — starts as LocalTables (encrypted at rest on
-//                                           the host, zero ceremony); the OWNER can
-//                                           graduate THIS placement's data to shared
-//                                           SyncTables so other frames bind the same
-//                                           rows. Other placements stay local. This is
-//                                           the per-placement graduation pattern — see
-//                                           docs/table-graduation.md in this repo.
+//   data_storage:   the space's tables   — `kanban_columns` and `kanban_cards`
+//                                           (`<name>.table.jsonl` at the space's root),
+//                                           synced with the space; one board per space.
 //   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so all viewers of the placement refresh live;
-//                                           graduated placements also refresh on foreign
-//                                           writes via table onChange.
-//   settings_scope: settings-per-sfi      — backend choice + bindings are keyed by sfi_id.
+//                                           so every viewer refreshes live.
 //
 // Columns carry a channel (c1–c12) as their identity color; cards carry a title,
 // an optional description, and an optional short label.
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
-  declareTables, ensureTables, table,
+  pushToInstance, sanitizeText,
+  declareTables, table,
 } from "@frame-core";
 
-// ----- Schemas (one source of truth for the local AND shared declarations) --------------
+// ----- Schemas ----------------------------------------------------------------------------
 const COLUMNS_SCHEMA = [
   { name: "title",      col_type: "text" as const,    nullable: false, default_val: "" },
   { name: "channel",    col_type: "text" as const,    nullable: false, default_val: "c1" },
@@ -41,136 +34,17 @@ const CARDS_SCHEMA = [
   { name: "created_ms",  col_type: "integer" as const, nullable: false, default_val: "0" },
 ];
 
-// ----- LocalTables (the install-time default: encrypted, per-placement, zero ceremony) --
+// ----- The space's tables, named for this frame (`cards` alone is also Flashcards') ------
 declareTables([
-  { key: "columns", title: "Kanban Columns", description: "Columns for this placement's kanban board.", local: true, schema: COLUMNS_SCHEMA },
-  { key: "cards",   title: "Kanban Cards",   description: "Cards for this placement's kanban board.",   local: true, schema: CARDS_SCHEMA },
+  { key: "kanban_columns", title: "Kanban Columns", description: "Columns of this space's kanban board.", schema: COLUMNS_SCHEMA },
+  { key: "kanban_cards",   title: "Kanban Cards",   description: "Cards of this space's kanban board.",   schema: CARDS_SCHEMA },
 ]);
-
-// Shared decls are registered LAZILY — declaring a synced table up-front would pop the
-// owner's binding modal on frame start (the host refires bindings for every missing
-// non-local decl). Only a placement that graduated (or is graduating) registers them.
-let sharedDeclsRegistered = false;
-function ensureSharedDecls(): void {
-  if (sharedDeclsRegistered) return;
-  sharedDeclsRegistered = true;
-  declareTables([
-    {
-      key: "columns_shared", title: "Kanban Columns",
-      description: "Columns of a shared kanban board. Create a new table, or pick the one other frames should read.",
-      schema: COLUMNS_SCHEMA,
-    },
-    {
-      key: "cards_shared", title: "Kanban Cards",
-      description: "Cards of a shared kanban board. Create a new table, or pick the one other frames should read.",
-      schema: CARDS_SCHEMA,
-    },
-  ]);
-}
-
-// ----- Per-placement settings: which backend this placement runs on ---------------------
-// pending_graduation modes: "convert" copies this placement's local rows into the freshly
-// bound shared tables; "adopt" just binds existing shared tables (no copy — the board
-// shows whatever they contain). Local rows are untouched either way.
-type Backend = "local" | "shared";
-type GradMode = "convert" | "adopt";
-type SfiSettings = { backend: Backend; pending_graduation?: GradMode };
-const allSettings: Record<string, SfiSettings> = loadJsonFile(import.meta.url, "settings.json", {});
-function getSettings(sfiId: string): SfiSettings {
-  // Default LAST, not first: written before the spread it reads as a default but is
-  // whatever the stored object happens to carry, including a missing backend.
-  const stored = allSettings[sfiId] ?? ({} as Partial<SfiSettings>);
-  return { ...stored, backend: stored.backend ?? "local" };
-}
-function saveSettings(sfiId: string, s: SfiSettings): void {
-  allSettings[sfiId] = s;
-  saveJsonFile(import.meta.url, "settings.json", allSettings);
-}
 
 type Tbl = ReturnType<typeof table>;
 type Peer = ReturnType<typeof parsePeerInfo>;
 
-/** The placement's data tables, resolved through its backend choice. Same handle API
- * either way — everything below this line is backend-agnostic. */
-function dataTables(sfiId: string, s: SfiSettings): { columns: Tbl; cards: Tbl } {
-  const shared = s.backend === "shared";
-  return {
-    columns: table(shared ? "columns_shared" : "columns", sfiId),
-    cards: table(shared ? "cards_shared" : "cards", sfiId),
-  };
-}
-
-/** True when BOTH shared bindings exist for this placement (post-graduation). */
-function sharedBound(sfiId: string): boolean {
-  try { table("columns_shared", sfiId); table("cards_shared", sfiId); return true; } catch { return false; }
-}
-
-/** ensureTables, but QUIET and with local tables awaited.
- * Quiet: is_owner stripped, so a missing shared binding never fires the owner's binding
- * modal from a passive path (once one placement graduates, the shared decls exist
- * worker-globally — a plain ensureTables(owner) would pop the picker on every OTHER
- * placement). Only the explicit graduate/waiting paths call ensureTables with owner
- * privilege. Awaited: a fresh placement's local self-ensure is async, so touch missing
- * local tables with a no-op query, then re-read. */
-async function readyLocalTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  const missing = ["columns", "cards"].filter((k) => !r.byKey[k]);
-  if (missing.length) {
-    for (const k of missing) {
-      try { await table(k, peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`kanban: ensure "${k}" failed: ${e}`); }
-    }
-    r = ensureTables(quiet);
-  }
-  return !!(r.byKey["columns"] && r.byKey["cards"]);
-}
-
-// ----- Graduation: flip this placement to the freshly bound shared tables ---------------
-// "convert" first copies the local rows in. Row ids are PRESERVED (upsert(localRowId, …)
-// creates with that id), which keeps the cards.column_id references valid with no
-// remapping and makes a rerun after a partial copy an idempotent overwrite.
-// pending_graduation is only cleared after a full pass.
-async function runGraduation(sfiId: string, settings: SfiSettings): Promise<void> {
-  const mode = settings.pending_graduation!;
-  let copied = "";
-  if (mode === "convert") {
-    const sharedColumns = table("columns_shared", sfiId);
-    const sharedCards = table("cards_shared", sfiId);
-    const { rows: cols } = await table("columns", sfiId).query({});
-    for (const r of cols) {
-      await sharedColumns.upsert(r._row_id, { title: r.title, channel: r.channel, sort_order: r.sort_order });
-    }
-    const { rows: cards } = await table("cards", sfiId).query({});
-    for (const r of cards) {
-      await sharedCards.upsert(r._row_id, {
-        column_id: r.column_id, title: r.title, description: r.description,
-        label: r.label, sort_order: r.sort_order, created_ms: r.created_ms,
-      });
-    }
-    copied = ` (${cols.length} columns, ${cards.length} cards copied)`;
-  }
-
-  settings.backend = "shared";
-  delete settings.pending_graduation;
-  saveSettings(sfiId, settings);
-  wireSharedListeners(sfiId);
-  pushToInstance(sfiId, { type: "kanban_changed" });
-  log(`kanban: placement ${sfiId} moved to shared tables (${mode})${copied}`);
-}
-
-// Foreign writes to a graduated placement's tables (another frame bound to the same
-// table, a peer device) should refresh viewers just like our own writes do. Our own
-// writes also fire this — the extra refresh is cheap and keeps the wiring simple.
-const wiredShared = new Set<string>();
-function wireSharedListeners(sfiId: string): void {
-  if (wiredShared.has(sfiId)) return;
-  wiredShared.add(sfiId);
-  try {
-    table("columns_shared", sfiId).onChange(() => notify(sfiId));
-    table("cards_shared", sfiId).onChange(() => notify(sfiId));
-  } catch {
-    wiredShared.delete(sfiId); // not bound yet — rewired after graduation completes
-  }
+function dataTables(sfiId: string): { columns: Tbl; cards: Tbl } {
+  return { columns: table("kanban_columns", sfiId), cards: table("kanban_cards", sfiId) };
 }
 
 const CHANNEL_RE = /^c([1-9]|1[0-2])$/;
@@ -218,30 +92,7 @@ function notify(sfiId: string) {
 type WriteResult = { status: number; body: unknown };
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const settings = getSettings(sfiId);
-
-  // Re-register the shared decls for placements that graduated or are mid-graduation
-  // (decls don't survive worker restarts; bindings do).
-  if (settings.backend === "shared" || settings.pending_graduation) ensureSharedDecls();
-
-  // Finish a pending graduation the moment both shared bindings exist.
-  if (settings.pending_graduation && sharedBound(sfiId)) {
-    try { await runGraduation(sfiId, settings); } catch (e) { log(`kanban: graduation failed (will retry): ${e}`); }
-  }
-
-  // Graduated placement whose bindings are missing (fresh worker on a new host, or the
-  // owner closed the picker mid-graduation recovery): every write waits.
-  if (settings.backend === "shared" && !sharedBound(sfiId)) {
-    return { status: 503, body: { error: "table not bound" } };
-  }
-  if (settings.backend === "shared") wireSharedListeners(sfiId);
-
-  // Local tables resolve with zero ceremony; awaiting keeps a fresh placement's first
-  // request from racing the self-ensure. Quiet — see readyLocalTables.
-  if (settings.backend === "local" && !(await readyLocalTables(peer))) {
-    return { status: 503, body: { error: "table not ready" } };
-  }
-  const { columns, cards } = dataTables(sfiId, settings);
+  const { columns, cards } = dataTables(sfiId);
 
   // Every op below mutates state and is editor-only. Non-members AND Viewer-role
   // members are rejected with the same gate (never gate writes on is_sfi_member —
@@ -252,25 +103,6 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     notify(sfiId);
     return { status: 200, body: { columns: await boardData(columns, cards) } };
   };
-
-  // --- Data backend (owner-only): per-placement graduation local → shared -------------
-  if (op === "data/graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    if (settings.backend === "shared") return { status: 400, body: { error: "already shared" } };
-    settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";
-    saveSettings(sfiId, settings);
-    ensureSharedDecls();
-    ensureTables(peer); // fires the owner's binding modals (columns, then cards)
-    notify(sfiId);
-    return { status: 200, body: { waiting: true } };
-  }
-  if (op === "data/cancel_graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    delete settings.pending_graduation;
-    saveSettings(sfiId, settings);
-    notify(sfiId);
-    return { status: 200, body: { ok: true } };
-  }
 
   // --- Columns --------------------------------------------------------------------------
   if (op === "column") {
@@ -412,53 +244,14 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, r.status, r.body);
   }
 
-  const settings = getSettings(sfiId);
+  const { columns, cards } = dataTables(sfiId);
 
-  // Re-register the shared decls for placements that graduated or are mid-graduation
-  // (decls don't survive worker restarts; bindings do).
-  if (settings.backend === "shared" || settings.pending_graduation) ensureSharedDecls();
-
-  // Finish a pending graduation the moment both shared bindings exist.
-  if (settings.pending_graduation && sharedBound(sfiId)) {
-    try { await runGraduation(sfiId, settings); } catch (e) { log(`kanban: graduation failed (will retry): ${e}`); }
-  }
-  // Mid-graduation and the picker was dismissed (or the app restarted): the owner's
-  // next look at the board brings it back. Pending is an explicit owner-initiated
-  // state, so the auto-refire is wanted here, unlike the quiet passive paths.
-  if (settings.pending_graduation && peer.is_owner && !sharedBound(sfiId)
-      && reqPath === "/api/board" && method === "GET") {
-    ensureTables(peer);
-  }
-
-  // Graduated placement whose bindings are missing (fresh worker on a new host, or the
-  // owner closed the picker mid-graduation recovery): every data route waits; the board
-  // route re-fires the owner's binding modal so they can finish.
-  if (settings.backend === "shared" && !sharedBound(sfiId)) {
-    if (reqPath === "/api/board" && method === "GET") {
-      if (peer.is_owner) ensureTables(peer);
-      return jsonReply(replyPort, 200, {
-        waiting_for_binding: true, is_owner: peer.is_owner,
-        storage: { backend: settings.backend, pending: false, can_manage: peer.is_owner },
-      });
-    }
-    return jsonReply(replyPort, 503, { error: "table not bound" });
-  }
-  if (settings.backend === "shared") wireSharedListeners(sfiId);
-
-  // Local tables resolve with zero ceremony; awaiting keeps a fresh placement's first
-  // request from racing the self-ensure. Quiet — see readyLocalTables.
-  if (settings.backend === "local" && !(await readyLocalTables(peer))) {
-    return jsonReply(replyPort, 503, { error: "table not ready" });
-  }
-  const { columns, cards } = dataTables(sfiId, settings);
-
-  // Read — open to everyone (non-members get a read-only view of this placement's board).
+  // Read — open to everyone (non-members get a read-only view of the board).
   if (reqPath === "/api/board" && method === "GET") {
     // First-open seeding: an editor's first look at an empty board lands the three
     // classic columns (no sample cards). Never seeded for read-only viewers — a GET
     // from a viewer must not mutate.
-    if (peer.is_sfi_editor && settings.backend === "local"
-        && (await columns.query({ limit: 1 })).rows.length === 0) {
+    if (peer.is_sfi_editor && (await columns.query({ limit: 1 })).rows.length === 0) {
       for (let i = 0; i < SEED_COLUMNS.length; i++) {
         await columns.upsert(null, {
           title: SEED_COLUMNS[i][0], channel: SEED_COLUMNS[i][1], sort_order: i,
@@ -467,11 +260,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     }
     return jsonReply(replyPort, 200, {
       columns: await boardData(columns, cards),
-      storage: {
-        backend: settings.backend,
-        pending: !!settings.pending_graduation,
-        can_manage: peer.is_owner,
-      },
     });
   }
 

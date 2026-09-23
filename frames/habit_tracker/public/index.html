@@ -326,7 +326,7 @@
           ],
         });
         if (what === "rename") {
-          const v = await frame.prompt("Habit", { title: "Rename", value: h.name, okLabel: "Save" });
+          const v = await frame.prompt("Habit", { title: "Rename", defaultValue: h.name, okLabel: "Save" });
           if (v && v.trim() && v.trim() !== h.name) write("api/habit/" + h.id, { name: v.trim() });
         } else if (what === "remove") {
           if (await frame.confirm(`Remove "${h.name}" and everything marked for it?`, { title: "Habit", okLabel: "Remove" }))

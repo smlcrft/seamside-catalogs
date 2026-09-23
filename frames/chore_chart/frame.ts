@@ -4,17 +4,13 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members get a live read-only board;
 //                                           space editors get the interactive one.
-//   data_storage:   storage-graduating   — starts as a LocalTable (encrypted at rest on
-//                                           the host, zero ceremony); the OWNER can
-//                                           graduate THIS placement's data to a shared
-//                                           SyncTable so other frames bind the same rows.
-//                                           Other placements stay local. See
-//                                           docs/table-graduation.md in this repo.
+//   data_storage:   the space's table    — `chores.table.jsonl` at the space's root,
+//                                           synced with the space; any frame in the space
+//                                           that speaks `chores` works on the same rows.
 //   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
 //                                           so all viewers refresh live. Ticking a chore
 //                                           off on the kitchen tablet lands on every
 //                                           other device instantly.
-//   settings_scope: settings-per-sfi      — backend choice + bindings are keyed by sfi_id.
 //
 // This frame OWNS the `chores` v1 contract (docs/schema-contracts.md). The chart is
 // deliberately about the CURRENT turn of each chore rather than a growing history: a row
@@ -25,8 +21,8 @@
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
-  declareTables, ensureTables, table,
+  pushToInstance, sanitizeText,
+  declareTables, table,
 } from "@frame-core";
 
 // ----- Schema (the `chores` v1 contract — declared verbatim, one source of truth) -------
@@ -42,63 +38,13 @@ const CHORES_SCHEMA = [
   { name: "notes",        col_type: "text"    as const, nullable: false, default_val: "" },
 ];
 
-// ----- LocalTable (the install-time default: encrypted, per-placement, zero ceremony) ---
+// ----- The space's `chores` table (the contract name) ---------------------------------
 declareTables([
-  { key: "chores", title: "Chore Chart", description: "Chores for this placement's chart.", local: true, schema: CHORES_SCHEMA },
+  { key: "chores", title: "Chore Chart", description: "The chores of this space.", schema: CHORES_SCHEMA },
 ]);
-
-// Shared decl is registered LAZILY — declaring a synced table up-front would pop the
-// owner's binding modal on frame start (the host refires bindings for every missing
-// non-local decl). Only a placement that graduated (or is graduating) registers it.
-let sharedDeclsRegistered = false;
-function ensureSharedDecls(): void {
-  if (sharedDeclsRegistered) return;
-  sharedDeclsRegistered = true;
-  declareTables([
-    {
-      key: "chores_shared", title: "Chore Chart",
-      description: "Chores of a shared chart. Create a new table, or pick the one other frames should read.",
-      schema: CHORES_SCHEMA,
-    },
-  ]);
-}
-
-// ----- Per-placement settings: which backend this placement runs on ---------------------
-type Backend = "local" | "shared";
-type GradMode = "convert" | "adopt";
-type SfiSettings = { backend: Backend; pending_graduation?: GradMode };
-const allSettings: Record<string, SfiSettings> = loadJsonFile(import.meta.url, "settings.json", {});
-function getSettings(sfiId: string): SfiSettings {
-  return allSettings[sfiId] ?? { backend: "local" };
-}
-function saveSettings(sfiId: string, s: SfiSettings): void {
-  allSettings[sfiId] = s;
-  saveJsonFile(import.meta.url, "settings.json", allSettings);
-}
 
 type Tbl = ReturnType<typeof table>;
 type Peer = ReturnType<typeof parsePeerInfo>;
-
-function dataTable(sfiId: string, s: SfiSettings): Tbl {
-  return table(s.backend === "shared" ? "chores_shared" : "chores", sfiId);
-}
-
-function sharedBound(sfiId: string): boolean {
-  try { table("chores_shared", sfiId); return true; } catch { return false; }
-}
-
-/** ensureTables, but QUIET and with the local table awaited. See grocery_list for the
- * full reasoning: is_owner is stripped so a missing shared binding never fires the
- * owner's binding modal from a passive path. */
-async function readyLocalTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  if (!r.byKey["chores"]) {
-    try { await table("chores", peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`chore_chart: ensure "chores" failed: ${e}`); }
-    r = ensureTables(quiet);
-  }
-  return !!r.byKey["chores"];
-}
 
 // ----- Cadence: the whole clock of this frame -------------------------------------------
 // A chore's turn is a PERIOD, and "done" means "done in the period we are in now". Two
@@ -134,42 +80,6 @@ function isDoneNow(row: { last_done_ms: number; cadence: Cadence }, now: number)
   if (!row.last_done_ms) return false;
   if (row.cadence === "once") return true;
   return periodIndex(row.last_done_ms, row.cadence) === periodIndex(now, row.cadence);
-}
-
-// ----- Graduation: flip this placement to the freshly bound shared table ----------------
-async function runGraduation(sfiId: string, settings: SfiSettings): Promise<void> {
-  const mode = settings.pending_graduation!;
-  let copied = "";
-  if (mode === "convert") {
-    const shared = table("chores_shared", sfiId);
-    const { rows } = await table("chores", sfiId).query({});
-    for (const r of rows) {
-      await shared.upsert(r._row_id, {
-        chore: r.chore, assignee: r.assignee, cadence: r.cadence,
-        last_done_ms: r.last_done_ms, last_done_by: r.last_done_by,
-        streak: r.streak, best_streak: r.best_streak, sort_order: r.sort_order, notes: r.notes,
-      });
-    }
-    copied = ` (${rows.length} chores copied)`;
-  }
-
-  settings.backend = "shared";
-  delete settings.pending_graduation;
-  saveSettings(sfiId, settings);
-  wireSharedListeners(sfiId);
-  notify(sfiId);
-  log(`chore_chart: placement ${sfiId} moved to shared tables (${mode})${copied}`);
-}
-
-const wiredShared = new Set<string>();
-function wireSharedListeners(sfiId: string): void {
-  if (wiredShared.has(sfiId)) return;
-  wiredShared.add(sfiId);
-  try {
-    table("chores_shared", sfiId).onChange(() => notify(sfiId));
-  } catch {
-    wiredShared.delete(sfiId); // not bound yet — rewired after graduation completes
-  }
 }
 
 // ----- Queries --------------------------------------------------------------------------
@@ -210,23 +120,7 @@ function notify(sfiId: string) {
 type WriteResult = { status: number; body: unknown };
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const settings = getSettings(sfiId);
-
-  if (settings.backend === "shared" || settings.pending_graduation) ensureSharedDecls();
-
-  if (settings.pending_graduation && sharedBound(sfiId)) {
-    try { await runGraduation(sfiId, settings); } catch (e) { log(`chore_chart: graduation failed (will retry): ${e}`); }
-  }
-
-  if (settings.backend === "shared" && !sharedBound(sfiId)) {
-    return { status: 503, body: { error: "table not bound" } };
-  }
-  if (settings.backend === "shared") wireSharedListeners(sfiId);
-
-  if (settings.backend === "local" && !(await readyLocalTables(peer))) {
-    return { status: 503, body: { error: "table not ready" } };
-  }
-  const t = dataTable(sfiId, settings);
+  const t = table("chores", sfiId);
 
   // Every op below mutates state and is editor-only. Non-members AND Viewer-role members
   // are rejected with the same gate (never gate writes on is_sfi_member — Viewer-role
@@ -238,25 +132,6 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     notify(sfiId);
     return { status: 200, body: { chores: await listRows(t) } };
   };
-
-  // --- Data backend (owner-only): per-placement graduation local → shared -------------
-  if (op === "data/graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    if (settings.backend === "shared") return { status: 400, body: { error: "already shared" } };
-    settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";
-    saveSettings(sfiId, settings);
-    ensureSharedDecls();
-    ensureTables(peer); // fires the owner's binding modal (the chores table)
-    notify(sfiId);
-    return { status: 200, body: { waiting: true } };
-  }
-  if (op === "data/cancel_graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    delete settings.pending_graduation;
-    saveSettings(sfiId, settings);
-    notify(sfiId);
-    return { status: 200, body: { ok: true } };
-  }
 
   // --- Chores ---------------------------------------------------------------------------
   if (op === "chore") {
@@ -367,44 +242,11 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, r.status, r.body);
   }
 
-  const settings = getSettings(sfiId);
-
-  if (settings.backend === "shared" || settings.pending_graduation) ensureSharedDecls();
-
-  if (settings.pending_graduation && sharedBound(sfiId)) {
-    try { await runGraduation(sfiId, settings); } catch (e) { log(`chore_chart: graduation failed (will retry): ${e}`); }
-  }
-  if (settings.pending_graduation && peer.is_owner && !sharedBound(sfiId)
-      && reqPath === "/api/list" && method === "GET") {
-    ensureTables(peer);
-  }
-
-  if (settings.backend === "shared" && !sharedBound(sfiId)) {
-    if (reqPath === "/api/list" && method === "GET") {
-      if (peer.is_owner) ensureTables(peer);
-      return jsonReply(replyPort, 200, {
-        waiting_for_binding: true, is_owner: peer.is_owner,
-        storage: { backend: settings.backend, pending: false, can_manage: peer.is_owner },
-      });
-    }
-    return jsonReply(replyPort, 503, { error: "table not bound" });
-  }
-  if (settings.backend === "shared") wireSharedListeners(sfiId);
-
-  if (settings.backend === "local" && !(await readyLocalTables(peer))) {
-    return jsonReply(replyPort, 503, { error: "table not ready" });
-  }
-
-  // Read — open to everyone (non-members get a read-only view of this placement's chart).
+  // Read — open to everyone (non-members get a read-only view of the chart).
   // No seeding: an empty chart is an honest empty chart.
   if (reqPath === "/api/list" && method === "GET") {
     return jsonReply(replyPort, 200, {
-      chores: await listRows(dataTable(sfiId, settings)),
-      storage: {
-        backend: settings.backend,
-        pending: !!settings.pending_graduation,
-        can_manage: peer.is_owner,
-      },
+      chores: await listRows(table("chores", sfiId)),
     });
   }
 

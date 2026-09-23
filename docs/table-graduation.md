@@ -1,4 +1,11 @@
-# Per-placement table graduation (local → shared)
+# Per-placement table graduation (local → shared) — retired in Seamside v1
+
+> **Retired.** Seamside v1 has no LocalTables, SyncTables or binding picker: every
+> table is a file of the space (`<name>.table.jsonl`), shared by name by every frame
+> in it, so there is nothing to graduate. The catalog's frames (kanban, recipe_box,
+> grocery_list, meal_planner, gift_list, chore_chart, family_budget, garden_planner)
+> dropped this machinery on 2026-09-23. What follows is v0's design, kept for the
+> record; see [schema-contracts.md](schema-contracts.md) for how frames share rows now.
 
 The common pattern for letting a user move ONE placement's data from private
 LocalTables to shared tables (SyncTables), so other frames can bind the same

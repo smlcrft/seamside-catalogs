@@ -210,9 +210,8 @@ function App() {
   const messagesRef = useRef([]);
   if (state) messagesRef.current = state.messages;
 
-  useEffect(() => {
-    frame.api("./api/state").then(setState).catch((e) => setErr(e));
-  }, []);
+  const load = () => frame.api("./api/state").then(setState).catch((e) => setErr(e));
+  useEffect(() => { load(); }, []);
 
   useFramePush({
     dc_message: (d) => setState((prev) => {
@@ -221,7 +220,11 @@ function App() {
     }),
     dc_delete: (d) => setState((prev) => prev ? { ...prev, messages: prev.messages.filter((m) => m.id !== d.id) } : prev),
     dc_reactions: (d) => setState((prev) => prev ? { ...prev, messages: prev.messages.map((m) => m.id === d.message_id ? { ...m, reactions: d.reactions } : m) } : prev),
-    dc_prefs: (d) => setState((prev) => prev ? { ...prev, prefs: { ...prev.prefs, ...d.prefs } } : prev),
+    // The viewers toggle changes who may write, which only the worker can say — re-read.
+    dc_prefs: (d) => {
+      setState((prev) => prev ? { ...prev, prefs: { ...prev.prefs, ...d.prefs } } : prev);
+      load();
+    },
   });
 
   useEffect(() => {

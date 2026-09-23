@@ -4,7 +4,7 @@
 //   • Private-frame notice (non-member, /api/state returned 403)
 //   • Player shell (member) — station dropdown + transport + local-only volume / mute
 //
-// Shared state (station + playing) flows over /api/state and pushed radio_state events.
+// Shared state (station + playing) is read from /api/state, again on each radio_state push.
 // Local state (volume + mute) is per-device only — saved in the host page's localStorage
 // via framelib (frame.localStorageSetItem/GetItem) as a single JSON entry. It never
 // travels through the backend and is not synced across viewers.
@@ -25,7 +25,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   // callers see the readable error instead of "frame.api POST … → 400".
   // Writes (bodied calls) go over the tether (frame.busSend → BusUiToFrame): HTTP POST
   // bodies are dropped on Android (issue #750), the tether carries them everywhere.
-  // Fire-and-forget — the resulting playstate arrives via the radio_state push, which is
+  // Fire-and-forget — the resulting playstate is re-read on the radio_state push, which is
   // how this UI already renders every change. Feature-detect: an older viewer's framelib
   // has no busSend — fall back to the HTTP write it was using before.
   async function api(path, body, method) {
@@ -419,15 +419,18 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   }
 
   // ---------------------------------------------------------------------------------------
-  // REALTIME — pushed playstate from frame.ts. Same object shape we receive from /api/state.
+  // REALTIME — a radio_state push says "re-read": it reaches every radio in the space, and
+  // /api/state answers with this session's own playstate.
   // ---------------------------------------------------------------------------------------
-  window.addEventListener("message", (e) => {
+  window.addEventListener("message", async (e) => {
     const d = e.data;
     if (!d || typeof d !== "object") return;
     if (d.type !== "radio_state") return;
-    if (!d.playstate) return;
-    const stationChanged = d.playstate.station_id !== playstate.station_id;
-    playstate = { ...playstate, ...d.playstate };
+    let next;
+    try { next = (await frame.api("api/state")).playstate; } catch { return; }
+    if (!next) return;
+    const stationChanged = next.station_id !== playstate.station_id;
+    playstate = { ...playstate, ...next };
     syncDropdown();
     renderMeta();
     renderLive();

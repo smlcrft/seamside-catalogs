@@ -80,12 +80,8 @@ body {
 .rt-topline .rt-icon-btn:hover { color: var(--os-text); background: var(--os-bg-subtle); }
 .rt-topline .rt-icon-btn:active { transform: scale(0.92); }
 
-/* Exposure indicators for SFI members. Up to two badges can stack:
-     VIEWERS CONTRIBUTE — public_to_space_viewers (channel-tinted; signals that members at
-                          Viewer role can write here, not just observe)
-     PUBLIC             — public_read_view (warning-tinted; signals "anyone with the link
-                          can see")
-   Members see them; non-members in public-read mode don't need the heads-up. */
+/* Shown to members when public_to_space_viewers is on: Viewer-role members can write
+   here, not just observe. Non-members don't need the heads-up. */
 .rt-badge {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 8px;

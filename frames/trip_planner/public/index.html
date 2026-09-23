@@ -428,7 +428,8 @@
     // about changes rather than re-rendered. Vendored (no CDN, no API key) and pointed at
     // OpenFreeMap, whose tiles are free and unmetered — OSM's own raster tiles explicitly
     // ask apps like this one not to use them.
-    const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
+    const TILE_HOST = "https://tiles.openfreemap.org/";
+    const MAP_STYLE = TILE_HOST + "styles/positron";
 
     function TripMap({ stops, selected, onSelect }) {
       const host = useRef(null);
@@ -444,6 +445,11 @@
         map.current = new maplibregl.Map({
           container: host.current,
           style: MAP_STYLE,
+          // The page has no network: every OpenFreeMap URL (style, tilejson, tiles, glyphs,
+          // sprites) is asked of this frame's own worker, which fetches it.
+          transformRequest: (url) => url.startsWith(TILE_HOST)
+            ? { url: new URL("./tiles/" + url.slice(TILE_HOST.length), document.baseURI).href }
+            : { url },
           center: [stops[0].lon, stops[0].lat],
           zoom: 9,
           attributionControl: { compact: true },
@@ -590,7 +596,7 @@
         const r = await frame.api("api/trips").catch(() => null);
         if (r && r.trips) {
           setTrips(r.trips);
-          // A placement with exactly one trip opens straight into it (until the user
+          // A space with exactly one trip opens straight into it (until the user
           // deliberately backs out to the list).
           if (NAV.tripId == null && !NAV.touched && r.trips.length === 1) { openTrip(r.trips[0].id); return; }
         }

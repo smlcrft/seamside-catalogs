@@ -4,19 +4,13 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members get a live read-only view;
 //                                           space editors record income and expenses.
-//   data_storage:   storage-graduating   — starts as LocalTables (encrypted at rest on
-//                                           the host, zero ceremony); the OWNER can
-//                                           graduate THIS placement's data to shared
-//                                           SyncTables so other frames bind the same
-//                                           rows. Other placements stay local. This is
-//                                           the per-placement graduation pattern — see
-//                                           docs/table-graduation.md in this repo.
+//   data_storage:   the space's tables   — `budget_categories` and `budget_transactions`
+//                                           (`<name>.table.jsonl` at the space's root),
+//                                           synced with the space.
 //   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so all viewers of the placement refresh live;
-//                                           graduated placements also refresh on foreign
-//                                           writes via table onChange.
-//   settings_scope: settings-per-sfi      — backend choice, bindings, and the currency
-//                                           symbol are keyed by sfi_id.
+//                                           so every viewer refreshes live.
+//   settings_scope: the space            — the currency symbol is a frameSettings row
+//                                           (`budget_currency`) of the space.
 //
 // Categories carry a channel (c1–c12) as their identity color, an income flag, and a
 // monthly budget (the envelope; 0 = no envelope set, income categories never have one).
@@ -25,11 +19,11 @@
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, loadJsonFile, saveJsonFile,
-  declareTables, ensureTables, table,
+  pushToInstance, sanitizeText, frameSettings,
+  declareTables, table,
 } from "@frame-core";
 
-// ----- Schemas (one source of truth for the local AND shared declarations) --------------
+// ----- Schemas ----------------------------------------------------------------------------
 const CATEGORIES_SCHEMA = [
   { name: "name",           col_type: "text" as const,    nullable: false, default_val: "" },
   { name: "channel",        col_type: "text" as const,    nullable: false, default_val: "c1" },
@@ -43,135 +37,17 @@ const TRANSACTIONS_SCHEMA = [
   { name: "date",        col_type: "text" as const, nullable: false, default_val: "" },
 ];
 
-// ----- LocalTables (the install-time default: encrypted, per-placement, zero ceremony) --
+// ----- The space's tables, named for this frame so no other frame's rows land in them ---
 declareTables([
-  { key: "categories",   title: "Budget Categories",   description: "Income and expense categories for this placement's budget.", local: true, schema: CATEGORIES_SCHEMA },
-  { key: "transactions", title: "Budget Transactions", description: "Transactions for this placement's budget.",                  local: true, schema: TRANSACTIONS_SCHEMA },
+  { key: "budget_categories",   title: "Budget Categories",   description: "Income and expense categories of this space's budget.", schema: CATEGORIES_SCHEMA },
+  { key: "budget_transactions", title: "Budget Transactions", description: "Transactions of this space's budget.",                  schema: TRANSACTIONS_SCHEMA },
 ]);
-
-// Shared decls are registered LAZILY — declaring a synced table up-front would pop the
-// owner's binding modal on frame start (the host refires bindings for every missing
-// non-local decl). Only a placement that graduated (or is graduating) registers them.
-let sharedDeclsRegistered = false;
-function ensureSharedDecls(): void {
-  if (sharedDeclsRegistered) return;
-  sharedDeclsRegistered = true;
-  declareTables([
-    {
-      key: "categories_shared", title: "Budget Categories",
-      description: "Categories of a shared budget. Create a new table, or pick the one other frames should read.",
-      schema: CATEGORIES_SCHEMA,
-    },
-    {
-      key: "transactions_shared", title: "Budget Transactions",
-      description: "Transactions of a shared budget. Create a new table, or pick the one other frames should read.",
-      schema: TRANSACTIONS_SCHEMA,
-    },
-  ]);
-}
-
-// ----- Per-placement settings: backend choice + the currency symbol ---------------------
-// pending_graduation modes: "convert" copies this placement's local rows into the freshly
-// bound shared tables; "adopt" just binds existing shared tables (no copy — the budget
-// shows whatever they contain). Local rows are untouched either way.
-type Backend = "local" | "shared";
-type GradMode = "convert" | "adopt";
-type SfiSettings = { backend: Backend; pending_graduation?: GradMode; currency?: string };
-const allSettings: Record<string, SfiSettings> = loadJsonFile(import.meta.url, "settings.json", {});
-function getSettings(sfiId: string): SfiSettings {
-  const s = allSettings[sfiId];
-  return s ? { ...s, backend: s.backend ?? "local" } : { backend: "local" };
-}
-function saveSettings(sfiId: string, s: SfiSettings): void {
-  allSettings[sfiId] = s;
-  saveJsonFile(import.meta.url, "settings.json", allSettings);
-}
 
 type Tbl = ReturnType<typeof table>;
 type Peer = ReturnType<typeof parsePeerInfo>;
 
-/** The placement's data tables, resolved through its backend choice. Same handle API
- * either way — everything below this line is backend-agnostic. */
-function dataTables(sfiId: string, s: SfiSettings): { categories: Tbl; transactions: Tbl } {
-  const shared = s.backend === "shared";
-  return {
-    categories: table(shared ? "categories_shared" : "categories", sfiId),
-    transactions: table(shared ? "transactions_shared" : "transactions", sfiId),
-  };
-}
-
-/** True when BOTH shared bindings exist for this placement (post-graduation). */
-function sharedBound(sfiId: string): boolean {
-  try { table("categories_shared", sfiId); table("transactions_shared", sfiId); return true; } catch { return false; }
-}
-
-/** ensureTables, but QUIET and with local tables awaited.
- * Quiet: is_owner stripped, so a missing shared binding never fires the owner's binding
- * modal from a passive path (once one placement graduates, the shared decls exist
- * worker-globally — a plain ensureTables(owner) would pop the picker on every OTHER
- * placement). Only the explicit graduate/waiting paths call ensureTables with owner
- * privilege. Awaited: a fresh placement's local self-ensure is async, so touch missing
- * local tables with a no-op query, then re-read. */
-async function readyLocalTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  const missing = ["categories", "transactions"].filter((k) => !r.byKey[k]);
-  if (missing.length) {
-    for (const k of missing) {
-      try { await table(k, peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`budget: ensure "${k}" failed: ${e}`); }
-    }
-    r = ensureTables(quiet);
-  }
-  return !!(r.byKey["categories"] && r.byKey["transactions"]);
-}
-
-// ----- Graduation: flip this placement to the freshly bound shared tables ---------------
-// "convert" first copies the local rows in. Row ids are PRESERVED (upsert(localRowId, …)
-// creates with that id), which keeps the transactions.category_id references valid with
-// no remapping and makes a rerun after a partial copy an idempotent overwrite.
-// pending_graduation is only cleared after a full pass.
-async function runGraduation(sfiId: string, settings: SfiSettings): Promise<void> {
-  const mode = settings.pending_graduation!;
-  let copied = "";
-  if (mode === "convert") {
-    const sharedCategories = table("categories_shared", sfiId);
-    const sharedTransactions = table("transactions_shared", sfiId);
-    const { rows: cats } = await table("categories", sfiId).query({});
-    for (const r of cats) {
-      await sharedCategories.upsert(r._row_id, {
-        name: r.name, channel: r.channel, is_income: r.is_income, monthly_budget: r.monthly_budget,
-      });
-    }
-    const { rows: txs } = await table("transactions", sfiId).query({});
-    for (const r of txs) {
-      await sharedTransactions.upsert(r._row_id, {
-        category_id: r.category_id, amount: r.amount, note: r.note, date: r.date,
-      });
-    }
-    copied = ` (${cats.length} categories, ${txs.length} transactions copied)`;
-  }
-
-  settings.backend = "shared";
-  delete settings.pending_graduation;
-  saveSettings(sfiId, settings);
-  wireSharedListeners(sfiId);
-  pushToInstance(sfiId, { type: "budget_changed" });
-  log(`budget: placement ${sfiId} moved to shared tables (${mode})${copied}`);
-}
-
-// Foreign writes to a graduated placement's tables (another frame bound to the same
-// table, a peer device) should refresh viewers just like our own writes do. Our own
-// writes also fire this — the extra refresh is cheap and keeps the wiring simple.
-const wiredShared = new Set<string>();
-function wireSharedListeners(sfiId: string): void {
-  if (wiredShared.has(sfiId)) return;
-  wiredShared.add(sfiId);
-  try {
-    table("categories_shared", sfiId).onChange(() => notify(sfiId));
-    table("transactions_shared", sfiId).onChange(() => notify(sfiId));
-  } catch {
-    wiredShared.delete(sfiId); // not bound yet — rewired after graduation completes
-  }
+function dataTables(sfiId: string): { categories: Tbl; transactions: Tbl } {
+  return { categories: table("budget_categories", sfiId), transactions: table("budget_transactions", sfiId) };
 }
 
 const CHANNEL_RE = /^c([1-9]|1[0-2])$/;
@@ -244,30 +120,7 @@ function notify(sfiId: string) {
 type WriteResult = { status: number; body: unknown };
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const settings = getSettings(sfiId);
-
-  // Re-register the shared decls for placements that graduated or are mid-graduation
-  // (decls don't survive worker restarts; bindings do).
-  if (settings.backend === "shared" || settings.pending_graduation) ensureSharedDecls();
-
-  // Finish a pending graduation the moment both shared bindings exist.
-  if (settings.pending_graduation && sharedBound(sfiId)) {
-    try { await runGraduation(sfiId, settings); } catch (e) { log(`budget: graduation failed (will retry): ${e}`); }
-  }
-
-  // Graduated placement whose bindings are missing (fresh worker on a new host, or the
-  // owner closed the picker mid-graduation recovery): every write waits.
-  if (settings.backend === "shared" && !sharedBound(sfiId)) {
-    return { status: 503, body: { error: "table not bound" } };
-  }
-  if (settings.backend === "shared") wireSharedListeners(sfiId);
-
-  // Local tables resolve with zero ceremony; awaiting keeps a fresh placement's first
-  // request from racing the self-ensure. Quiet — see readyLocalTables.
-  if (settings.backend === "local" && !(await readyLocalTables(peer))) {
-    return { status: 503, body: { error: "table not ready" } };
-  }
-  const { categories, transactions } = dataTables(sfiId, settings);
+  const { categories, transactions } = dataTables(sfiId);
 
   // Every op below mutates state and is editor-only. Non-members AND Viewer-role
   // members are rejected with the same gate (never gate writes on is_sfi_member —
@@ -279,29 +132,9 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     return { status: 200, body: { ok: true } };
   };
 
-  // --- Data backend (owner-only): per-placement graduation local → shared -------------
-  if (op === "data/graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    if (settings.backend === "shared") return { status: 400, body: { error: "already shared" } };
-    settings.pending_graduation = v?.mode === "adopt" ? "adopt" : "convert";
-    saveSettings(sfiId, settings);
-    ensureSharedDecls();
-    ensureTables(peer); // fires the owner's binding modals (categories, then transactions)
-    notify(sfiId);
-    return { status: 200, body: { waiting: true } };
-  }
-  if (op === "data/cancel_graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    delete settings.pending_graduation;
-    saveSettings(sfiId, settings);
-    notify(sfiId);
-    return { status: 200, body: { ok: true } };
-  }
-
-  // --- Per-placement settings -----------------------------------------------------------
+  // --- The space's settings ------------------------------------------------------------
   if (op === "settings") {
-    settings.currency = sanitizeText(v?.currency, 4) || "$";
-    saveSettings(sfiId, settings);
+    await frameSettings(sfiId).set("budget_currency", sanitizeText(v?.currency, 4) || "$");
     return ok();
   }
 
@@ -430,67 +263,23 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, r.status, r.body);
   }
 
-  const settings = getSettings(sfiId);
+  const { categories, transactions } = dataTables(sfiId);
 
-  // Re-register the shared decls for placements that graduated or are mid-graduation
-  // (decls don't survive worker restarts; bindings do).
-  if (settings.backend === "shared" || settings.pending_graduation) ensureSharedDecls();
-
-  // Finish a pending graduation the moment both shared bindings exist.
-  if (settings.pending_graduation && sharedBound(sfiId)) {
-    try { await runGraduation(sfiId, settings); } catch (e) { log(`budget: graduation failed (will retry): ${e}`); }
-  }
-  // Mid-graduation and the picker was dismissed (or the app restarted): the owner's
-  // next look at the budget brings it back. Pending is an explicit owner-initiated
-  // state, so the auto-refire is wanted here, unlike the quiet passive paths.
-  if (settings.pending_graduation && peer.is_owner && !sharedBound(sfiId)
-      && reqPath === "/api/month" && method === "GET") {
-    ensureTables(peer);
-  }
-
-  // Graduated placement whose bindings are missing (fresh worker on a new host, or the
-  // owner closed the picker mid-graduation recovery): every data route waits; the month
-  // route re-fires the owner's binding modal so they can finish.
-  if (settings.backend === "shared" && !sharedBound(sfiId)) {
-    if (reqPath === "/api/month" && method === "GET") {
-      if (peer.is_owner) ensureTables(peer);
-      return jsonReply(replyPort, 200, {
-        waiting_for_binding: true, is_owner: peer.is_owner,
-        storage: { backend: settings.backend, pending: false, can_manage: peer.is_owner },
-      });
-    }
-    return jsonReply(replyPort, 503, { error: "table not bound" });
-  }
-  if (settings.backend === "shared") wireSharedListeners(sfiId);
-
-  // Local tables resolve with zero ceremony; awaiting keeps a fresh placement's first
-  // request from racing the self-ensure. Quiet — see readyLocalTables.
-  if (settings.backend === "local" && !(await readyLocalTables(peer))) {
-    return jsonReply(replyPort, 503, { error: "table not ready" });
-  }
-  const { categories, transactions } = dataTables(sfiId, settings);
-
-  // Read — open to everyone (non-members get a read-only view of this placement's month).
+  // Read — open to everyone (non-members get a read-only view of the month).
   if (reqPath === "/api/month" && method === "GET") {
     const monthRaw = typeof query?.month === "string" ? query.month : "";
     const month = MONTH_RE.test(monthRaw) ? monthRaw : new Date().toISOString().slice(0, 7);
     // First-open seeding: an editor's first look at an empty budget lands the starter
     // categories (no transactions, no envelopes preset). Never seeded for read-only
     // viewers — a GET from a viewer must not mutate.
-    if (peer.is_sfi_editor && settings.backend === "local"
-        && (await categories.query({ limit: 1 })).rows.length === 0) {
+    if (peer.is_sfi_editor && (await categories.query({ limit: 1 })).rows.length === 0) {
       for (const [name, channel, isIncome] of SEED_CATEGORIES) {
         await categories.upsert(null, { name, channel, is_income: isIncome, monthly_budget: 0 });
       }
     }
     return jsonReply(replyPort, 200, {
       month,
-      settings: { currency: settings.currency || "$" },
-      storage: {
-        backend: settings.backend,
-        pending: !!settings.pending_graduation,
-        can_manage: peer.is_owner,
-      },
+      settings: { currency: await frameSettings(sfiId).get<string>("budget_currency", "$") || "$" },
       ...(await monthData(categories, transactions, month)),
     });
   }

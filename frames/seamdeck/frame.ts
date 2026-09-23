@@ -4,11 +4,12 @@
 // (see frame.sim.ts → public/games/*-sim.js) turns a submitted turn payload
 // into authoritative { points, summary }.
 //
-// STORAGE: no synctables. The worker runs ONCE (on the owner's device) and
-// every viewer's requests are proxied to it, so plain worker memory is already
-// shared state for all players. Sessions/seats/turns/beacons live in memory —
-// they're ephemeral by design. High scores are the one thing that should
-// outlive a restart, so they persist to data/high-scores.json.
+// STORAGE: one worker, on the keeper's device, serves every space the frame
+// runs in, and every player's requests reach it, so plain worker memory —
+// keyed by sfi_id, the space — is already shared state for all players.
+// Sessions/seats/turns/beacons live in memory — ephemeral by design. High
+// scores are the one thing that should outlive a restart: the space's
+// `seamdeck_scores` table, a row per score, one board per space.
 // Live updates ride pushToInstance(sfi, { type: "state_changed" }) — the same
 // event the frontend already subscribes to via useFramePush.
 //
@@ -18,7 +19,7 @@
 // ============================================================================
 import {
   serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, sanitizeText,
-  pushToInstance, onUiMessage, loadJsonFile, saveJsonFile, log,
+  pushToInstance, onUiMessage, declareTables, table, log,
 } from "@frame-core";
 import { SIMS } from "./frame.sim.ts";
 
@@ -44,22 +45,27 @@ type Session = {
   round_id: number; turn_index: number; seed: number | null; deadline: number | null;
   started_at: number; seats: Seat[];
 };
-type Score = { initials: string; game_id: string; points: number; scored_at: number; client_id: string };
 
 // Ephemeral: gone on worker restart, which is fine — games are one-more-go toys.
 const sessionsBySfi: Record<string, Session[]> = {};
-// Durable: the arcade high-score board survives restarts via data/.
-const scoresBySfi: Record<string, Score[]> =
-  loadJsonFile(import.meta.url, "high-scores.json", {} as Record<string, Score[]>);
+// Durable: the arcade high-score board is the space's table.
+declareTables([{
+  key: "seamdeck_scores",
+  title: "Seamdeck high scores",
+  description: "The arcade board: each finished run's best, by game.",
+  local: true,
+  schema: [
+    { name: "initials",  col_type: "text",    nullable: false, default_val: "???" },
+    { name: "game_id",   col_type: "text",    nullable: false, default_val: "" },
+    { name: "points",    col_type: "integer", nullable: false, default_val: "0" },
+    { name: "scored_at", col_type: "integer", nullable: false, default_val: "0" },
+    { name: "client_id", col_type: "text",    nullable: false, default_val: "" },
+  ],
+}]);
+const scores = () => table("seamdeck_scores");
 
 function sessionsOf(sfi: string): Session[] {
   return sessionsBySfi[sfi] ?? (sessionsBySfi[sfi] = []);
-}
-function scoresOf(sfi: string): Score[] {
-  return scoresBySfi[sfi] ?? (scoresBySfi[sfi] = []);
-}
-function saveScores() {
-  saveJsonFile(import.meta.url, "high-scores.json", scoresBySfi);
 }
 function pushState(sfi: string) {
   pushToInstance(sfi, { type: "state_changed" });
@@ -84,30 +90,27 @@ function playerName(body: any, peer: any): string {
 // Flip a session to results and record each seat's best attempt on the
 // high-score board (global per game — sessions compete). "???" placeholders
 // carry the client_id until /api/initials fills them in.
-function finishSession(sfi: string, session: Session) {
+async function finishSession(session: Session) {
   session.phase = "results";
-  const scores = scoresOf(sfi);
   for (const seat of session.seats) {
     const best = bestAttempt(attemptsOf(seat, session.round_id));
     if (best && best.points > 0) {
-      scores.push({
+      await scores().upsert(null, {
         initials: seat.initials || "???", game_id: session.game_id,
         points: best.points, scored_at: Date.now(), client_id: seat.client_id,
       });
     }
   }
   // Prune: keep the 50 highest per game.
-  const forGame = scores.filter((r) => r.game_id === session.game_id)
-    .sort((a, b) => b.points - a.points);
-  for (const extra of forGame.slice(50)) scores.splice(scores.indexOf(extra), 1);
-  saveScores();
+  const { rows } = await scores().query({ where: { game_id: session.game_id }, order_by: [{ col: "points", dir: "desc" }] });
+  for (const extra of rows.slice(50)) await scores().delete(extra.row_id);
 }
 
 // Stand `client_id` up from every seat they hold (normally at most one), then
 // settle each affected session: empty → GC; playing turn-game → resolve to
 // results (rotation can't survive a leaver); playing race → their finish is no
 // longer required, so the race may now be complete.
-function standUpEverywhere(sfi: string, client_id: string) {
+async function standUpEverywhere(sfi: string, client_id: string) {
   const sessions = sessionsOf(sfi);
   for (const session of [...sessions]) {
     const idx = session.seats.findIndex((s) => s.client_id === client_id);
@@ -121,9 +124,9 @@ function standUpEverywhere(sfi: string, client_id: string) {
       const sim = SIMS[session.game_id];
       if (!sim) continue;
       if (sim.mode === "turns") {
-        finishSession(sfi, session);
+        await finishSession(session);
       } else if (session.seats.every((s) => attemptsOf(s, session.round_id).length > 0)) {
-        finishSession(sfi, session);
+        await finishSession(session);
       }
     }
   }
@@ -137,7 +140,7 @@ function standUpEverywhere(sfi: string, client_id: string) {
 // ---------------------------------------------------------------------------
 type MutResult = { status: number; body: unknown };
 
-function handleWrite(sfi: string, op: string, b: any, peer: ReturnType<typeof parsePeerInfo>): MutResult {
+async function handleWrite(sfi: string, op: string, b: any, peer: ReturnType<typeof parsePeerInfo>): Promise<MutResult> {
   // Open a NEW lobby for a game, seating the caller as host (seat 1). The
   // caller implicitly stands up from anywhere else — one seat per person.
   if (op === "create_session") {
@@ -151,7 +154,7 @@ function handleWrite(sfi: string, op: string, b: any, peer: ReturnType<typeof pa
     const requested = typeof b?.session_id === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(b.session_id)
       ? b.session_id : "";
     if (requested && findSession(sfi, requested)) return { status: 409, body: { error: "session exists" } };
-    standUpEverywhere(sfi, client_id);
+    await standUpEverywhere(sfi, client_id);
     const session: Session = {
       session_id: requested || crypto.randomUUID(), game_id: game, phase: "lobby",
       round_id: 0, turn_index: 0, seed: null, deadline: null, started_at: Date.now(),
@@ -173,7 +176,7 @@ function handleWrite(sfi: string, op: string, b: any, peer: ReturnType<typeof pa
     if (session.phase !== "lobby") return { status: 409, body: { error: "not in lobby" } };
     if (session.seats.some((s) => s.client_id === client_id)) return { status: 200, body: { ok: true, already: true } };
     if (session.seats.length >= 6) return { status: 409, body: { error: "lobby full" } };
-    standUpEverywhere(sfi, client_id); // can't GC this session — caller isn't in it
+    await standUpEverywhere(sfi, client_id); // can't GC this session — caller isn't in it
     const taken = new Set(session.seats.map((s) => s.seat_no));
     const requested = Number(b?.seat_no);
     let seat_no: number;
@@ -196,7 +199,7 @@ function handleWrite(sfi: string, op: string, b: any, peer: ReturnType<typeof pa
   if (op === "leave") {
     const client_id = String(b?.client_id ?? "");
     if (!client_id) return { status: 400, body: { error: "client_id required" } };
-    standUpEverywhere(sfi, client_id);
+    await standUpEverywhere(sfi, client_id);
     pushState(sfi);
     return { status: 200, body: { ok: true } };
   }
@@ -256,7 +259,7 @@ function handleWrite(sfi: string, op: string, b: any, peer: ReturnType<typeof pa
 
     if (sim.mode === "race") {
       if (session.seats.every((s) => attemptsOf(s, session.round_id).length > 0)) {
-        finishSession(sfi, session);
+        await finishSession(session);
       } else {
         // first finisher starts the clock for stragglers
         const cutoff = Date.now() + 30000;
@@ -264,7 +267,7 @@ function handleWrite(sfi: string, op: string, b: any, peer: ReturnType<typeof pa
       }
     } else {
       session.turn_index += 1;
-      if (session.turn_index >= session.seats.length * sim.attempts) finishSession(sfi, session);
+      if (session.turn_index >= session.seats.length * sim.attempts) await finishSession(session);
     }
     pushState(sfi);
     return { status: 200, body: { ok: true, points, summary } };
@@ -279,7 +282,7 @@ function handleWrite(sfi: string, op: string, b: any, peer: ReturnType<typeof pa
     const session = findSession(sfi, String(b?.session_id ?? ""));
     if (!session || session.phase !== "playing") return { status: 200, body: { ok: true, stale: true } };
     if (session.deadline && Date.now() > session.deadline) {
-      finishSession(sfi, session);
+      await finishSession(session);
       pushState(sfi);
       return { status: 200, body: { ok: true, ended: true } };
     }
@@ -308,10 +311,8 @@ function handleWrite(sfi: string, op: string, b: any, peer: ReturnType<typeof pa
       if (mine) mine.initials = initials;
     }
     if (game) {
-      for (const row of scoresOf(sfi)) {
-        if (row.game_id === game && row.client_id === client_id && row.initials === "???") row.initials = initials;
-      }
-      saveScores();
+      const { rows } = await scores().query({ where: { game_id: game, client_id, initials: "???" } });
+      for (const row of rows) await scores().upsert(row.row_id, { initials });
     }
     pushState(sfi);
     return { status: 200, body: { ok: true, initials } };
@@ -340,11 +341,11 @@ function handleWrite(sfi: string, op: string, b: any, peer: ReturnType<typeof pa
 // Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame → here).
 // `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo.
 // Denials are logged, not answered — clients render from the state_changed push.
-onUiMessage((sfiId, data, peer) => {
+onUiMessage(async (sfiId, data, peer) => {
   if (!sfiId || typeof data !== "object" || data === null) return;
   const d = data as Record<string, unknown>;
   if (typeof d.op !== "string" || !d.op) return;
-  const r = handleWrite(sfiId, d.op, d, peer);
+  const r = await handleWrite(sfiId, d.op, d, peer);
   if (r.status !== 200) log(`seamdeck: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
 });
 
@@ -379,9 +380,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
           }))
         : [],
     }));
-    const leaderboard = [...scoresOf(sfi)]
-      .sort((a, b) => b.points - a.points)
-      .slice(0, 60)
+    const leaderboard = (await scores().query({ order_by: [{ col: "points", dir: "desc" }], limit: 60 })).rows
       .map((r) => ({ initials: r.initials, game_id: r.game_id, points: r.points }));
     return jsonReply(replyPort, 200, {
       sessions, leaderboard,
@@ -392,7 +391,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   // HTTP arms kept for API compatibility (older viewers, scripted clients); the
   // frame's own UI writes over the bus (see the dispatcher above). Same logic.
   if (reqPath.startsWith("/api/") && method === "POST") {
-    const r = handleWrite(sfi, reqPath.slice("/api/".length), parseJsonBody<any>(body), peer);
+    const r = await handleWrite(sfi, reqPath.slice("/api/".length), parseJsonBody<any>(body), peer);
     return jsonReply(replyPort, r.status, r.body);
   }
 

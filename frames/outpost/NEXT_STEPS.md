@@ -2,20 +2,20 @@
 
 Outpost is a lightweight public posting board: editors publish short posts (thought /
 question / status / announcement, with optional media or a poll) and anyone with the
-frame's share link reads them. State lives under `data/outposts/<sfi>/` — a per-placement
-local SQLite database `posts.db` (posts / media rows / votes / prefs, indexed on
-`created_ms`) plus a `<post_id>/` subfolder holding any attached media bytes.
+frame's share link reads them. Posts, media rows and votes are the space's tables
+(`outpost_posts`, `outpost_media`, `outpost_votes`); attached media are files of the space under
+`Outpost/<post_id>/` (the media row's `path`), synced with it and served by the worker to every reader.
 
 Ideas, roughly in order of value:
 
 - **Edit a post.** Today a post is publish-or-delete. An `/api/post/:id` PATCH that lets
   the author (or owner) revise text / kind, stamping an `edited_ms`, would be a small add.
-- **Reactions.** The poll vote plumbing (per-voter key, anon device token, live push) is
+- **Reactions.** The poll vote plumbing (per-voter key, live push) is
   already a general "public reader interaction" primitive — a lightweight emoji reaction
   row per post could reuse it almost verbatim.
 - **Search.** The feed now pages reverse-chronologically via a `created_ms` keyset cursor
   (`/api/state?limit=` for page one, `/api/posts?before=&limit=` for older pages, auto-loaded
-  on scroll). The natural next step is a `posts_fts` FTS5 virtual table (or a `LIKE` filter)
+  on scroll). The natural next step is a `like` filter on `text`
   for full-text search across a large community's history, plus a `kind` filter chip.
 - **Cursor ties.** Paging keys on `created_ms` alone; two posts sharing an exact millisecond
   could straddle a page boundary. If that ever matters, extend the cursor to `(created_ms, id)`.
@@ -27,7 +27,7 @@ Ideas, roughly in order of value:
 - **Image handling.** Attachments are stored and served as-is. Server-side downscaling of
   large images (or generating thumbnails) would keep public loads cheap.
 
-Design axes in play: `privacy-public-view` · `storage-local-db` (one SQLite db per SFI) ·
+Design axes in play: `privacy-public-view` · the space's tables ·
 `view-collaborative` · `settings-per-sfi`. Posting is editor-gated; reading is fully public;
-poll voting sits in between — any real (non-anonymous) Seamside user may vote, member or not,
-keyed by `user_id`, while anonymous web viewers see results read-only.
+poll voting sits in between — anyone signed in votes (listed viewers and visitors not on the
+roster included), keyed by `user_id`; readers nobody named see results read-only.

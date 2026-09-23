@@ -495,17 +495,17 @@
         });
         if (what === "grade") {
           const v = await frame.prompt(`Score out of ${w.possible}. Leave it empty to un-mark it.`,
-            { title: "Score", value: w.earned >= 0 ? String(w.earned) : "", okLabel: "Save" });
+            { title: "Score", defaultValue: w.earned >= 0 ? String(w.earned) : "", okLabel: "Save" });
           if (v !== null) write("api/work/" + w.id + "/grade", { earned: v });
         } else if (what === "weight") {
           const v = await frame.prompt("How much of the course grade is this worth, as a percentage?",
-            { title: "Weight", value: String(w.weight || ""), okLabel: "Save" });
+            { title: "Weight", defaultValue: String(w.weight || ""), okLabel: "Save" });
           if (v !== null) write("api/work/" + w.id, { weight: Number(v) || 0 });
         } else if (what === "due") {
-          const v = await frame.prompt("yyyy-mm-dd, or empty for no date.", { title: "Due date", value: w.due, okLabel: "Save" });
+          const v = await frame.prompt("yyyy-mm-dd, or empty for no date.", { title: "Due date", defaultValue: w.due, okLabel: "Save" });
           if (v !== null) write("api/work/" + w.id, { due: v.trim() });
         } else if (what === "rename") {
-          const v = await frame.prompt("Title", { title: "Rename", value: w.title, okLabel: "Save" });
+          const v = await frame.prompt("Title", { title: "Rename", defaultValue: w.title, okLabel: "Save" });
           if (v && v.trim()) write("api/work/" + w.id, { title: v.trim() });
         } else if (what === "remove") {
           if (await frame.confirm(`Remove "${w.title}"?`, { title: "Assignment", okLabel: "Remove" }))
@@ -515,7 +515,7 @@
       async function addCourse() {
         const name = await frame.prompt("Course name", { title: "Add a course", okLabel: "Add" });
         if (!name || !name.trim()) return;
-        const cr = await frame.prompt("How many credits is it worth?", { title: "Credits", value: "3", okLabel: "Add" });
+        const cr = await frame.prompt("How many credits is it worth?", { title: "Credits", defaultValue: "3", okLabel: "Add" });
         write("api/course", { name: name.trim(), credits: Number(cr) || 3 });
       }
       async function editCourse(c) {
@@ -529,10 +529,10 @@
           ],
         });
         if (what === "credits") {
-          const v = await frame.prompt("Credits", { title: c.name, value: String(c.credits), okLabel: "Save" });
+          const v = await frame.prompt("Credits", { title: c.name, defaultValue: String(c.credits), okLabel: "Save" });
           if (v !== null) write("api/course/" + c.id, { credits: Number(v) || 0 });
         } else if (what === "rename") {
-          const v = await frame.prompt("Course name", { title: "Rename", value: c.name, okLabel: "Save" });
+          const v = await frame.prompt("Course name", { title: "Rename", defaultValue: c.name, okLabel: "Save" });
           if (v && v.trim()) write("api/course/" + c.id, { name: v.trim() });
         } else if (what === "remove") {
           if (await frame.confirm(`Remove "${c.name}" and all its assignments?`, { title: "Course", okLabel: "Remove" }))

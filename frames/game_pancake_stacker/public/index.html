@@ -134,6 +134,7 @@
     let score = 0;
     let best = 0;
     let holder = "";
+    let canRecord = false;   // only an editor's game can set the space's best
     let alive = true;
     let started = false;
     let isRedStack = false;
@@ -243,6 +244,7 @@
         const s = await frame.api('api/state');
         best = s.score?.high ?? 0;
         holder = s.score?.holder || "";
+        canRecord = !!s.can_record;
         $best.textContent = best;
       } catch (_) {}
     }
@@ -577,8 +579,8 @@
         climbOsc = null;
       }
 
-      const beat = score > best;
-      submitScore(score);
+      const beat = canRecord && score > best;
+      if (canRecord) submitScore(score);
       const headline = beat ? 'New best!' : (score > 0 ? 'Stack toppled.' : 'Whiffed.');
       const holderLine = holder ? `<div class="holder">best held by ${escapeHTML(holder)}</div>` : '';
       $result.innerHTML = `

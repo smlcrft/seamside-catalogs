@@ -74,7 +74,15 @@
       frame.api('api/roll', null, 'POST').catch(() => {});
     }
 
-    frame.api('api/state').then(({ value, sides }) => show(value, sides)).catch(() => {});
+    frame.api('api/state').then(({ value, sides, can_roll }) => {
+      // Rolling is an editor's; everyone else watches the same dice.
+      if (!can_roll) {
+        document.getElementById('roll-btn').style.display = 'none';
+        die.style.cursor = 'default';
+        result.textContent = 'watching the dice';
+      }
+      show(value, sides);
+    }).catch(() => {});
 
     window.addEventListener('message', (e) => {
       if (e.data?.type === 'rolled' && !rolling) {

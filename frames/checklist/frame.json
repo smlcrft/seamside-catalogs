@@ -1,17 +1,19 @@
 {
     "name": "Checklist",
-    "description": "A simple, collaborative to-do list. Each placement is its own list \u2014 any member of the space can add tasks, cycle each task through three states (unstarted, in-progress, complete), drag to reorder, and delete. Non-members get a live read-only view. Items, ordering, and states are stored in an encrypted LocalTable scoped to the placement, and every change is pushed live to all viewers.",
+    "description": "A simple, collaborative to-do list for a space. Collaborators add tasks, cycle each through three states (unstarted, in progress, complete), drag to reorder and delete; everyone else gets a live read-only view. The list is the space's own table, checklist.table.jsonl, so it syncs with the space and opens in any table tool, and every change reaches every viewer live.",
     "frame_type": "Tandem",
     "tags": ["everyday", "tasks"],
     "permissions": {
         "net": []
     },
     "created_at": "2026-06-02T23:18:49Z",
-    "modified_at": "2026-08-04T21:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T04:15:22Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "default_width_px": 420,
     "default_height_px": 560,
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:list-checks",
+    "color": "c1"
 }

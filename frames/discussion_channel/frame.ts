@@ -1,65 +1,58 @@
 // ----------------------------------------------------------------------------------------
-// Discussion Channel — Per-placement realtime chat + two owner access toggles.
+// Discussion Channel — a realtime chat channel for a space.
 //
-// Auth model (mirrors Roundtable's owner toggle):
-//   - `public_to_space_viewers` — when true, Viewer-role members of the space (members
-//     with is_sfi_editor=false) are opted into full participation: chat, react, delete
-//     their own. Editors / owners participate regardless. When OFF, Viewer-role members
-//     can still READ the channel (they're members) but cannot mutate anything.
-//
-//   Reads are open to every viewer who reaches the frame — whether a non-member can
-//   reach it at all is the platform's call (public sharing on the placement), never
-//   the frame's.
-//
-//   Resolution:
-//     canParticipate = isSfiEditor OR (publicToSpaceViewers AND isSfiMember)
-//     Every mutation route requires canParticipate.
-//     /api/settings additionally requires isOwner.
-//   - Owners can additionally delete anyone's message.
-//   - Messages/reactions live in per-placement LocalTables (encrypted at rest, host-local,
-//     not peer-synced) — each placement is its own channel.
+// Auth model:
+//   - Editors (collaborator and up) chat, react, and delete their own messages; the owner
+//     can also delete anyone's, rename the channel and flip the viewers toggle.
+//   - `public_to_space_viewers` (owner-only, off by default): when on, Viewer-role members
+//     of the space participate like editors — chat, react, delete their own.
+//       canParticipate = isSfiEditor OR (publicToSpaceViewers AND isSfiMember)
+//     Every write requires canParticipate.
+//   - Everyone else who reaches the frame — viewers while the toggle is off, and anyone
+//     the frame is published to — reads the channel live.
+//   - Messages and reactions are the space's tables, discussion_messages and
+//     discussion_reactions, synced with the space; the title is a frameSettings row.
 //
 // Realtime: new messages, deletions, reaction toggles, and pref changes are broadcast via
-// pushToInstance(sfi_id, …); framecore handles viewer tracking, including read-only viewers.
+// pushToInstance(sfi_id, …).
 // ----------------------------------------------------------------------------------------
 import {
   log, parsePeerInfo, serveFileAtPath, serveHtmlShell, pushToInstance, onUiMessage,
   jsonReply, parseJsonBody, sanitizeText,
-  loadJsonFile, saveJsonFile, declareTables, ensureTables, table,
+  declareTables, ensureTables, table, frameSettings,
 } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
-// PER-PLACEMENT PREFS (channel name), stored as JSON
+// PREFS (channel name, viewers toggle) — frameSettings rows of the space; every frame in
+// the space shares that store, so the keys carry this frame's name.
 // ----------------------------------------------------------------------------------------
-type Prefs = {
-  title: string;
-  // When true, Viewer-role space members can fully participate (chat, react,
-  // delete their own). Off by default — Viewers still read as members.
-  public_to_space_viewers: boolean;
-};
-const DEFAULT_PREFS: Prefs = {
-  title: "Discussion",
-  public_to_space_viewers: false,
-};
+type Prefs = { title: string; public_to_space_viewers: boolean };
+const DEFAULT_PREFS: Prefs = { title: "Discussion", public_to_space_viewers: false };
 
-const allPrefs: Record<string, Prefs> = loadJsonFile(import.meta.url, "prefs.json", {});
-function getPrefs(sfiId: string): Prefs {
-  return { ...DEFAULT_PREFS, ...(allPrefs[sfiId] ?? {}) };
+async function getPrefs(sfiId: string): Promise<Prefs> {
+  const s = frameSettings(sfiId);
+  const title = await s.get<string>("discussion_title");
+  const viewers = await s.get<boolean>("discussion_viewers_participate");
+  return { title: title || DEFAULT_PREFS.title, public_to_space_viewers: viewers === true };
 }
-function setPrefs(sfiId: string, next: Prefs): void {
-  allPrefs[sfiId] = next;
-  saveJsonFile(import.meta.url, "prefs.json", allPrefs);
+async function setPrefs(sfiId: string, next: Prefs): Promise<void> {
+  const s = frameSettings(sfiId);
+  await s.set("discussion_title", next.title);
+  await s.set("discussion_viewers_participate", next.public_to_space_viewers);
 }
 
+function canParticipate(peer: { is_sfi_editor: boolean; is_sfi_member: boolean }, prefs: Prefs): boolean {
+  return peer.is_sfi_editor || (prefs.public_to_space_viewers && peer.is_sfi_member);
+}
+
 // ----------------------------------------------------------------------------------------
-// LOCALTABLES — messages + reactions, per-placement (no sfi_id columns needed)
+// THE SPACE'S TABLES — named for this frame, so no other frame's rows land in them
 // ----------------------------------------------------------------------------------------
 declareTables([
   {
-    key: "messages",
+    key: "discussion_messages",
     title: "Channel Messages",
-    description: "Messages in this placement's discussion channel.",
-    local: true,
+    description: "Messages in this space's discussion channel.",
     schema: [
       { name: "user_id",    col_type: "text",    nullable: false, default_val: "" },
       { name: "user_name",  col_type: "text",    nullable: false, default_val: "" },
@@ -68,10 +61,9 @@ declareTables([
     ],
   },
   {
-    key: "reactions",
+    key: "discussion_reactions",
     title: "Channel Reactions",
     description: "Per-user reaction icons on messages.",
-    local: true,
     schema: [
       { name: "message_id", col_type: "text",    nullable: false, default_val: "" },
       { name: "user_id",    col_type: "text",    nullable: false, default_val: "" },
@@ -138,19 +130,16 @@ type WritePeer = ReturnType<typeof parsePeerInfo>;
 type WriteResult = { status: number; body: Record<string, unknown> };
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: WritePeer): Promise<WriteResult> {
-  // Local tables are always ready; the gate stays so a future graduation to
-  // synced tables needs no code change here.
   const ready = ensureTables(peer);
   if (!ready.ready) return { status: 503, body: { error: "table not bound" } };
-  const messages = table("messages", sfiId);
-  const reactions = table("reactions", sfiId);
+  const messages = table("discussion_messages", sfiId);
+  const reactions = table("discussion_reactions", sfiId);
   const isOwner = peer.is_owner;
 
-  // Every write requires canParticipate (see header) — read-only viewers get one
-  // uniform 403 here instead of per-op checks.
-  const current = getPrefs(sfiId);
-  const canParticipate = peer.is_sfi_editor || (current.public_to_space_viewers === true && peer.is_sfi_member);
-  if (!canParticipate) return { status: 403, body: { error: "read-only access" } };
+  // Every write requires canParticipate (see header) — readers get one uniform 403 here
+  // instead of per-op checks.
+  const current = await getPrefs(sfiId);
+  if (!canParticipate(peer, current)) return { status: 403, body: { error: "read-only access" } };
 
   if (op === "send") {
     const text = sanitizeText(v?.body, 4000);
@@ -200,17 +189,15 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     return { status: 200, body: { ok: true } };
   }
 
-  // Owner-only: channel identity + the two access toggles (they gate who can
-  // read/write, so they're strictly owner-controlled, like Roundtable's).
+  // Owner-only: the channel's name and the viewers toggle (it decides who writes).
   if (op === "settings") {
     if (!isOwner) return { status: 403, body: { error: "owner only" } };
-    const title = sanitizeText(v?.title, 80) || current.title || DEFAULT_PREFS.title;
     const next: Prefs = {
-      title,
+      title: sanitizeText(v?.title, 80) || current.title,
       public_to_space_viewers: v?.public_to_space_viewers !== undefined
         ? v.public_to_space_viewers === true : current.public_to_space_viewers,
     };
-    setPrefs(sfiId, next);
+    await setPrefs(sfiId, next);
     pushToInstance(sfiId, { type: "dc_prefs", sfi_id: sfiId, prefs: next });
     return { status: 200, body: { ok: true, prefs: next } };
   }
@@ -237,7 +224,6 @@ onUiMessage(async (sfiId, data, peer) => {
 self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body, cookies) => {
   const peer = parsePeerInfo(query, cookies);
   const sfiId = peer.sfi_id;
-  const isAnon = peer.is_anon || !peer.user_id;
   const isOwner = peer.is_owner;
 
   // UI shell — anon viewers receive the same HTML; the iframe checks window.__peer
@@ -252,28 +238,21 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
     });
   }
 
-  // Participation auth (mirrors Roundtable — see header): editors always, plus
-  // Viewer-role members when public_to_space_viewers. Reads are open to every
-  // viewer who reaches the frame.
-  const authPrefs = sfiId ? getPrefs(sfiId) : DEFAULT_PREFS;
-  const canParticipate = peer.is_sfi_editor || (authPrefs.public_to_space_viewers === true && peer.is_sfi_member);
-
   if (reqPath.startsWith("/api/")) {
     if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
 
     if (reqPath === "/api/state" && method === "GET") {
-      // Local tables are always ready; the gate stays so a future graduation to
-      // synced tables needs no code change here.
       const ready = ensureTables(peer);
       if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
-      const messages = table("messages", sfiId);
-      const reactions = table("reactions", sfiId);
+      const messages = table("discussion_messages", sfiId);
+      const reactions = table("discussion_reactions", sfiId);
+      const prefs = await getPrefs(sfiId);
       return jsonReply(replyPort, 200, {
-        prefs: getPrefs(sfiId),
+        prefs,
         messages: await listMessages(messages, reactions),
         reaction_icons: REACTION_ICONS,
         can_edit_settings: isOwner,
-        can_participate: canParticipate,
+        can_participate: canParticipate(peer, prefs),
         me: { user_id: peer.user_id, user_name: peer.user_name, is_owner: isOwner },
       });
     }

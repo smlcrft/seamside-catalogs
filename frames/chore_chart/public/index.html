@@ -34,31 +34,11 @@
       font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); line-height: 24px;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    /* the rail is frame chrome only: role, then data. One word, three outcomes. */
+    /* the rail is frame chrome only: the role. One word, three outcomes. */
     .header .mode {
       flex: 0 0 auto; height: 24px; display: inline-flex; align-items: center;
       font-size: var(--os-fs-2xs); color: var(--os-text-muted); white-space: nowrap;
     }
-    .drawer {
-      flex: 0 0 auto; position: relative;
-      width: 24px; height: 24px; padding: 0;
-      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
-      display: inline-flex; align-items: center; justify-content: center;
-      color: var(--os-text-subtle); font-size: 16px; line-height: 1;
-      transition: color 150ms, background 150ms;
-    }
-    /* the glyph must outrank the .header i channel-tint rule above */
-    .drawer i { font-size: 16px; line-height: 1; color: inherit; width: auto; height: auto; }
-    .drawer:hover { color: var(--os-text); background: var(--os-bg-subtle); }
-    .drawer:active { transform: scale(0.92); }
-    .drawer:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
-    .drawer.pending::after {
-      content: ""; position: absolute; top: 0; right: 0;
-      width: 5px; height: 5px; border-radius: var(--os-radius-full); background: var(--ch);
-      animation: drawer-breathe 2s ease-in-out infinite;
-    }
-    @keyframes drawer-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-    @media (prefers-reduced-motion: reduce) { .drawer.pending::after { animation: none; } }
 
     /* how the week is going. Thin channel meter, tnum count. */
     .progress {
@@ -212,12 +192,6 @@
     }
     .tally b { color: var(--ch); font-weight: var(--os-weight-semibold); }
 
-    .notice {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: var(--os-sp-sm); text-align: center; padding: var(--os-sp-xl); flex: 1;
-    }
-    .notice i { font-size: 28px; color: var(--os-text-subtle); }
-    .notice p { margin: 0; font-size: var(--os-fs-sm); color: var(--os-text-secondary); max-width: 380px; }
     .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-lg); flex: 1; }
   </style>
 </head>
@@ -243,15 +217,11 @@
     function App() {
       const [me, setMe]           = useState(null);
       const [chores, setChores]   = useState(null);     // null until first load
-      const [storage, setStorage] = useState(null);     // { backend, pending, can_manage }
-      const [waiting, setWaiting] = useState(false);    // graduated placement, binding missing
       const [draft, setDraft]     = useState({ chore: "", assignee: "", cadence: "weekly" });
 
       async function refresh() {
         const r = await frame.api("api/list").catch(() => null);
         if (!r) return;
-        if (r.storage) setStorage(r.storage);
-        setWaiting(!!r.waiting_for_binding);
         if (r.chores) setChores(r.chores);
       }
       // Writes go over the tether (frame.busSend) — fire-and-forget; the board refreshes
@@ -273,7 +243,7 @@
       }, []);
       useFramePush({ chores_changed: refresh });
 
-      if (!me || chores === null && !waiting) return html`<div></div>`;
+      if (!me || chores === null) return html`<div></div>`;
       const isEditor = !!me.is_sfi_editor;
       const all = chores || [];
 
@@ -312,10 +282,10 @@
             })
           : "rename");
         if (what === "rename") {
-          const name = await frame.prompt("Chore", { title: "Rename", value: c.chore, okLabel: "Save" });
+          const name = await frame.prompt("Chore", { title: "Rename", defaultValue: c.chore, okLabel: "Save" });
           if (name && name.trim() && name.trim() !== c.chore) write("api/chore/" + c.id, { chore: name.trim() }).catch(() => {});
         } else if (what === "who") {
-          const who = await frame.prompt("Leave it empty for anyone.", { title: "Who does it", value: c.assignee, okLabel: "Save" });
+          const who = await frame.prompt("Leave it empty for anyone.", { title: "Who does it", defaultValue: c.assignee, okLabel: "Save" });
           if (who !== null) write("api/chore/" + c.id, { assignee: who.trim() }).catch(() => {});
         } else if (what === "cadence") {
           const pick = await frame.choose("How often does this come back?", {
@@ -330,36 +300,6 @@
             write("api/chore/" + c.id + "/delete", {}).catch(() => {});
           }
         }
-      }
-
-      // ---- the data drawer (owner-only) --------------------------------------------------
-      // One button, one surface: the frame says nothing about storage at rest, and every
-      // data action lives here. Single call site so #755 (frame-chrome data controls) can
-      // replace this wholesale. See docs/table-graduation.md.
-      async function onDrawer() {
-        if (storage.pending) {
-          const stop = await frame.confirm("Stop the move to a shared table?", {
-            title: "Chart data", okLabel: "Stop", cancelLabel: "Keep going",
-          });
-          if (stop) { await write("api/data/cancel_graduate", {}).catch(() => null); refresh(); }
-          return;
-        }
-        if (storage.backend === "shared") {
-          await frame.alert("These chores live in a shared table, so other frames in this space can work with the same rows.", { title: "Chart data" });
-          return;
-        }
-        const mode = frame.choose
-          ? await frame.choose("These chores live on this device.", {
-              title: "Chart data",
-              options: [
-                { id: "convert", label: "Move to a shared table", icon: "ph-dresser",
-                  detail: "Copies this chart so other frames can use it" },
-                { id: "adopt", label: "Use an existing shared table", icon: "ph-plugs-connected",
-                  detail: "Point this chart at a table you already have" },
-              ],
-            })
-          : ((await frame.confirm("Move this chart's data to a shared table?", { title: "Chart data", okLabel: "Move" })) ? "convert" : null);
-        if (mode) { await write("api/data/graduate", { mode }).catch(() => null); refresh(); }
       }
 
       // ---- order: still-open cards first, then by person, then by when they were added.
@@ -379,22 +319,8 @@
             <i class="ph-light ph-broom"></i>
             <h1>Chore Chart</h1>
             <span class="mode">${mode}</span>
-            ${storage && storage.can_manage ? html`
-              <button class=${"drawer" + (storage.pending ? " pending" : "")}
-                title=${storage.pending ? "Finishing a move to a shared table" : "Chart data"}
-                onClick=${onDrawer}>
-                <i class="ph-light ph-dresser"></i>
-              </button>` : null}
           </div>
 
-          ${waiting ? html`
-            <div class="notice">
-              <i class="ph-light ph-table"></i>
-              <p>${me.is_owner
-                ? "This chart is moving to a shared table. Pick or create the table to finish."
-                : "This chart is being set up. It will be back in a moment."}</p>
-            </div>`
-          : html`
             ${!isEditor ? html`
               <div class="banner">
                 <i class="ph-light ph-eye"></i>
@@ -476,7 +402,6 @@
                       </div>`;
                   })}
                 </div>`}
-          `}
         </main>`;
     }
 

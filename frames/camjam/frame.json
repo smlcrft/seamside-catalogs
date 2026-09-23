@@ -5,9 +5,9 @@
         "media",
         "social"
     ],
-    "description": "A tiny, low-bandwidth webcam feed for a space: a stopmotion camera share rather than a video call. One member at a time shares their webcam as a small JPEG still, sent on an interval and fanned out live to everyone viewing the placement, captioned with the sharer's name and how long ago the still was taken. The stopmotion pacing is the whole idea, since a still every few seconds costs a fraction of a video call and reads as presence rather than surveillance. Cadence and detail are a single owner setting that moves them together, from a 100px thumbnail twice a second up to a 1920px still once a minute, so the choice is smoothness or sharpness rather than more or less bandwidth. Any member can start sharing, pick which camera to use, take over an active feed, or rename the frame in place. Only members are ever asked for their camera; viewers just watch. Nothing is recorded: the current still lives in memory on the host device and disappears when sharing stops. There is no microphone and no audio of any kind. Whether people outside the space can watch simply follows the frame's own share key, so there is no second visibility switch to find.",
+    "description": "A tiny, low-bandwidth webcam feed for a space: a stop-motion camera share rather than a video call. One member at a time shares their webcam as a small JPEG still, sent on an interval and fanned out live to everyone watching, captioned with the sharer's name and how long ago the still was taken. A still every few seconds costs a fraction of a video call and reads as presence rather than surveillance. Cadence and detail are one owner setting that moves them together, from a 100px thumbnail twice a second up to a 1920px still once a minute. Any member, viewers included, can start sharing, pick which camera to use, take over an active feed or rename the feed in place; only a member who presses share is ever asked for their camera. Nothing is recorded: the current still lives in memory on the keeper's device and disappears when sharing stops, and there is no microphone or audio. Who can watch follows the space's own sharing: members, and anyone the space lets in when the frame is published.",
     "frame_type": "Tandem",
-    "app_version_min": "0.2.6",
+    "app_version_min": "1.0.0",
     "permissions": {
         "net": [],
         "web": [],
@@ -16,10 +16,12 @@
         "camera": true
     },
     "created_at": "2026-08-06T18:52:28Z",
-    "modified_at": "2026-08-10T19:27:16Z",
+    "modified_at": "2026-09-23T11:17:54Z",
     "depends_on_capabilities": [],
     "default_width_px": 360,
     "default_height_px": 380,
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:video-camera",
+    "color": "c1"
 }

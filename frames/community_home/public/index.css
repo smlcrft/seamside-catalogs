@@ -21,29 +21,8 @@ body {
   margin: 0 auto;
 }
 
-/* Blocks flow in order. Plain block layout (not flex) so inline-block .pub-frame-wrap
-   embeds can sit side-by-side when the admin places them consecutively. */
 .ch-blocks > * { margin-bottom: var(--os-sp-2xl); display: block; }
-.ch-blocks > .pub-frame-wrap { margin-right: var(--os-sp-sm); margin-bottom: var(--os-sp-sm); }
 
-/* Public-frame embed wrapper — sized inline by the admin's width/height. */
-.pub-frame-wrap {
-  display: inline-block;
-  vertical-align: top;
-}
-.pub-frame-title {
-  font-size: var(--os-fs-sm);
-  font-weight: var(--os-weight-medium);
-  color: var(--os-text-secondary);
-  margin-bottom: var(--os-sp-xs);
-}
-.pub-frame {
-  position: relative;
-  display: block;
-  border: 1px solid var(--os-border-color-subtle);
-  border-radius: var(--os-radius-md);
-  background: var(--os-bg-subtle);
-}
 .ch-hero {
   display: flex;
   flex-direction: column;
@@ -293,26 +272,9 @@ body {
 .ch-link-row input[type="text"] { flex: 1 1 160px; min-width: 120px; }
 .ch-link-row input[type="url"] { flex: 2 1 240px; min-width: 160px; }
 
-/* Public-frame admin row: optional title (in head) + URL + width/height inputs. */
+/* Public-frame admin row: optional label (in head) + URL. */
 .ch-pubframe-row .ch-row-head input[type="text"] { flex: 1; min-width: 160px; }
 .ch-pubframe-row > input[type="url"] { width: 100%; }
-.ch-pubframe-dims {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--os-sp-md);
-}
-.ch-pubframe-dims label {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--os-sp-xs);
-  font-size: var(--os-fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--os-text-muted);
-  font-weight: var(--os-weight-medium);
-}
-.ch-pubframe-dims input[type="number"] { width: 88px; }
 
 /* ---------- Toast ---------- */
 .ch-toast {

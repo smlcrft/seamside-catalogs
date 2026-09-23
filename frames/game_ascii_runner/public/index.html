@@ -248,10 +248,8 @@
       const obsTop = obs.y + obs.height;
 
       if (playerRight > obsLeft && playerLeft < obsRight) {
-        if (obs.requiresJump && playerBottom < obsTop && playerTop > obsBottom) {
-          if (playerBottom < 5) return false;
-          return true;
-        }
+        // A rock is cleared only by being above it: standing on the ground is a hit.
+        if (obs.requiresJump && playerBottom < obsTop && playerTop > obsBottom) return true;
         if (obs.requiresDuck && playerTop > obsBottom) {
           if (gameState.isDucking && playerTop < obsBottom + 20) return false;
           return true;

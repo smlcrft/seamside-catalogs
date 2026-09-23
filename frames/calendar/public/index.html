@@ -244,10 +244,8 @@
 
     const SESSION = Math.random().toString(36).slice(2);
 
-    // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
-    // dropped on Android (issue #750). Fire-and-forget — the resulting calendar arrives
-    // via the cal_changed push, sender included. Feature-detect: an older viewer's
-    // framelib has no busSend — fall back to the HTTP write it was using before.
+    // Writes go over frame.busSend, fire-and-forget — the resulting calendar arrives via the
+    // cal_changed push, sender included. A framelib without busSend falls back to HTTP.
     const write = (path, body) => {
       if (typeof frame.busSend === "function") {
         frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });

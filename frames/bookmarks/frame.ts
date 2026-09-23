@@ -4,23 +4,24 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members read and follow the links; space
 //                                           editors save and edit.
-//   data_storage:   storage-local        — LocalTable, no contract. Nothing else acts on
-//                                           these rows (docs/schema-contracts.md, "When NOT
-//                                           to write a contract").
+//   data_storage:   the space's table    — `bookmarks.table.jsonl` at the space's root,
+//                                           synced with the space to every member. No
+//                                           contract: nothing else acts on these rows
+//                                           (docs/schema-contracts.md, "When NOT to write a
+//                                           contract").
 //   view_realtime:  view-collaborative    — every write pushes.
 //   settings_scope: settings-per-sfi
 //
 // THIS FRAME FETCHES NOTHING. It would be easy to reach out for each page's <title> and
 // favicon, and it would make the list prettier. It would also mean that saving a link
 // privately quietly told that site you had done so, and turned a bookmark list into a
-// browsing history broadcast — with `permissions.net: ["*"]`, since bookmarks can point
-// anywhere. So the title is derived from the address itself and the user renames it if the
+// browsing history broadcast — and bookmarks can point anywhere, so no list of hosts would do. So the title is derived from the address itself and the user renames it if the
 // URL was unhelpful. `permissions.net` stays empty, which is a promise the manifest makes
 // on the frame's behalf and the platform enforces.
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, declareTables, ensureTables, table,
+  pushToInstance, sanitizeText, declareTables, table,
 } from "@frame-core";
 
 const BOOKMARKS_SCHEMA = [
@@ -34,7 +35,7 @@ const BOOKMARKS_SCHEMA = [
 ];
 
 declareTables([
-  { key: "bookmarks", title: "Bookmarks", description: "Saved links for this placement.", local: true, schema: BOOKMARKS_SCHEMA },
+  { key: "bookmarks", title: "Bookmarks", description: "Saved links for this space.", local: true, schema: BOOKMARKS_SCHEMA },
 ]);
 
 type Peer = ReturnType<typeof parsePeerInfo>;
@@ -81,16 +82,6 @@ function cleanTags(raw: unknown): string {
   return [...new Set(parts)].slice(0, 12).join(",");
 }
 
-async function readyTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  if (!r.byKey["bookmarks"]) {
-    try { await table("bookmarks", peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`bookmarks: ensure failed: ${e}`); }
-    r = ensureTables(quiet);
-  }
-  return !!r.byKey["bookmarks"];
-}
-
 async function listRows(sfiId: string) {
   const { rows } = await table("bookmarks", sfiId).query({ order_by: [{ col: "added_ms", dir: "desc" }], limit: 2000 });
   return rows.map((r) => ({
@@ -105,7 +96,6 @@ function notify(sfiId: string) {
 }
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  if (!(await readyTables(peer))) return { status: 503, body: { error: "table not ready" } };
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
   const t = table("bookmarks", sfiId);
 
@@ -184,8 +174,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
     return jsonReply(replyPort, r.status, r.body);
   }
-
-  if (!(await readyTables(peer))) return jsonReply(replyPort, 503, { error: "table not ready" });
 
   if (reqPath === "/api/list" && method === "GET") {
     return jsonReply(replyPort, 200, { bookmarks: await listRows(sfiId) });

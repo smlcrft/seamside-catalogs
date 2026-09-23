@@ -1,17 +1,21 @@
 {
     "name": "File Folder",
-    "description": "A simple shared file bucket, unique per placement. Members (or just the owner — the owner chooses) can add files by clicking 'Add file' or dragging them in from the desktop. The owner sets who may add files, a max file size, and a max number of files. Anyone who can open the frame can list and download its files, so sharing the frame publicly shares the folder. Files live in the frame's own data folder in a per-placement subfolder; only the owner's sharing preferences are stored, in a single JSON file. No database or sync tables.",
+    "description": "A shared file drop over one folder of the space (\"File Folder/\" unless an editor points it elsewhere, or the space opens it on a folder). The owner, or the owner and the space's editors (the owner chooses), add files by clicking 'Add file' or dragging them in, up to 8 MB each and a file count the owner sets; anyone who can open the frame can list and download them, so publishing the frame shares that folder. The files are ordinary files of the space: they show in the space page, sync to members' copies and open in other tools. Which folder, and the sharing settings, belong to each session of the frame.",
     "frame_type": "Tandem",
     "tags": ["everyday", "files"],
     "permissions": {
         "net": []
     },
+    "data": "write",
+    "opens_folders": ["file folder", "files", "uploads", "shared"],
     "created_at": "2026-06-03T00:24:55Z",
-    "modified_at": "2026-08-12T18:30:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T14:03:23Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "default_width_px": 420,
     "default_height_px": 560,
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:folder",
+    "color": "c4"
 }

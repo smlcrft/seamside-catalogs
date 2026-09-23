@@ -1,6 +1,6 @@
 {
     "name": "Flashcards",
-    "description": "Decks you can share, with a schedule that stays yours. Cards live in the space, so a study group builds one deck together and everybody drills the same material — but what you have learned is counted per person, so your intervals never move because a classmate answered well. Reviewing uses SM-2, the spaced-repetition schedule Anki is built on: rate a card and it comes back tomorrow, in six days, or in a month, depending on how well you have been doing with it. Each answer shows what it will cost you, so choosing is a decision rather than a guess. Space editors write the cards; anyone in the space can study them. Decks, cards and each person's progress live in encrypted LocalTables scoped to the placement.",
+    "description": "Decks you can share, with a schedule that stays yours. Cards live in the space, so a study group builds one deck together and everybody drills the same material \u2014 but what you have learned is counted per person, so your intervals never move because a classmate answered well. Reviewing uses SM-2, the spaced-repetition schedule Anki is built on: rate a card and it comes back tomorrow, in six days, or in a month, depending on how well you have been doing with it. Each answer shows what it will cost you, so choosing is a decision rather than a guess. Editors write the cards; every member of the space, viewers included, studies and keeps their own schedule. Decks, cards and each person's progress are the space's own tables (flashcards_decks, flashcards, flashcards_reviews), synced with the space; the frame shows each person only their own progress, though any member opening the reviews table can read it.",
     "frame_type": "Tandem",
     "tags": ["study", "learning", "flashcards", "memory"],
     "permissions": {
@@ -9,9 +9,11 @@
     "default_width_px": 560,
     "default_height_px": 480,
     "created_at": "2026-08-10T00:00:00Z",
-    "modified_at": "2026-08-10T00:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T11:14:10Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:cards",
+    "color": "c1"
 }

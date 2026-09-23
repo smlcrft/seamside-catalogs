@@ -1,25 +1,41 @@
 // ----------------------------------------------------------------------------------------
-// Calendar — a simple shared calendar, one per placement (sfi_id).
+// Calendar — a simple shared calendar, one per space (sfi_id).
 //
 // Design axes:
 //   privacy:        privacy-public-view  — editors add/change events; everyone else gets a
 //                                           read-only view. Whether a non-member can reach this
-//                                           frame at all is the platform's call (public sharing on
-//                                           the placement), never the frame's — if a request lands
-//                                           here, the viewer is allowed to see the calendar.
-//   data_storage:   storage-simple-files — the whole calendar lives in a single cal.json under a
-//                                           per-sfi folder. No DB / SyncTable.
+//                                           frame at all is the platform's call (the space's tier
+//                                           and whether the frame is published), never the frame's
+//                                           — if a request lands here, the viewer may see it.
+//   data_storage:   the space's table    — `calendar.table.jsonl` at the space's root, one row
+//                                           per event (row id = event id): synced with the space
+//                                           to every member, openable in any table tool. Two
+//                                           editors changing different events never collide.
 //   view_realtime:  view-collaborative   — every mutation calls pushToInstance so all viewers of
-//                                           the placement refresh live.
-//   settings_scope: settings-per-sfi     — everything is keyed by peer.sfi_id.
+//                                           the space refresh live.
+//   settings_scope: settings-per-space   — the table is the space's; the frame keeps nothing else.
 //
 // Events are either one-time (a specific YYYY-MM-DD) or weekly-recurring (a set of weekdays,
 // e.g. Mon/Wed/Fri). Recurrence is expanded for display on the frontend; the backend only stores.
 // ----------------------------------------------------------------------------------------
 import {
   log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance, onUiMessage,
-  frameDataDir, serveFileAtPath, path,
+  serveFileAtPath, declareTables, table,
 } from "@frame-core";
+
+declareTables([{
+  key: "calendar",
+  title: "Calendar",
+  description: "This space's calendar: one row per event (a date or a weekly recurrence).",
+  local: true,
+  schema: [
+    { name: "title", col_type: "text" }, { name: "date", col_type: "text" },
+    { name: "time", col_type: "text" }, { name: "tz", col_type: "text" },
+    { name: "dur", col_type: "integer" }, { name: "color", col_type: "text" },
+    { name: "url", col_type: "text" }, { name: "note", col_type: "text" },
+    { name: "recur", col_type: "text" },
+  ],
+}]);
 
 // ----- Calendar shape -------------------------------------------------------------------
 // A recurring event never extends back before `start` (its creation day) and runs until `until`
@@ -34,7 +50,7 @@ type CalEvent = {
   time: string;     // "HH:MM" (24h) or "" for an all-day entry
   tz: string;       // IANA zone the time/date was authored in (e.g. "America/New_York").
                     // Only meaningful for timed events — the frontend shifts them into each
-                    // viewer's local zone. Empty = "floating" (all-day, or legacy events): no
+                    // viewer's local zone. Empty = "floating" (all-day, or a row written without one): no
                     // shift, shown as-is everywhere.
   dur: number;      // duration in minutes (0 = none); only meaningful for timed events
   color: string;    // "c1".."c12", or "" to inherit the space accent
@@ -43,9 +59,6 @@ type CalEvent = {
   recur: Recur;     // null = one-time
 };
 type Settings = Record<string, never>;
-type Cal = { settings: Settings; events: CalEvent[] };
-
-const DEFAULT_CAL: Cal = { settings: {}, events: [] };
 
 // Caps — keep disk + rendering bounded.
 const MAX_EVENTS = 1000;
@@ -54,7 +67,7 @@ const MAX_NOTE = 1000;
 const MAX_URL = 2048;
 
 const PALETTES = ["c1","c2","c3","c4","c5","c6","c7","c8","c9","c10","c11","c12"];
-const ID_RE = /^[0-9a-fA-F-]{8,64}$/;
+const ID_RE = /^[0-9A-Za-z_-]{8,64}$/;   // a UUID from here, or a row id a table tool made
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const TZ_RE = /^[A-Za-z0-9_+\-/]{1,64}$/;   // IANA zone id shape ("Area/City", "UTC", "Etc/GMT+5")
@@ -65,24 +78,16 @@ function todayIso(): string {
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
 }
 
-// ----- Files on disk --------------------------------------------------------------------
-// data/cals/<sfi_slug>/cal.json
-const CALS_DIR = path.join(frameDataDir(import.meta.url), "cals");
-function sfiSlug(sfiId: string): string {
-  return (sfiId || "").replace(/[^a-zA-Z0-9_-]/g, "_") || "default";
-}
-function calDir(sfiId: string): string { return path.join(CALS_DIR, sfiSlug(sfiId)); }
-function calFile(sfiId: string): string { return path.join(calDir(sfiId), "cal.json"); }
+// ----- The events table -----------------------------------------------------------------
+const events = () => table("calendar");
 
-function loadCal(sfiId: string): Cal {
-  try {
-    const raw = Deno.readTextFileSync(calFile(sfiId));
-    return sanitizeCal(JSON.parse(raw));
-  } catch { return structuredClone(DEFAULT_CAL); }
+async function loadEvents(): Promise<CalEvent[]> {
+  const { rows } = await events().query({ order_by: [{ col: "_created_at", dir: "asc" }] });
+  return rows.map((r) => sanitizeEvent({ ...r, id: r._row_id })).filter(Boolean) as CalEvent[];
 }
-function saveCal(sfiId: string, cal: Cal): void {
-  Deno.mkdirSync(calDir(sfiId), { recursive: true });
-  Deno.writeTextFileSync(calFile(sfiId), JSON.stringify(cal, null, 2));
+async function saveEvent(ev: CalEvent): Promise<void> {
+  const { id, ...fields } = ev;
+  await events().upsert(id, fields);
 }
 
 // ----- Validation -----------------------------------------------------------------------
@@ -134,28 +139,18 @@ function sanitizeEvent(e: any): CalEvent | null {
   return { id, title, date, time, tz, dur, color, url, note: str(e.note, MAX_NOTE), recur };
 }
 
-function sanitizeCal(raw: any): Cal {
-  const s = raw && typeof raw === "object" ? raw : {};
-  // Legacy cal.json may carry settings.isPublic (the old frame-side gate) and
-  // settings.palette (the old frame-picked accent); both are dropped here — the
-  // frame follows the space channel now.
-  const settings: Settings = {};
-  const eventsIn = Array.isArray(s.events) ? s.events.slice(0, MAX_EVENTS) : [];
-  const events = eventsIn.map(sanitizeEvent).filter(Boolean) as CalEvent[];
-  return { settings, events };
-}
-
 // ----- State for a peer -----------------------------------------------------------------
 // Reads are open to every viewer who reaches the frame; the identity flags only decide which
 // controls the frontend renders. Writes are gated per-endpoint on is_sfi_editor below.
-function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
-  const cal = loadCal(peer.sfi_id);
+async function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
+  const list = await loadEvents();
   const me = {
     is_anon: peer.is_anon, is_sfi_member: peer.is_sfi_member,
     is_sfi_editor: peer.is_sfi_editor, is_owner: peer.is_owner,
     user_name: peer.user_name, space_color: peer.space_color,
   };
-  return { me, settings: cal.settings, events: cal.events };
+  const settings: Settings = {};
+  return { me, settings, events: list };
 }
 
 // ----- Mutations ------------------------------------------------------------------------
@@ -165,31 +160,24 @@ type MutPeer = ReturnType<typeof parsePeerInfo>;
 type MutResult = { status: number; body: unknown };
 
 // Create or update one event — editors only. id present + known → update; else insert.
-function mutEvent(sfiId: string, v: { event?: any; by?: unknown }, peer: MutPeer): MutResult {
+async function mutEvent(sfiId: string, v: { event?: any; by?: unknown }, peer: MutPeer): Promise<MutResult> {
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
   const ev = sanitizeEvent(v.event);
   if (!ev) return { status: 400, body: { error: "invalid event" } };
-  const cal = loadCal(sfiId);
-  const i = cal.events.findIndex((e) => e.id === ev.id);
-  if (i >= 0) cal.events[i] = ev;
-  else {
-    if (cal.events.length >= MAX_EVENTS) return { status: 413, body: { error: "calendar is full" } };
-    cal.events.push(ev);
+  if (!(await events().get(ev.id)) && (await loadEvents()).length >= MAX_EVENTS) {
+    return { status: 413, body: { error: "calendar is full" } };
   }
-  saveCal(sfiId, cal);
+  await saveEvent(ev);
   pushToInstance(sfiId, { type: "cal_changed", by: str(v.by, 64) });
   return { status: 200, body: { ok: true, id: ev.id } };
 }
 
 // Delete one event — editors only.
-function mutEventDelete(sfiId: string, v: { id?: unknown; by?: unknown }, peer: MutPeer): MutResult {
+async function mutEventDelete(sfiId: string, v: { id?: unknown; by?: unknown }, peer: MutPeer): Promise<MutResult> {
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
   const id = String(v.id || "");
-  const cal = loadCal(sfiId);
-  const next = cal.events.filter((e) => e.id !== id);
-  if (next.length !== cal.events.length) {
-    cal.events = next;
-    saveCal(sfiId, cal);
+  if (ID_RE.test(id) && await events().get(id)) {
+    await events().delete(id);
     pushToInstance(sfiId, { type: "cal_changed", by: str(v.by, 64) });
   }
   return { status: 200, body: { ok: true } };
@@ -200,12 +188,12 @@ function mutEventDelete(sfiId: string, v: { id?: unknown; by?: unknown }, peer: 
 // platform-resolved identity, same shape as parsePeerInfo; the role gates live inside the
 // mutation functions. Denials are logged, not answered — a legitimate client never sends
 // a write it isn't allowed to make.
-onUiMessage((sfiId, data, peer) => {
+onUiMessage(async (sfiId, data, peer) => {
   if (!sfiId || typeof data !== "object" || data === null) return;
   const d = data as Record<string, unknown>;
   const r =
-    d.op === "event"          ? mutEvent(sfiId, d, peer)
-    : d.op === "event_delete" ? mutEventDelete(sfiId, d, peer)
+    d.op === "event"          ? await mutEvent(sfiId, d, peer)
+    : d.op === "event_delete" ? await mutEventDelete(sfiId, d, peer)
     : null;
   if (r && r.status !== 200) log(`calendar: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
 });
@@ -221,16 +209,16 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
 
   // Full calendar + identity in one round trip. Open to every viewer who reaches the frame.
   if (reqPath === "/api/state" && method === "GET") {
-    return jsonReply(replyPort, 200, stateFor(peer));
+    return jsonReply(replyPort, 200, await stateFor(peer));
   }
 
   // Writes — kept as HTTP arms for older viewers; same shared logic as the bus dispatcher.
   if (reqPath === "/api/event" && method === "POST") {
-    const r = mutEvent(peer.sfi_id, parseJsonBody<{ event?: any; by?: unknown }>(body) || {}, peer);
+    const r = await mutEvent(peer.sfi_id, parseJsonBody<{ event?: any; by?: unknown }>(body) || {}, peer);
     return jsonReply(replyPort, r.status, r.body);
   }
   if (reqPath === "/api/event_delete" && method === "POST") {
-    const r = mutEventDelete(peer.sfi_id, parseJsonBody<{ id?: unknown; by?: unknown }>(body) || {}, peer);
+    const r = await mutEventDelete(peer.sfi_id, parseJsonBody<{ id?: unknown; by?: unknown }>(body) || {}, peer);
     return jsonReply(replyPort, r.status, r.body);
   }
 

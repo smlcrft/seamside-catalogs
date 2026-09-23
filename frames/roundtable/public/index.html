@@ -273,8 +273,7 @@ function App() {
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [listCollapsed, setListCollapsed] = useState({ positive: false, negative: false });
 
-  useEffect(() => {
-    api("./api/state")
+  const load = () => api("./api/state")
       .then((data) => {
         setState({
           prefs: { ...DEFAULT_PREFS, ...(data.prefs || {}) },
@@ -286,7 +285,7 @@ function App() {
         });
       })
       .catch((e) => setErr(e.message || String(e)));
-  }, []);
+  useEffect(() => { load(); }, []);
 
   useFramePush({
     rt_message: (d) => setState((prev) => {
@@ -313,7 +312,11 @@ function App() {
       const next = sortItems(list.map((x) => x.id === d.id ? { ...x, votes: d.votes } : x));
       return d.kind === "positive" ? { ...prev, positives: next } : { ...prev, negatives: next };
     }),
-    rt_prefs: (d) => setState((prev) => prev ? { ...prev, prefs: { ...prev.prefs, ...d.prefs } } : prev),
+    // The viewers toggle changes who may write, which only the worker can say — re-read.
+    rt_prefs: (d) => {
+      setState((prev) => prev ? { ...prev, prefs: { ...prev.prefs, ...d.prefs } } : prev);
+      load();
+    },
   });
 
   useEffect(() => {

@@ -243,7 +243,7 @@
             </div>` : null}
 
           ${items.length === 0
-            ? html`<div class="empty">${isEditor ? "Nothing on the list. The box above starts it." : "Nothing here yet."}</div>`
+            ? html`<div class="empty">${isEditor ? "Nothing on the list. The box below starts it." : "Nothing here yet."}</div>`
             : html`
               <div class="list" ref=${listRef}
                 onDragOver=${isEditor ? onListDragOver : null}

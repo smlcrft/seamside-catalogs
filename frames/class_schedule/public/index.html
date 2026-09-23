@@ -410,6 +410,10 @@
       const [, setTick] = useState(0);
       const wrapRef = useRef(null);
       const nameRef = useRef(null);
+      // A naming box commits or cancels on its one blur: Enter and Escape blur it, so the
+      // box going away afterwards cannot commit a second time.
+      const cancelRef = useRef(false);
+      const settle = (commit, cancel) => { if (cancelRef.current) { cancelRef.current = false; cancel(); } else commit(); };
       const drag = useRef(null);
       const spanRef = useRef(MIN_SPAN_HOURS);
 
@@ -788,15 +792,15 @@
                           style=${`top:${top}px; height:${h}px; --bc: ${channelFor(r.title)}`}
                           tabindex=${isEditor ? 0 : -1}
                           title=${`${r.title} · ${timeStrip(r.start_min, r.end_min)}${r.place ? " · " + r.place : ""}`}
-                          onPointerDown=${isNaming ? null : (e) => startDrag(e, "move", r, d)}
+                          onPointerDown=${isNaming ? (e) => e.stopPropagation() : (e) => startDrag(e, "move", r, d)}
                           onKeyDown=${(e) => { if (isEditor && !isNaming && e.key === "Enter") setEditing({ id: r.id, title: r.title, days: meetingDays(r), was: meetingDays(r) }); }}>
                           ${isNaming ? html`
                             <input ref=${nameRef} maxlength="120" value=${editing.title}
                               onInput=${(e) => setEditing({ ...editing, title: e.target.value })}
-                              onBlur=${commitRename}
+                              onBlur=${() => settle(commitRename, () => setEditing(null))}
                               onKeyDown=${(e) => {
-                                if (e.key === "Enter") { e.preventDefault(); commitRename(); }
-                                if (e.key === "Escape") { e.preventDefault(); setEditing(null); }
+                                if (e.key === "Enter") { e.preventDefault(); e.target.blur(); }
+                                if (e.key === "Escape") { e.preventDefault(); cancelRef.current = true; e.target.blur(); }
                               }} />
                             <span class="t2">
                               <span>${timeStrip(r.start_min, r.end_min)}</span>
@@ -822,13 +826,14 @@
                       </div>` : null}
 
                     ${draft && draft.day === d ? html`
-                      <div class=${"naming-new" + (d >= days.length - 2 ? " flip" : "")} style=${`top:${topFor(draft.start)}px; height:${Math.max(30, topFor(draft.end) - topFor(draft.start))}px`}>
+                      <div class=${"naming-new" + (d >= days.length - 2 ? " flip" : "")} style=${`top:${topFor(draft.start)}px; height:${Math.max(30, topFor(draft.end) - topFor(draft.start))}px`}
+                        onPointerDown=${(e) => e.stopPropagation()}>
                         <input ref=${nameRef} maxlength="120" placeholder="name it" value=${draft.title}
                           onInput=${(e) => setDraft({ ...draft, title: e.target.value })}
-                          onBlur=${commitDraft}
+                          onBlur=${() => settle(commitDraft, () => setDraft(null))}
                           onKeyDown=${(e) => {
-                            if (e.key === "Enter") { e.preventDefault(); commitDraft(); }
-                            if (e.key === "Escape") { e.preventDefault(); setDraft(null); }
+                            if (e.key === "Enter") { e.preventDefault(); e.target.blur(); }
+                            if (e.key === "Escape") { e.preventDefault(); cancelRef.current = true; e.target.blur(); }
                           }} />
                         <span class="t2">${timeStrip(draft.start, draft.end)}</span>
                         ${dayStrip(draft.days, (i) => setDraft({

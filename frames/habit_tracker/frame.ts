@@ -3,12 +3,13 @@
 //
 // Design axes:
 //   privacy:        privacy-public-view  — non-members watch the grid; space editors mark.
-//   data_storage:   storage-local        — LocalTables, no contract. Nothing else acts on
-//                                           these rows (docs/schema-contracts.md, "When NOT
-//                                           to write a contract").
+//   data_storage:   the space's tables   — `habits` and `habit_marks` (`<name>.table.jsonl`
+//                                           at the space's root), synced with the space. No
+//                                           contract: nothing else acts on these rows
+//                                           (docs/schema-contracts.md, "When NOT to write a
+//                                           contract").
 //   view_realtime:  view-collaborative    — marking pushes, so a shared habit fills in on
 //                                           everyone's grid at once.
-//   settings_scope: settings-per-sfi
 //
 // A DAY IS A STRING, and that is deliberate. The chore chart learned the hard way that
 // deriving a day number from a timestamp invites timezone bugs: a local-midnight value
@@ -20,7 +21,7 @@
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, declareTables, ensureTables, table,
+  pushToInstance, sanitizeText, declareTables, table,
 } from "@frame-core";
 
 const HABITS_SCHEMA = [
@@ -36,8 +37,8 @@ const MARKS_SCHEMA = [
 ];
 
 declareTables([
-  { key: "habits", title: "Habits", description: "Habits tracked in this placement.", local: true, schema: HABITS_SCHEMA },
-  { key: "marks",  title: "Habit marks", description: "One row per habit per completed day.", local: true, schema: MARKS_SCHEMA },
+  { key: "habits",      title: "Habits",      description: "Habits tracked in this space.", schema: HABITS_SCHEMA },
+  { key: "habit_marks", title: "Habit marks", description: "One row per habit per completed day.", schema: MARKS_SCHEMA },
 ]);
 
 type Peer = ReturnType<typeof parsePeerInfo>;
@@ -70,21 +71,9 @@ function validDay(v: unknown, todayStr: string): string | null {
   return s;
 }
 
-async function readyTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  for (const key of ["habits", "marks"]) {
-    if (!r.byKey[key]) {
-      try { await table(key, peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`habit_tracker: ensure "${key}" failed: ${e}`); }
-      r = ensureTables(quiet);
-    }
-  }
-  return !!r.byKey["habits"] && !!r.byKey["marks"];
-}
-
 async function readAll(sfiId: string) {
   const { rows: hrows } = await table("habits", sfiId).query({ order_by: [{ col: "sort_order" }] });
-  const { rows: mrows } = await table("marks", sfiId).query({ limit: 5000 });
+  const { rows: mrows } = await table("habit_marks", sfiId).query({ limit: 5000 });
   const oldest = new Date();
   oldest.setDate(oldest.getDate() - WINDOW_DAYS);
   const cutoff = dayString(oldest.getTime());
@@ -113,11 +102,10 @@ function notify(sfiId: string) {
 }
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  if (!(await readyTables(peer))) return { status: 503, body: { error: "tables not ready" } };
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
 
   const habits = table("habits", sfiId);
-  const marks = table("marks", sfiId);
+  const marks = table("habit_marks", sfiId);
   const today = dayString(Date.now());
 
   const ok = async (): Promise<WriteResult> => {
@@ -206,8 +194,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
     return jsonReply(replyPort, r.status, r.body);
   }
-
-  if (!(await readyTables(peer))) return jsonReply(replyPort, 503, { error: "tables not ready" });
 
   if (reqPath === "/api/list" && method === "GET") {
     return jsonReply(replyPort, 200, await readAll(sfiId));

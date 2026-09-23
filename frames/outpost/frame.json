@@ -1,19 +1,20 @@
 {
     "name": "Outpost",
-    "description": "A lightweight public posting board for sharing with the world. Space members (editors) publish short posts \u2014 a passing thought, an open question, a status update, an announcement, a quick poll, or an image / audio / video clip \u2014 and anyone with the frame's share link can read them. Each post shows its author and the time it was shared, and URLs in the text become clickable (opened safely in the reader's browser). Posts live entirely in the frame's own data folder: one subfolder per placement holds a encrypted LocalTable (posts, media rows, and poll votes \u2014 indexed so a large, active feed stays fast) plus a per-post subfolder for any attached media bytes. Local file only, no sync tables.",
+    "description": "A lightweight public posting board for sharing with the world. Editors publish short posts \u2014 a thought, a question, a status, an announcement, a quick poll, or an image / audio / video clip \u2014 and anyone with the frame's link reads them, attachments included. Anyone signed in votes in polls, listed viewers included; people who have not signed in see the live results. The owner sets the heading, the tagline and whether only they may post. Posts, media rows and votes are the space's own tables (outpost_posts, outpost_media, outpost_votes); attachments are files of the space in an Outpost folder, one subfolder per post, served by the frame to everyone who reads the board.",
     "frame_type": "Tandem",
+    "data": "write",
     "tags": ["community", "social"],
-    "app_version_min": "0.2.5",
+    "app_version_min": "1.0.0",
     "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": []
+        "net": []
     },
     "created_at": "2026-07-01T00:00:00Z",
-    "modified_at": "2026-08-04T21:00:00Z",
+    "modified_at": "2026-09-23T14:07:02Z",
     "depends_on_capabilities": [],
     "default_width_px": 480,
     "default_height_px": 640,
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:megaphone",
+    "color": "c6"
 }

@@ -1,6 +1,6 @@
 {
     "name": "Meal Planner",
-    "description": "A weekly meal planner, unique per placement. Space editors lay out breakfast, lunch, dinner, and snacks across a seven day week, step between weeks, and keep servings and notes on every meal. On its own it is a freeform planner; link a shared recipes table for a recipe picker on each day, and a shared grocery table to send a day's or a week's ingredients straight to the list. Everyone else, including anyone the frame is shared with publicly, sees a live read-only view of the plan. Meals live in encrypted LocalTables scoped to the placement until the owner moves them to shared tables, and every change is pushed live to all viewers.",
+    "description": "A weekly meal planner for a space. Collaborators lay out breakfast, lunch, dinner and snacks across a seven-day week, step between weeks, drag meals between days, and keep servings and notes on each. When a Recipe Box is in the same space, each day gets a recipe picker over its recipes, and a week's ingredients go to the space's Grocery List in one click (re-sending never duplicates what is still on the list). Everyone else, including anyone the frame is published to, sees the plan live and read-only. The plan is the space's meal_plan table (meal_plan.table.jsonl); recipes and groceries are the space's recipes and grocery tables, shared by name with those frames.",
     "frame_type": "Tandem",
     "tags": ["household", "kitchen", "planning"],
     "permissions": {
@@ -9,9 +9,11 @@
     "default_width_px": 760,
     "default_height_px": 560,
     "created_at": "2026-08-04T23:00:00Z",
-    "modified_at": "2026-08-04T23:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T04:26:06Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:fork-knife",
+    "color": "c1"
 }

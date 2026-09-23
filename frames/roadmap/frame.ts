@@ -1,21 +1,19 @@
 // ----------------------------------------------------------------------------------------
-// Roadmap — a simple, robust project roadmapping tool (one roadmap per placement).
+// Roadmap — a simple, robust project roadmapping tool (one roadmap per space).
 //
 // Design axes:
 //   privacy:        privacy-public-view  — non-members / Viewer-role members get a live
 //                                          read-only view; space editors get the full UI.
-//   data_storage:   storage-local-db     — LocalTables: encrypted at rest on the host,
-//                                          scoped per placement so each placement is its
-//                                          own independent roadmap. NOT peer-synced;
-//                                          collaboration happens at the frontend layer —
-//                                          all viewers talk to this one backend and refetch
-//                                          on push.
+//   data_storage:   the space's tables   — `roadmap_milestones.table.jsonl` and
+//                                          `roadmap_tasks.table.jsonl` at the space's root,
+//                                          synced with it; one roadmap per space.
 //   view_realtime:  view-collaborative   — every mutation calls pushToInstance(sfi_id, …)
-//                                          so all viewers of the placement refresh live.
-//   settings_scope: settings-per-sfi     — project meta + links keyed by peer.sfi_id.
+//                                          so every viewer refreshes live.
+//   settings_scope: settings-per-sfi     — project meta + links in the space's frameSettings,
+//                                          under `roadmap_*` keys (other frames share it).
 //
-// Data model (all tables are per-placement LocalTables):
-//   meta        one row per placement — project name, overview, links (JSON).
+// Data model:
+//   meta        frameSettings keys — project name, overview, links (JSON).
 //   milestones  real milestones (kind='milestone', with a target date + completed flag)
 //               PLUS two auto-created singleton buckets, kind='backburner' / 'maybelater',
 //               which hold parked tasks and never appear on the timeline.
@@ -33,10 +31,12 @@ import {
   declareTables, ensureTables, table, frameSettings,
 } from "@frame-core";
 
-// ----- LocalTables (encrypted, per-placement — no sfi_id columns needed) ----------------
+// ----- The space's tables (named for this frame) ----------------------------------------
+const MILESTONES = "roadmap_milestones";
+const TASKS = "roadmap_tasks";
 declareTables([
   {
-    key: "milestones",
+    key: MILESTONES,
     title: "Roadmap Milestones",
     description: "Milestones and parking buckets for this roadmap.",
     local: true,
@@ -51,7 +51,7 @@ declareTables([
     ],
   },
   {
-    key: "tasks",
+    key: TASKS,
     title: "Roadmap Tasks",
     description: "Tasks, each belonging to one milestone or bucket.",
     local: true,
@@ -90,10 +90,10 @@ function isSafeUrl(u: string): boolean {
 }
 
 // ----- Buckets bootstrap ----------------------------------------------------------------
-// Project meta (name/overview/links) lives in the per-placement
-// frameSettings store, which needs no seeding — getMeta reads keys with defaults.
+// Project meta (name/overview/links) lives in the space's frameSettings, which needs no
+// seeding — getMeta reads keys with defaults.
 async function ensurePlacement(t: Tables): Promise<void> {
-  // Auto-create the two parking buckets once per placement. Each bucket is unique
+  // Auto-create the two parking buckets once per space, on an editor's write. Each bucket is unique
   // by kind, so key its row by a stable id — a concurrent first-load then converges
   // on one row instead of forking duplicate buckets (the query-then-upsert(null) race).
   for (const b of BUCKETS) {
@@ -110,9 +110,9 @@ async function ensurePlacement(t: Tables): Promise<void> {
 // ----- Readers --------------------------------------------------------------------------
 async function getMeta(t: Tables) {
   const [name, overview, links] = await Promise.all([
-    t.settings.get<string>("name"),
-    t.settings.get<string>("overview"),
-    t.settings.get<Array<{ label: string; url: string }>>("links"),
+    t.settings.get<string>("roadmap_name"),
+    t.settings.get<string>("roadmap_overview"),
+    t.settings.get<Array<{ label: string; url: string }>>("roadmap_links"),
   ]);
   return {
     name: name ?? "",
@@ -125,10 +125,18 @@ async function listMilestones(t: Tables) {
   const { rows } = await t.milestones.query({
     order_by: [{ col: "sort_order" }, { col: "_created_at" }],
   });
-  return rows.map((r) => ({
+  const out = rows.map((r) => ({
     id: r._row_id, kind: r.kind, title: r.title, target_ms: r.target_ms,
     completed: r.completed, completed_ms: r.completed_ms, sort_order: r.sort_order,
   }));
+  // A read writes nothing (a viewer's rung cannot), so a bucket no editor has written yet
+  // is shown as it will be.
+  for (const b of BUCKETS) {
+    if (!out.some((m) => m.kind === b.kind)) {
+      out.push({ id: `bucket:${b.kind}`, kind: b.kind, title: b.title, target_ms: null, completed: 0, completed_ms: 0, sort_order: b.sort_order });
+    }
+  }
+  return out;
 }
 
 async function listTasks(t: Tables) {
@@ -181,8 +189,8 @@ type MutResult = { status: number; body: unknown };
 function tablesFor(sfiId: string): Tables {
   return {
     settings: frameSettings(sfiId),
-    milestones: table("milestones", sfiId),
-    tasks: table("tasks", sfiId),
+    milestones: table(MILESTONES, sfiId),
+    tasks: table(TASKS, sfiId),
   };
 }
 
@@ -201,10 +209,10 @@ async function handleWrite(
   // ----- Project settings: name / overview / links --------------------------------------
   if (op === "settings") {
     if (v?.name !== undefined) {
-      await t.settings.set("name", sanitizeText(v.name, MAX_NAME));
+      await t.settings.set("roadmap_name", sanitizeText(v.name, MAX_NAME));
     }
     if (v?.overview !== undefined) {
-      await t.settings.set("overview", sanitizeText(v.overview, MAX_OVERVIEW));
+      await t.settings.set("roadmap_overview", sanitizeText(v.overview, MAX_OVERVIEW));
     }
     if (v?.links !== undefined) {
       const raw = Array.isArray(v.links) ? v.links : [];
@@ -212,9 +220,9 @@ async function handleWrite(
         label: sanitizeText(l?.label, MAX_LABEL),
         url: sanitizeText(l?.url, MAX_URL).trim(),
       })).filter((l: { label: string; url: string }) => l.label && l.url && isSafeUrl(l.url));
-      await t.settings.set("links", links);
+      await t.settings.set("roadmap_links", links);
     }
-    await t.settings.set("updated_ms", Date.now());
+    await t.settings.set("roadmap_updated_ms", Date.now());
     notify(sfiId);
     return await ok();
   }
@@ -344,7 +352,8 @@ async function handleWrite(
       if (state === 0) {
         await t.tasks.upsert(id, { state: 0, actor_id: "", actor_name: "", completed_ms: 0 });
       } else {
-        const actorName = sanitizeText(peer.user_name, 80) || "someone";
+        // The keeper has no roster name; say who they are rather than "someone".
+        const actorName = sanitizeText(peer.user_name, 80) || (peer.is_owner ? "the owner" : "someone");
         const completedMs = state === 2 ? Date.now() : 0;
         await t.tasks.upsert(id, { state, actor_id: peer.user_id ?? "", actor_name: actorName, completed_ms: completedMs });
       }
@@ -403,16 +412,13 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   }
 
   if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
-  // Local tables are always ready; the gate stays so a future graduation to
-  // synced tables needs no code change here.
   const ready = ensureTables(peer);
   if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
   const t = tablesFor(sfiId);
 
   // Full read, open to every viewer who reaches the frame. Whether a non-member can reach
-  // it at all is the platform's call (public sharing on the placement), never the frame's.
+  // it at all is the platform's call (the space's tier, the frame published), never the frame's.
   if (reqPath === "/api/state" && method === "GET") {
-    await ensurePlacement(t);
     const meta = await getMeta(t);
     return jsonReply(replyPort, 200, { meta, milestones: await listMilestones(t), tasks: await listTasks(t) });
   }

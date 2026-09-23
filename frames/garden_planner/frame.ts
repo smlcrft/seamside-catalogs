@@ -6,27 +6,23 @@
 // keyless) for the configured location and computes a per-plot natural stress level via
 // a plant-profile lookup table. Stress is rendered as a radial gradient on each plot:
 // vibrant green at the edges (low stress), soft yellow mid-band (avg), red at the center
-// (high). Members live in a SyncTable schema-compatible with Member Manager.
+// (high). Plots are the space's `garden_plots` table; a plot can be assigned to someone on
+// a `members` list of the space (Member Manager's roster: `members.table.jsonl` or a
+// subtype such as `club.members.table.jsonl`), the one this session is bound to
+// (sessionKv `bound/members`). The garden's settings are this session's own (sessionKv
+// `prefs`).
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, pushToInstance, parsePeerInfo, onUiMessage,
-  declareTables, ensureTables, table, renderWaitingForOwner,
+  declareTables, table, sessionKv,
   jsonReply, parseJsonBody, sanitizeText, toIntOrNull, clampInt,
-  loadJsonFile, saveJsonFile, wireTableChangeListener, serveHtmlShell
+  wireTableChangeListener, serveHtmlShell
 } from "@frame-core";
 
-// ----- Table units -----------------------------------------------------------------------
-// Two units with different jobs. The garden's PLOTS are this frame's own data, so they
-// start in a LocalTable and the owner may graduate them. The MEMBERS roster is somebody
-// else's data — the point of the Member Manager compatibility is to bind a roster that
-// already exists — so it is a LINK unit: adopt-only, owning nothing, and the planner
-// works perfectly well with no roster at all (plots just take typed-in names).
-// See docs/schema-contracts.md, "Link units".
-const MEMBERS_SCHEMA = [
-  { name: "name",  col_type: "text" as const, nullable: false },
-  { name: "email", col_type: "text" as const, nullable: false },
-  { name: "role",  col_type: "text" as const, nullable: false },
-];
+// ----- The space's tables -----------------------------------------------------------------
+// PLOTS are this frame's own rows. The members list is Member Manager's roster (name, role
+// read here): bound to one, plots can be assigned to real people; with none the planner
+// works as well, plots just take typed-in names.
 
 const PLOTS_SCHEMA = [
   { name: "name",                 col_type: "text"    as const, nullable: false },
@@ -40,114 +36,24 @@ const PLOTS_SCHEMA = [
   { name: "notes",                col_type: "text"    as const, nullable: true  },
 ];
 
-// The install-time default: encrypted, per-placement, zero ceremony. Only the plots unit
-// has a local table; the members link unit owns no data.
 declareTables([
   {
-    key: "garden_plots", title: "Garden Plots", local: true,
-    description: "Plots of this placement's garden, with grid position/size, assignment, plant entries and sun exposure.",
+    key: "garden_plots", title: "Garden Plots",
+    description: "Plots of this space's garden, with grid position/size, assignment, plant entries and sun exposure.",
     schema: PLOTS_SCHEMA,
   },
 ]);
 
-// Shared decls are registered LAZILY, per unit — declaring a synced table up-front pops
-// the owner's binding modal the moment the frame starts (the host refires bindings for
-// every missing non-local decl). Before this, installing the garden threw TWO pickers at
-// the owner before they had seen a single plot.
-type Unit = "plots" | "members";
-const UNIT_SHARED: Record<Unit, string> = { plots: "garden_plots_shared", members: "members_shared" };
-const sharedDeclsRegistered = new Set<Unit>();
-function ensureSharedDecls(unit: Unit): void {
-  if (sharedDeclsRegistered.has(unit)) return;
-  sharedDeclsRegistered.add(unit);
-  if (unit === "plots") {
-    declareTables([{
-      key: "garden_plots_shared", title: "Garden Plots",
-      description: "Plots of a shared garden. Create a new table, or pick the one other frames should read.",
-      schema: PLOTS_SCHEMA,
-    }]);
-  } else {
-    declareTables([{
-      key: "members_shared", title: "Members",
-      description: "A shared roster owned by a member frame. Pick the table your members live in — the schema matches Member Manager.",
-      schema: MEMBERS_SCHEMA,
-    }]);
-  }
-}
-
-// ----- Per-placement settings: one backend choice per unit ------------------------------
-// plots:   "local" | "shared"  (full graduation: convert copies rows, adopt binds)
-// members: "none"  | "shared"  (link unit: adopt-only, nothing to convert)
-type GradMode = "convert" | "adopt";
-type UnitState = { backend: string; pending_graduation?: GradMode };
-type SfiSettings = { plots: UnitState; members: UnitState };
-const allTableSettings: Record<string, Partial<SfiSettings>> = loadJsonFile(import.meta.url, "table_settings.json", {});
-function getTableSettings(sfiId: string): SfiSettings {
-  const s = allTableSettings[sfiId] ?? {};
-  return {
-    plots:   { backend: "local", ...(s.plots ?? {}) },
-    members: { backend: "none",  ...(s.members ?? {}) },
-  };
-}
-function saveTableSettings(sfiId: string, s: SfiSettings): void {
-  allTableSettings[sfiId] = s;
-  saveJsonFile(import.meta.url, "table_settings.json", allTableSettings);
+// ----- Which members list: `members` or a subtype `<name>.members`, bound per session -----
+const LIST_NAME = /^([a-z0-9][a-z0-9_-]*\.)*members$/;
+const validList = (n: unknown): n is string => typeof n === "string" && n.length <= 64 && LIST_NAME.test(n);
+async function boundList(): Promise<string | null> {
+  const v = (await sessionKv.get("bound/members"))?.value;
+  return validList(v) ? v : null;
 }
 
 type Tbl = ReturnType<typeof table>;
 type PeerInfo = ReturnType<typeof parsePeerInfo>;
-
-/** True when the unit's shared binding exists for this placement. */
-function sharedBound(unit: Unit, sfiId: string): boolean {
-  try { table(UNIT_SHARED[unit], sfiId); return true; } catch { return false; }
-}
-
-/** The plots table, resolved through its backend choice. Same handle API either way. */
-function plotsTable(sfiId: string, s: SfiSettings): Tbl {
-  return table(s.plots.backend === "shared" ? "garden_plots_shared" : "garden_plots", sfiId);
-}
-
-/** The roster when it is linked AND bound, else null. A linked roster missing on a fresh
- * host degrades to typed-in names rather than blocking the garden. */
-function membersTable(sfiId: string, s: SfiSettings): Tbl | null {
-  if (s.members.backend !== "shared" || !sharedBound("members", sfiId)) return null;
-  return table("members_shared", sfiId);
-}
-
-/** ensureTables, but QUIET and with the local table awaited. Quiet: is_owner stripped, so
- * a missing shared binding never fires the owner's binding modal from a passive path. */
-async function readyLocalTables(peer: PeerInfo): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as PeerInfo;
-  let r = ensureTables(quiet);
-  if (!r.byKey["garden_plots"]) {
-    try { await table("garden_plots", peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`garden_planner: ensure "garden_plots" failed: ${e}`); }
-    r = ensureTables(quiet);
-  }
-  return !!r.byKey["garden_plots"];
-}
-
-/** Copy local rows into the freshly bound shared table. Row ids are PRESERVED so plot
- * references stay valid and a rerun after a partial copy is an idempotent overwrite. */
-async function runGraduation(sfiId: string, settings: SfiSettings): Promise<void> {
-  const mode = settings.plots.pending_graduation!;
-  let copied = "";
-  if (mode === "convert") {
-    const shared = table("garden_plots_shared", sfiId);
-    const { rows } = await table("garden_plots", sfiId).query({});
-    for (const r of rows) {
-      await shared.upsert(r._row_id, {
-        name: r.name, pos_json: r.pos_json,
-        assigned_member_id: r.assigned_member_id, assigned_manual_name: r.assigned_manual_name,
-        plant_types_json: r.plant_types_json, shade_pct: r.shade_pct, notes: r.notes,
-      });
-    }
-    copied = ` (${rows.length} plots copied)`;
-  }
-  settings.plots.backend = "shared";
-  delete settings.plots.pending_graduation;
-  saveTableSettings(sfiId, settings);
-  log(`garden_planner: placement ${sfiId} moved plots to shared tables (${mode})${copied}`);
-}
 
 // ----- Plant profiles + stress lookup ---------------------------------------------------
 // Each tuple is [low_ideal, high_ideal, low_extreme, high_extreme]. Inside the ideal band
@@ -285,7 +191,7 @@ function serializePos(p: PlotPos): string {
   return JSON.stringify({ x: p.x, y: p.y, w: p.w, h: p.h });
 }
 
-// ----- Per-sfi preferences (local-only JSON file) ---------------------------------------
+// ----- Preferences (this session's own) ---------------------------------------------------
 type Prefs = {
   org_name: string;
   location: string;       // city name or zip; fed to Open-Meteo geocoding
@@ -306,10 +212,9 @@ const DEFAULT_PREFS: Prefs = {
   allow_public_viewing: false,
 };
 
-const allPrefs: Record<string, Prefs> = loadJsonFile(import.meta.url, "prefs.json", {} as Record<string, Prefs>);
-
-function getPrefs(sfi_id: string): Prefs {
-  const p = allPrefs[sfi_id];
+async function getPrefs(): Promise<Prefs> {
+  let p: Partial<Prefs> | null = null;
+  try { p = JSON.parse((await sessionKv.get("prefs"))?.value ?? "null"); } catch { /* defaults */ }
   if (!p) return { ...DEFAULT_PREFS };
   const cols = Number.isFinite(Number(p.grid_cols)) ? Math.max(4, Math.min(80, Math.trunc(Number(p.grid_cols)))) : DEFAULT_PREFS.grid_cols;
   const rows = Number.isFinite(Number(p.grid_rows)) ? Math.max(4, Math.min(80, Math.trunc(Number(p.grid_rows)))) : DEFAULT_PREFS.grid_rows;
@@ -325,9 +230,8 @@ function getPrefs(sfi_id: string): Prefs {
   };
 }
 
-function setPrefs(sfi_id: string, next: Prefs): void {
-  allPrefs[sfi_id] = next;
-  saveJsonFile(import.meta.url, "prefs.json", allPrefs);
+async function setPrefs(next: Prefs): Promise<void> {
+  await sessionKv.put("prefs", JSON.stringify(next));
 }
 
 // ----- Weather fetch + 30 min cache (per location) --------------------------------------
@@ -456,49 +360,16 @@ type PlotRow = Record<string, unknown> & { _row_id: string; _created_at: number 
 type WriteResult = { status: number; body: unknown };
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: PeerInfo): Promise<WriteResult> {
-  const tset = getTableSettings(sfiId);
-  if (tset.plots.backend === "shared" || tset.plots.pending_graduation) ensureSharedDecls("plots");
-  if (tset.members.backend === "shared" || tset.members.pending_graduation) ensureSharedDecls("members");
+  const prefs = await getPrefs();
 
-  if (tset.plots.pending_graduation && sharedBound("plots", sfiId)) {
-    try { await runGraduation(sfiId, tset); } catch (e) { log(`garden_planner: graduation failed (will retry): ${e}`); }
-  }
-
-  const prefs = getPrefs(sfiId);
-
-  // --- Data units (owner-only). The one surface behind the header's data drawer. -------
-  if (op === "data/graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    const unit = (v?.unit === "members" ? "members" : "plots") as Unit;
-    const mode: GradMode = v?.mode === "adopt" ? "adopt" : "convert";
-    // The roster is a link unit: there is nothing of ours to convert, only a table to
-    // point at, so a "convert" here would be meaningless rather than merely wrong.
-    if (unit === "members" && mode !== "adopt") return { status: 400, body: { error: "link units adopt only" } };
-    if (unit === "plots" && tset.plots.backend === "shared") return { status: 400, body: { error: "already shared" } };
-    if (unit === "members" && tset.members.backend === "shared") return { status: 400, body: { error: "already linked" } };
-    tset[unit].pending_graduation = mode;
-    saveTableSettings(sfiId, tset);
-    ensureSharedDecls(unit);
-    ensureTables(peer); // fires the owner's binding picker for this unit
+  // --- Which members list (editors) ------------------------------------------------------
+  if (op === "bind") {
+    if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+    const name = v?.list;
+    if (!validList(name)) return { status: 400, body: { error: "a members list is named members or <name>.members" } };
+    await sessionKv.put("bound/members", name);
     pushToInstance(sfiId, { type: "settings_changed" });
-    return { status: 200, body: { waiting: true } };
-  }
-  if (op === "data/cancel_graduate") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    const unit = (v?.unit === "members" ? "members" : "plots") as Unit;
-    delete tset[unit].pending_graduation;
-    saveTableSettings(sfiId, tset);
-    pushToInstance(sfiId, { type: "settings_changed" });
-    return { status: 200, body: { ok: true } };
-  }
-  if (op === "data/unlink") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    // Only a link unit can be unlinked — it owns no data, so clearing it back to "none"
-    // loses nothing and the garden returns to typed-in names.
-    tset.members = { backend: "none" };
-    saveTableSettings(sfiId, tset);
-    pushToInstance(sfiId, { type: "settings_changed" });
-    return { status: 200, body: { ok: true } };
+    return { status: 200, body: { bound: name } };
   }
 
   // --- Garden settings (owner-only) ----------------------------------------------------
@@ -515,7 +386,7 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
       owner_only_edit: !!v.owner_only_edit,
       allow_public_viewing: !!v.allow_public_viewing,
     };
-    setPrefs(sfiId, next);
+    await setPrefs(next);
     // Drop weather cache for any stale location so the next /api/state refreshes.
     weatherCache.clear();
     pushToInstance(sfiId, { type: "settings_changed" });
@@ -523,16 +394,9 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   }
 
   // --- Plots ---------------------------------------------------------------------------
-  // Everything below touches the garden itself and needs the placement's edit right.
+  // Everything below touches the garden itself and needs the edit right.
   if (!canEdit(peer, prefs)) return { status: 403, body: { error: "editing is restricted" } };
-
-  if (tset.plots.backend === "shared" && !sharedBound("plots", sfiId)) {
-    return { status: 503, body: { error: "table not bound" } };
-  }
-  if (tset.plots.backend === "local" && !(await readyLocalTables(peer))) {
-    return { status: 503, body: { error: "table not ready" } };
-  }
-  const plots = plotsTable(sfiId, tset);
+  const plots: Tbl = table("garden_plots", sfiId);
 
   if (op === "plot") {
     if (!v) return { status: 400, body: { error: "invalid JSON" } };
@@ -622,43 +486,11 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
   }
 
-  const tset = getTableSettings(peer.sfi_id);
-  if (tset.plots.backend === "shared" || tset.plots.pending_graduation) ensureSharedDecls("plots");
-  if (tset.members.backend === "shared" || tset.members.pending_graduation) ensureSharedDecls("members");
-
-  // Finish a pending graduation the moment the binding exists.
-  if (tset.plots.pending_graduation && sharedBound("plots", peer.sfi_id)) {
-    try { await runGraduation(peer.sfi_id, tset); } catch (e) { log(`garden_planner: graduation failed (will retry): ${e}`); }
-  }
-  if (tset.members.pending_graduation && sharedBound("members", peer.sfi_id)) {
-    tset.members.backend = "shared";
-    delete tset.members.pending_graduation;
-    saveTableSettings(peer.sfi_id, tset);
-  }
-
-  // A graduated placement whose binding is missing (fresh host, or the picker was
-  // dismissed) waits — but only the plots unit blocks, because the garden cannot draw
-  // itself without them. A missing roster just falls back to typed-in names.
-  if (tset.plots.backend === "shared" && !sharedBound("plots", peer.sfi_id)) {
-    if (reqPath === "/index.html" || reqPath === "/api/state") {
-      if (peer.is_owner) ensureTables(peer);
-      if (reqPath === "/index.html") return renderWaitingForOwner(replyPort, peer);
-    }
-    return jsonReply(replyPort, 503, { error: "tables not yet bound", missing: ["garden_plots_shared"] });
-  }
-  if (tset.plots.backend === "local" && !(await readyLocalTables(peer))) {
-    if (method === "GET" && reqPath === "/index.html") {
-      return serveHtmlShell(replyPort, new URL("./public/index.html", import.meta.url), {});
-    }
-    return jsonReply(replyPort, 503, { error: "table not ready" });
-  }
-
-  wireTableChangeListener(tset.plots.backend === "shared" ? "garden_plots_shared" : "garden_plots",
-                          peer.sfi_id, "plots_changed");
-  if (tset.members.backend === "shared") wireTableChangeListener("members_shared", peer.sfi_id, "members_changed");
-  const plots = plotsTable(peer.sfi_id, tset);
-  const members = membersTable(peer.sfi_id, tset);
-  const prefs = getPrefs(peer.sfi_id);
+  wireTableChangeListener("garden_plots", peer.sfi_id, "plots_changed");
+  const plots: Tbl = table("garden_plots", peer.sfi_id);
+  const list = await boundList();
+  const roster = async () => list ? (await table(list, peer.sfi_id).query({ limit: 1000 })).rows as Record<string, unknown>[] : [];
+  const prefs = await getPrefs();
   const editable = canEdit(peer, prefs);
   const now = Date.now();
 
@@ -672,16 +504,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
         is_anon: peer.is_anon,
       },
       can_edit: editable,
-      // What the header's data drawer needs: one entry per unit, owner-only.
-      storage: {
-        can_manage: peer.is_owner,
-        units: [
-          { unit: "plots", label: "Garden plots", backend: tset.plots.backend,
-            pending: !!tset.plots.pending_graduation, kind: "owned" },
-          { unit: "members", label: "Member roster", backend: tset.members.backend,
-            pending: !!tset.members.pending_graduation, kind: "link" },
-        ],
-      },
+      bound: list,
+      can_bind: peer.is_sfi_editor,
       plant_types: PLANT_TYPES,
       stages: STAGE_KEYS.map((k) => ({ key: k, label: STAGE_LABEL[k] })),
       weather: weather
@@ -692,10 +516,9 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
   }
 
   if (reqPath === "/api/members" && method === "GET") {
-    // No roster linked (or its table is missing on this host) is a normal state, not an
-    // error: plots simply take typed-in names.
-    if (peer.is_anon || !members) return jsonReply(replyPort, 200, { rows: [] });
-    const { rows } = await members.query({ limit: 1000 });
+    // No roster in the space is a normal state, not an error: plots take typed-in names.
+    if (peer.is_anon) return jsonReply(replyPort, 200, { rows: [] });
+    const rows = await roster();
     rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
     const slim = rows.map((r: Record<string, unknown>) => ({
       _row_id: r._row_id, name: r.name, role: r.role,
@@ -710,7 +533,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     const weather = prefs.location ? await fetchWeatherSummary(prefs.location) : null;
     const { rows } = await plots.query({ limit: 2000 }) as { rows: PlotRow[] };
     rows.sort((a, b) => Number(a._created_at) - Number(b._created_at));
-    const memberRows = (peer.is_anon || !members) ? [] : (await members.query({ limit: 1000 })).rows as Record<string, unknown>[];
+    const memberRows = peer.is_anon ? [] : await roster();
     const memberById = new Map(memberRows.map((m) => [String(m._row_id), m]));
 
     const enriched = rows.map((r) => {

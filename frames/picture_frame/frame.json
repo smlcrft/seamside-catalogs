@@ -1,7 +1,8 @@
 {
     "name": "Picture Frame",
-    "description": "A digital picture frame for a space. Space editors drop photos in — by clicking Add or dragging them from the desktop — and everyone sees them as a grid of thumbnails; tap one and it fills the frame, tap again to go back. Turn on slideshow mode and the frame cycles through the photos at an interval you choose. There is one shared display: whatever an editor puts up is what every viewer sees, and the frame remembers exactly what it was showing, so a restarted frame or a rebooted machine comes back to the same photo. Viewer-role members and anonymous link visitors can browse the photos on their own screen without changing what the frame displays for anyone else. Photos are downscaled on the way in and stored with their bytes on the host beside a per-placement encrypted LocalTable; nothing leaves the device.",
+    "description": "A digital picture frame for a space. Editors add photos by clicking Add or dragging them in, and everyone sees them as a grid of thumbnails; tap one and it fills the frame, tap again to go back. Turn on slideshow mode and every screen cycles through the photos together on one shared clock, at an interval you choose. Each picture frame in a space keeps its own display: whatever an editor puts up is what every viewer of that frame sees, and it remembers what it was showing, so a restart comes back to the same photo. Viewers and anonymous link visitors can browse the photos on their own screen without moving the display. Photos are downscaled on the way in (8 MB each at most). The photo list is the space's table picture_frame_photos.table.jsonl, and each photo and its thumbnail are files of the space in a Picture Frame folder, one subfolder per photo; the display is the frame's own session state.",
     "frame_type": "Tandem",
+    "data": "write",
     "tags": ["household", "photos", "media"],
     "permissions": {
         "net": [],
@@ -9,11 +10,13 @@
         "web_scripts": []
     },
     "created_at": "2026-07-29T00:00:00Z",
-    "modified_at": "2026-08-04T21:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T14:11:58Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "default_width_px": 640,
     "default_height_px": 480,
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:image-square",
+    "color": "c7"
 }

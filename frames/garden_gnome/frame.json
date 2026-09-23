@@ -1,6 +1,6 @@
 {
     "name": "Garden Gnome",
-    "description": "An at-a-glance helper for home gardeners. Set a location, pick your soil, tick the plants you grow, and Garden Gnome fetches local weather (Open-Meteo, keyless) every 15 minutes — past 5 days plus the next 24 hours — and shows three color-coded dots on a +/- spectrum next to each plant for water, temperature, and sunlight so you know when a plant is being naturally pampered or stressed. Space editors set the garden up; everyone else, including anyone you share the frame with publicly, gets the same read-only board with the location withheld.",
+    "description": "An at-a-glance helper for home gardeners. Set a location, pick your soil, tick the plants you grow, and Garden Gnome's server half fetches local weather (Open-Meteo, keyless) at most every 15 minutes \u2014 past 5 days plus the next 24 hours \u2014 and shows three color-coded dots on a +/- spectrum next to each plant for water, temperature and sunlight, with badges for freeze, heat, drought and waterlogging. Editors of the space set the garden up; members read the board; anyone else the frame is published to gets the same read-only board with the town withheld. Each Garden Gnome keeps its garden as its own session state in the space, so two in one space can watch two gardens.",
     "frame_type": "Tandem",
     "tags": ["household", "garden", "weather"],
     "permissions": {
@@ -12,9 +12,11 @@
     "default_width_px": 560,
     "default_height_px": 640,
     "created_at": "2026-05-06T00:00:00Z",
-    "modified_at": "2026-08-04T21:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T14:19:46Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:plant",
+    "color": "c5"
 }

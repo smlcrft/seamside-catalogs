@@ -1,15 +1,17 @@
 {
     "name": "Help Desk",
-    "description": "Anonymous visitors submit a message with email (plus admin-configured fields); known users in the space see a realtime inbox of incoming correspondence.",
+    "description": "A contact form with a shared inbox. Visitors who are not on the space's roster fill in their email and the fields the editors configure; the space's members see new messages arrive live, and editors set each one's status, keep internal notes and edit the form. Every member, viewers included, can read the inbox; nobody else can. Share the frame's public link with visitors: it reaches the form and nothing else. Submissions, notes and fields are the space's own tables (help_desk_submissions, help_desk_notes, help_desk_fields).",
     "frame_type": "Tandem",
     "tags": ["smallbiz", "community", "support"],
     "permissions": {
         "net": []
     },
     "created_at": "2026-04-22 00:00:00.000000 UTC",
-    "modified_at": "2026-08-04T21:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T04:48:51Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:lifebuoy",
+    "color": "c2"
 }

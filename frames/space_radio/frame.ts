@@ -2,14 +2,14 @@
 // Space Radio — synced, shared web radio player for SFI members.
 //
 // Auth model: reads are open to every viewer who reaches the frame — whether a
-// non-member can reach it at all is the platform's call (public sharing on the
-// placement), never the frame's. A visitor gets a listen-along view: they see and
+// non-member can reach it at all is the platform's call (the space's tier, publishing
+// the frame), never the frame's. A visitor gets a listen-along view: they see and
 // hear what the space is playing but cannot touch the dial. Writes are editor-only,
 // because the experience only makes sense for the group of people sitting in the space.
 //
-// Shared state per placement: { station_id, playing, updated_by_name, updated_at }, stored
-// as JSON keyed by sfi_id. Any member can flip it; every change is broadcast to all viewers
-// of the placement via pushToInstance() so audio elements stay in lockstep.
+// Shared state per session: { station_id, playing, updated_by_name, updated_at }, the
+// session's own `playstate` key. Any editor can flip it; every change is pushed to everyone
+// on the session via pushToInstance() so audio elements stay in lockstep.
 //
 // Per-user state (volume / mute / last-volume) is kept entirely in the browser's
 // localStorage — it never travels through the backend and is not synced across viewers.
@@ -17,12 +17,12 @@
 import {
   log, parsePeerInfo, serveFileAtPath, serveHtmlShell, pushToInstance, onUiMessage,
   jsonReply, parseJsonBody, sanitizeText,
-  loadJsonFile, saveJsonFile,
+  sessionKv,
 } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
 // STATION CATALOG — embedded directly so a frame update can extend the list without any
-// per-placement state migration. `genre` and `country` are display hints only; the `id`
+// per-space state migration. `genre` and `country` are display hints only; the `id`
 // is the wire identifier so renaming a station's display name is non-breaking.
 // ----------------------------------------------------------------------------------------
 type Station = {
@@ -148,8 +148,8 @@ const STATIONS: Station[] = [
 const STATION_INDEX = new Set(STATIONS.map((s) => s.id));
 
 // ----------------------------------------------------------------------------------------
-// PER-PLACEMENT STATE — single JSON file keyed by sfi_id, holding the shared playstate
-// (station + playing + who last changed it), broadcast to all viewers of the placement.
+// PER-SESSION STATE — the session's `playstate` key (sessionKv): station + playing + who
+// last changed it, pushed to everyone on the session. Two radios in one space play apart.
 // Per-device volume/mute is NOT stored here — each viewer keeps it in their own browser
 // localStorage via framelib (frame.localStorageSetItem/GetItem; see public/index.js), so
 // it never travels through the backend and is never synced across viewers.
@@ -167,13 +167,9 @@ const DEFAULT_PLAYSTATE: Playstate = {
   updated_by_name: "",
 };
 
-// Records may pre-date this version and still carry a legacy `local_by_device` map;
-// getPlaystate reads only the playstate fields and setPlaystate rewrites the clean
-// record, so any stale local data is dropped from disk on the next playstate change.
-const allRecords: Record<string, Partial<Playstate>> = loadJsonFile(import.meta.url, "playstate.json", {});
-
-function getPlaystate(sfiId: string): Playstate {
-  const r = allRecords[sfiId] ?? {};
+async function getPlaystate(): Promise<Playstate> {
+  let r: Partial<Playstate> = {};
+  try { const op = await sessionKv.get("playstate"); if (op?.value) r = JSON.parse(op.value); } catch { /* unreadable → default */ }
   return {
     station_id: r.station_id ?? DEFAULT_PLAYSTATE.station_id,
     playing: r.playing ?? DEFAULT_PLAYSTATE.playing,
@@ -181,9 +177,8 @@ function getPlaystate(sfiId: string): Playstate {
     updated_by_name: r.updated_by_name ?? DEFAULT_PLAYSTATE.updated_by_name,
   };
 }
-function setPlaystate(sfiId: string, next: Playstate): void {
-  allRecords[sfiId] = next;
-  saveJsonFile(import.meta.url, "playstate.json", allRecords);
+async function setPlaystate(next: Playstate): Promise<void> {
+  await sessionKv.put("playstate", JSON.stringify(next));
 }
 
 // ----------------------------------------------------------------------------------------
@@ -198,10 +193,10 @@ function setPlaystate(sfiId: string, next: Playstate): void {
 type MutPeer = ReturnType<typeof parsePeerInfo>;
 type MutResult = { status: number; body: unknown };
 
-function mutSet(sfiId: string, v: { station_id?: unknown; playing?: unknown } | null, peer: MutPeer): MutResult {
+async function mutSet(sfiId: string, v: { station_id?: unknown; playing?: unknown } | null, peer: MutPeer): Promise<MutResult> {
   if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
   if (!sfiId) return { status: 400, body: { error: "sfi_id missing" } };
-  const cur = getPlaystate(sfiId);
+  const cur = await getPlaystate();
 
   let stationId: string | null = cur.station_id;
   if (Object.prototype.hasOwnProperty.call(v ?? {}, "station_id")) {
@@ -228,18 +223,19 @@ function mutSet(sfiId: string, v: { station_id?: unknown; playing?: unknown } | 
     updated_at: Date.now(),
     updated_by_name: userName,
   };
-  setPlaystate(sfiId, next);
-  pushToInstance(sfiId, { type: "radio_state", sfi_id: sfiId, playstate: next });
+  await setPlaystate(next);
+  // A push reaches every session of the frame in the space: it says "re-read", never what.
+  pushToInstance(sfiId, { type: "radio_state" });
   return { status: 200, body: { ok: true, playstate: next } };
 }
 
 // Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame). `peer` is the
 // sender's platform-resolved identity, same shape as parsePeerInfo; the role gate lives
 // inside mutSet. Denials are logged, not answered.
-onUiMessage((sfiId, data, peer) => {
+onUiMessage(async (sfiId, data, peer) => {
   if (!sfiId || typeof data !== "object" || data === null) return;
   const d = data as Record<string, unknown>;
-  const r = d.op === "set" ? mutSet(sfiId, d, peer) : null;
+  const r = d.op === "set" ? await mutSet(sfiId, d, peer) : null;
   if (r && r.status !== 200) log(`space_radio: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
 });
 
@@ -265,7 +261,7 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
     if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
     return jsonReply(replyPort, 200, {
       stations: STATIONS,
-      playstate: getPlaystate(sfiId),
+      playstate: await getPlaystate(),
       // Editor-only dial. Never gate writes on is_sfi_member — a Viewer-role member
       // would slip through and be able to change the station for everyone.
       can_edit: peer.is_sfi_editor,
@@ -276,7 +272,7 @@ self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body
   // HTTP arm kept for API compatibility (older viewers, web viewer fallback); the frame's
   // own UI writes over the bus (see the dispatcher above). Same function, same gate.
   if (reqPath === "/api/set" && method === "POST") {
-    const r = mutSet(sfiId, parseJsonBody<{ station_id?: unknown; playing?: unknown }>(body), peer);
+    const r = await mutSet(sfiId, parseJsonBody<{ station_id?: unknown; playing?: unknown }>(body), peer);
     return jsonReply(replyPort, r.status, r.body);
   }
 

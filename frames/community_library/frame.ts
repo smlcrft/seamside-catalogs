@@ -1,28 +1,19 @@
 // ----------------------------------------------------------------------------------------
 // Community Library — track community-owned items (books, tools, gear) and who has them
-// checked out. Two SyncTables: a `members` roster (schema-compatible with Member Manager
-// so they can share the same table) and a `library_assets` table for items + checkout info.
-// Per-placement preferences (org name, allowed borrow durations, item types, edit policy)
-// are stored in a local JSON file keyed by sfi_id.
+// checked out. Two tables of the space: `library_assets` for items + checkout info, and a
+// `members` list — `members.table.jsonl` or a subtype such as `club.members.table.jsonl` —
+// the roster Member Manager keeps, which this frame only reads. Each session is bound to one
+// list (sessionKv `bound/members`), chosen by an editor. Preferences (org name, borrow
+// durations, item types, edit policy) govern the space's one library_assets table, so they
+// are one frameSettings row of the space.
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, pushToInstance, parsePeerInfo, onUiMessage,
-  declareTables, ensureTables, table, renderWaitingForOwner,
-  jsonReply, parseJsonBody, sanitizeText, toIntOrNull,
-  loadJsonFile, saveJsonFile, wireTableChangeListener,
+  declareTables, table, frameSettings, sessionKv,
+  jsonReply, parseJsonBody, sanitizeText, toIntOrNull, wireTableChangeListener,
 } from "@frame-core";
 
 declareTables([
-  {
-    key: "members",
-    title: "Members",
-    description: "People in the organization. Compatible with the Member Manager frame so the same roster can be reused.",
-    schema: [
-      { name: "name",  col_type: "text", nullable: false },
-      { name: "email", col_type: "text", nullable: false },
-      { name: "role",  col_type: "text", nullable: false },
-    ],
-  },
   {
     key: "library_assets",
     title: "Library Assets",
@@ -40,7 +31,16 @@ declareTables([
   },
 ]);
 
-// ----- Per-sfi preferences (local-only JSON file) ---------------------------------------
+// ----- Which members list: `members` or a subtype `<name>.members`, bound per session -----
+// Read here for its name and role columns; Member Manager writes it.
+const LIST_NAME = /^([a-z0-9][a-z0-9_-]*\.)*members$/;
+const validList = (n: unknown): n is string => typeof n === "string" && n.length <= 64 && LIST_NAME.test(n);
+async function boundList(): Promise<string | null> {
+  const v = (await sessionKv.get("bound/members"))?.value;
+  return validList(v) ? v : null;
+}
+
+// ----- Preferences (a frameSettings row of the space) ------------------------------------
 type BorrowOption = { label: string; days: number };
 type Prefs = {
   org_name: string;
@@ -63,7 +63,7 @@ const DEFAULT_PREFS: Prefs = {
   owner_only_edit: false,
 };
 
-const allPrefs: Record<string, Prefs> = loadJsonFile(import.meta.url, "prefs.json", {} as Record<string, Prefs>);
+const PREFS_KEY = "community_library_prefs";
 
 function clonePrefs(p: Prefs): Prefs {
   return {
@@ -75,8 +75,8 @@ function clonePrefs(p: Prefs): Prefs {
   };
 }
 
-function getPrefs(sfi_id: string): Prefs {
-  const p = allPrefs[sfi_id];
+async function getPrefs(sfi_id: string): Promise<Prefs> {
+  const p = await frameSettings(sfi_id).get<Prefs>(PREFS_KEY);
   if (!p) return clonePrefs(DEFAULT_PREFS);
   const itemTypes = Array.isArray(p.item_types) && p.item_types.length > 0
     ? p.item_types.map(String) : [...DEFAULT_PREFS.item_types];
@@ -96,9 +96,8 @@ function getPrefs(sfi_id: string): Prefs {
   };
 }
 
-function setPrefs(sfi_id: string, next: Prefs): void {
-  allPrefs[sfi_id] = next;
-  saveJsonFile(import.meta.url, "prefs.json", allPrefs);
+async function setPrefs(sfi_id: string, next: Prefs): Promise<void> {
+  await frameSettings(sfi_id).set(PREFS_KEY, next);
 }
 
 // ----- Helpers --------------------------------------------------------------------------
@@ -131,8 +130,8 @@ function computeStatus(row: AssetRow, now: number): AssetStatus {
 // Every mutation, whether it arrives as an HTTP POST or over the tether
 // (frame.busSend → onUiMessage), runs through here. `op` is the API path minus the
 // leading "api/" ("asset", "asset/checkout", "settings", …). Role gates live here so the
-// two entry points never drift. Table writes broadcast via the wired table-change
-// listeners (assets_changed / members_changed); settings pushes settings_changed itself.
+// two entry points never drift. Item writes broadcast via the wired assets_changed listener;
+// settings and a new binding push settings_changed.
 type WriteResult = { status: number; body: Record<string, unknown> | null };
 
 async function handleWrite(
@@ -141,7 +140,16 @@ async function handleWrite(
   v: Record<string, unknown> | null,
   peer: ReturnType<typeof parsePeerInfo>,
 ): Promise<WriteResult> {
-  const prefs = getPrefs(sfi_id);
+  const prefs = await getPrefs(sfi_id);
+
+  if (op === "bind") {
+    if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+    const name = v?.list;
+    if (!validList(name)) return { status: 400, body: { error: "a members list is named members or <name>.members" } };
+    await sessionKv.put("bound/members", name);
+    pushToInstance(sfi_id, { type: "settings_changed" });
+    return { status: 200, body: { bound: name } };
+  }
 
   if (op === "settings") {
     if (!peer.is_owner) return { status: 403, body: { error: "only the frame owner can change settings" } };
@@ -162,13 +170,16 @@ async function handleWrite(
       org_name, item_types, borrow_options, default_borrow_days,
       owner_only_edit: !!v.owner_only_edit,
     };
-    setPrefs(sfi_id, next);
+    await setPrefs(sfi_id, next);
     pushToInstance(sfi_id, { type: "settings_changed" });
     return { status: 200, body: { prefs: next } };
   }
 
   if (!canEdit(peer, prefs)) return { status: 403, body: { error: "editing is restricted" } };
   const assets = table("library_assets", sfi_id);
+  // An id that names no item is refused, never created (upsert would phantom-create it).
+  const named = v?.row_id ? String(v.row_id) : "";
+  if (named && !(await assets.get(named))) return { status: 404, body: { error: "item not found" } };
 
   if (op === "asset") {
     if (!v) return { status: 400, body: { error: "invalid JSON" } };
@@ -245,15 +256,12 @@ async function handleWrite(
 // `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; role
 // gates live inside handleWrite. Denials are logged, not answered — a legitimate client
 // never sends a write it isn't allowed to make. Resulting state reaches every viewer
-// (sender included) via the table-change pushes / settings_changed.
+// (sender included) via the assets_changed push / settings_changed.
 onUiMessage(async (sfiId, data, peer) => {
   if (!sfiId || typeof data !== "object" || data === null) return;
   const d = data as Record<string, unknown>;
   if (typeof d.op !== "string" || !d.op) return;
-  const tables = ensureTables(peer);
-  if (!tables.ready) return log(`community library: bus op ${d.op} dropped (tables not bound)`);
   wireTableChangeListener("library_assets", sfiId, "assets_changed");
-  wireTableChangeListener("members",        sfiId, "members_changed");
   const r = await handleWrite(sfiId, d.op, d, peer);
   if (r.status >= 400) log(`community library: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
 });
@@ -262,22 +270,11 @@ onUiMessage(async (sfiId, data, peer) => {
 self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
 
-  const tables = ensureTables(peer);
-  if (!tables.ready) {
-    if (reqPath === "/index.html") {
-      return renderWaitingForOwner(replyPort, peer);
-    }
-    if (method === "GET") { // static assets are fine to serve even if tables are not ready.
-      return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-    }
-    return jsonReply(replyPort, 503, { error: "tables not yet bound", missing: tables.missingKeys });
-  }
-
   wireTableChangeListener("library_assets", peer.sfi_id, "assets_changed");
-  wireTableChangeListener("members",        peer.sfi_id, "members_changed");
   const assets = table("library_assets", peer.sfi_id);
-  const members = table("members", peer.sfi_id);
-  const prefs = getPrefs(peer.sfi_id);
+  const list = await boundList();
+  const roster = async () => list ? (await table(list, peer.sfi_id).query({ limit: 1000 })).rows as Record<string, unknown>[] : [];
+  const prefs = await getPrefs(peer.sfi_id);
   const editable = canEdit(peer, prefs);
   const now = Date.now();
 
@@ -290,13 +287,15 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
         is_anon: peer.is_anon,
       },
       can_edit: editable,
+      bound: list,
+      can_bind: peer.is_sfi_editor,
       now,
     });
   }
 
   if (reqPath === "/api/members" && method === "GET") {
     if (peer.is_anon) return jsonReply(replyPort, 200, { rows: [] });
-    const { rows } = await members.query({ limit: 1000 });
+    const rows = await roster();
     rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
     const slim = rows.map((r: Record<string, unknown>) => ({
       _row_id: r._row_id, name: r.name, role: r.role,
@@ -304,16 +303,14 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     return jsonReply(replyPort, 200, { rows: slim });
   }
 
-  // Open to every viewer who reaches the frame. Anonymous viewers get a reduced projection
-  // below (no member identities, no notes) — that is the public view, not an access gate.
+  // Open to every viewer who reaches the frame. Anyone not on the space's roster (v1's
+  // `is_anon`) gets a reduced projection below (no member identities, no notes).
   if (reqPath === "/api/assets" && method === "GET") {
     const { rows } = await assets.query({ limit: 2000 }) as { rows: AssetRow[] };
     rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
     if (peer.is_anon) {
       // Anonymous: name, item_type, simple status. No member identities, no notes.
-      const memberRows = (await members.query({ limit: 1000 })).rows as Record<string, unknown>[];
-      const _memberById = new Map(memberRows.map((m) => [String(m._row_id), m]));
       const publicRows = rows.map((r) => {
         const status = computeStatus(r, now);
         const checkedOutAt = toIntOrNull(r.checked_out_at);
@@ -331,7 +328,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     }
 
     // Authenticated: full data + computed status + resolved checkout names.
-    const memberRows = (await members.query({ limit: 1000 })).rows as Record<string, unknown>[];
+    const memberRows = await roster();
     const memberById = new Map(memberRows.map((m) => [String(m._row_id), m]));
     const enriched = rows.map((r) => {
       const status = computeStatus(r, now);

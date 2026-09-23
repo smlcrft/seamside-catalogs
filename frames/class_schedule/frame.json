@@ -1,6 +1,6 @@
 {
     "name": "Class Schedule",
-    "description": "Your week, laid out. Put each class on the days it meets with a time and a room, and the frame draws the timetable — only the hours you actually have classes in, only the days you actually use, so a Monday-to-Friday term never wastes half the grid on an empty weekend. A line tracks the current time across today's column, and the frame says what is next and when, so the common question is answered before you read anything. Share the placement with a roommate or a study group and everybody sees the same week. Space editors set the timetable; everyone else, including anyone it is shared with publicly, can read it. Classes live in an encrypted LocalTable scoped to the placement.",
+    "description": "Your week, laid out. Put each class on the days it meets with a time and a room, and the frame draws the timetable \u2014 only the hours you actually have classes in, only the days you actually use, so a Monday-to-Friday term never wastes half the grid on an empty weekend. A line tracks the current time across today's column, and the frame says what is next and when, so the common question is answered before you read anything. Share the space with a roommate or a study group and everybody sees the same week. Editors draw and edit the timetable; viewers and anyone the frame is published to can read it. Classes are the space's own table, class_schedule.table.jsonl, one row per meeting, synced with the space.",
     "frame_type": "Tandem",
     "tags": ["study", "school", "timetable", "schedule"],
     "permissions": {
@@ -9,9 +9,11 @@
     "default_width_px": 720,
     "default_height_px": 560,
     "created_at": "2026-08-10T00:00:00Z",
-    "modified_at": "2026-08-10T00:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T04:24:16Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:calendar-blank",
+    "color": "c1"
 }

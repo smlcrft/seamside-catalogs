@@ -1,18 +1,10 @@
 import { frame } from "./lib/js/framelib.js";
 
 (function () {
-  const peer = window.__peer || {};
-  const isAnon = !!peer.is_anon || !peer.user_id;
-
   const $ = (id) => document.getElementById(id);
 
-  // ----- Anonymous gate ------------------------------------------------------------------
-  if (isAnon) {
-    document.body.innerHTML =
-      '<div class="note"><i class="ph-light ph-lock-simple icon-sm"></i> ' +
-      'Garden Gnome is a private frame. Sign in to view this garden.</div>';
-    return;
-  }
+  // Everyone who reaches the frame gets the board; the worker withholds the town from
+  // non-members and refuses their saves.
 
   // ----- State ---------------------------------------------------------------------------
   let state = {

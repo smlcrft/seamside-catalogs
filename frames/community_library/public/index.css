@@ -318,3 +318,29 @@ body {
   .asset-status { grid-area: status; }
   .asset-actions { grid-area: actions; flex-wrap: wrap; }
 }
+
+/* Which members list this session uses (members_list.js). */
+.list-line {
+  display: flex;
+  align-items: center;
+  gap: var(--os-sp-xs);
+  margin: 0 0 var(--os-sp-md);
+  font-size: var(--os-fs-sm);
+  color: var(--os-text-muted);
+}
+
+.list-line strong {
+  color: var(--os-text);
+  font-weight: var(--os-weight-semibold);
+}
+
+.list-line__change {
+  background: none;
+  border: none;
+  padding: 0 var(--os-sp-xs);
+  font: inherit;
+  color: var(--ch, var(--os-c1));
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

@@ -1,19 +1,18 @@
 // ----------------------------------------------------------------------------------------
-// Help Desk — anonymous visitors submit a message (+ email + admin-configured fields);
-// known users of the space see a realtime inbox with status + correspondence notes.
+// Help Desk — visitors submit a message (+ email + admin-configured fields); the space's
+// members see a realtime inbox with status + correspondence notes.
 //
 // Auth model:
-//   - Anonymous request: peer.is_anon OR user_id is empty. Sees the submit form.
-//   - Known user (admin): !peer.is_anon AND user_id is set. Sees the placement's inbox.
-//     Admin reads are open to any known user; admin writes additionally require
-//     peer.is_sfi_editor.
-//     Storage is LocalTables (encrypted at rest, host-local, not peer-synced), scoped
-//     per placement — the same space can host multiple independent help desk placements
-//     and each has its own inbox/fields.
+//   - Not on the space's roster (v1's `is_anon`, signed in or not): sees the submit form.
+//   - A member of the space: sees the inbox. Every member reads it — the submissions are
+//     a table file of the space, which every member can read anyway — and only editors
+//     (collaborator and up) change status, add notes, or edit the form.
+//   - Submissions, fields and notes are the space's tables (help_desk_submissions,
+//     help_desk_fields, help_desk_notes). A stranger reaches none of them: the space's
+//     tables are its members', and pushes carry ids, never a submitter's details.
 //
-// Realtime: submissions, status changes, notes, and field-config edits are pushed to every
-// live viewer of this placement via pushToInstance(sfi_id, …); framecore handles viewer
-// tracking automatically based on authenticated requests.
+// Realtime: submissions, status changes, notes, and field-config edits are announced to
+// every live viewer via pushToInstance(sfi_id, …); the inbox re-reads what it is told of.
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, serveHtmlShell, pushToInstance, parsePeerInfo, onUiMessage,
@@ -21,14 +20,13 @@ import {
 } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
-// LOCALTABLES — encrypted, per-placement (no sfi_id columns needed).
+// THE SPACE'S TABLES — named for this frame, so no other frame's rows land in them.
 // ----------------------------------------------------------------------------------------
 declareTables([
   {
-    key: "submissions",
+    key: "help_desk_submissions",
     title: "Help Desk Submissions",
-    description: "Visitor submissions for this help desk placement.",
-    local: true,
+    description: "Visitor submissions for this help desk.",
     schema: [
       { name: "submitted_at", col_type: "integer", nullable: false, default_val: "0" },
       { name: "email",        col_type: "text",    nullable: false, default_val: "" },
@@ -37,10 +35,9 @@ declareTables([
     ],
   },
   {
-    key: "field_configs",
+    key: "help_desk_fields",
     title: "Help Desk Fields",
-    description: "Admin-configured form fields for this placement.",
-    local: true,
+    description: "Admin-configured form fields.",
     schema: [
       { name: "label",        col_type: "text",    nullable: false, default_val: "" },
       { name: "type",         col_type: "text",    nullable: false, default_val: "text" },
@@ -50,10 +47,9 @@ declareTables([
     ],
   },
   {
-    key: "notes",
+    key: "help_desk_notes",
     title: "Help Desk Notes",
     description: "Admin correspondence notes per submission.",
-    local: true,
     schema: [
       { name: "submission_id",  col_type: "text",    nullable: false, default_val: "" },
       { name: "author_user_id", col_type: "text",    nullable: false, default_val: "" },
@@ -63,8 +59,8 @@ declareTables([
     ],
   },
 ]);
-// Per-placement settings (title, one-time seed marker) live in the built-in
-// frameSettings(sfi) key/value store — no bespoke "meta" table, no singleton race.
+// Settings (title, one-time seed marker) are frameSettings rows of the space, a store
+// every frame in the space shares — so the keys carry this frame's name.
 
 // ----------------------------------------------------------------------------------------
 // HELPERS
@@ -120,25 +116,32 @@ async function listNotes(notes: Tbl, submissionId: string) {
 }
 
 type Settings = ReturnType<typeof frameSettings>;
+type WritePeer = ReturnType<typeof parsePeerInfo>;
 
 // The default seed field uses a fixed id so a concurrent first-load can't create
 // duplicate "Message" fields. User-added fields keep random ids.
 const DEFAULT_FIELD_ROW = "default_message";
 
-// Seed a default "Message" field the first time we see a placement. The "seeded"
-// setting is the one-time marker — after the initial seed the admin can delete or
-// replace the field and subsequent requests won't re-seed.
-async function ensureDefaultFields(settings: Settings, fields: Tbl): Promise<void> {
-  if (await settings.get("seeded")) return;
-  await settings.set("seeded", true);
+// v1 writes a worker's rows as the person it answers: editors and visitors who are not
+// on the roster write; a listed viewer's role does not.
+function mayWrite(peer: WritePeer): boolean {
+  return peer.is_sfi_editor || !peer.is_sfi_member;
+}
+
+// Seed a default "Message" field the first time the desk is opened by someone who may
+// write. The "seeded" setting is the one-time marker — after the initial seed the admin
+// can delete or replace the field and subsequent requests won't re-seed.
+async function ensureDefaultFields(settings: Settings, fields: Tbl, peer: WritePeer): Promise<void> {
+  if (!mayWrite(peer) || await settings.get("help_desk_seeded")) return;
+  await settings.set("help_desk_seeded", true);
   await fields.upsert(DEFAULT_FIELD_ROW, { label: "Message", type: "textarea", options_json: "[]", required: 0, sort_order: 0 });
 }
 
 const MAX_DESK_TITLE = 120;
 
-/// This placement's display name ("" = unset; UIs fall back to their defaults).
+/// The desk's display name ("" = unset; UIs fall back to their defaults).
 async function getTitle(settings: Settings): Promise<string> {
-  return (await settings.get<string>("title", "")) || "";
+  return (await settings.get<string>("help_desk_title", "")) || "";
 }
 
 // Route ids are opaque row-id strings (hex); a path segment must not contain '/'.
@@ -155,17 +158,14 @@ const RE_FIELD   = new RegExp(`^admin/fields/${ID_SEG}$`);
 // the bus dispatcher below); the role gates live here so the two paths can never drift.
 // `op` is the API path with the leading "/api/" stripped.
 // ----------------------------------------------------------------------------------------
-type WritePeer = ReturnType<typeof parsePeerInfo>;
 type WriteResult = { status: number; body: unknown };
 
 async function handleWrite(sfiId: string, op: string, data: any, peer: WritePeer): Promise<WriteResult> {
-  // Local tables are always ready; the gate stays so a future graduation to
-  // synced tables needs no code change here.
   const tables = ensureTables(peer);
   if (!tables.ready) return { status: 503, body: { error: "table not bound" } };
-  const submissions = table("submissions", sfiId);
-  const fieldsTbl   = table("field_configs", sfiId);
-  const notesTbl    = table("notes", sfiId);
+  const submissions = table("help_desk_submissions", sfiId);
+  const fieldsTbl   = table("help_desk_fields", sfiId);
+  const notesTbl    = table("help_desk_notes", sfiId);
   const settings    = frameSettings(sfiId);
 
   // ----- public: anonymous submission.
@@ -203,25 +203,25 @@ async function handleWrite(sfiId: string, op: string, data: any, peer: WritePeer
     const { row_id } = await submissions.upsert(null, {
       submitted_at: now, email, fields_json: JSON.stringify(fields), status: "new",
     });
-    const row = await submissions.get(row_id);
-    const sub = hydrateSubmission(row);
-    pushToInstance(sfiId, { type: "hd_new_submission", sfi_id: sfiId, submission: sub });
-    log(`Help Desk: submission ${row_id.slice(0, 8)}… in placement ${sfiId.slice(0, 8)}… from ${email}`);
+    // Every viewer of the frame hears a push, the public form included: say only that
+    // something arrived, and let the inbox read it through its gated route.
+    pushToInstance(sfiId, { type: "hd_new_submission", sfi_id: sfiId, id: row_id });
+    log(`Help Desk: submission ${row_id.slice(0, 8)}…`);
     return { status: 200, body: { ok: true, id: row_id } };
   }
 
-  // ----- admin writes: require an SFI editor (writes gate on is_sfi_editor; the
-  // admin READ routes stay open to any known user of the space).
+  // ----- admin writes: require an editor (the admin READ routes stay open to every
+  // member of the space).
   if (op.startsWith("admin/")) {
     if (!peer.is_sfi_editor) return { status: 403, body: { error: "forbidden" } };
-    await ensureDefaultFields(settings, fieldsTbl);
+    await ensureDefaultFields(settings, fieldsTbl, peer);
 
-    // Set this placement's display name ("" clears it back to the defaults).
+    // Set the desk's display name ("" clears it back to the defaults).
     // Shown as the admin h1 and atop the public view.
     if (op === "admin/title") {
       if (!data || typeof data.title !== "string") return { status: 400, body: { error: "title required (string)" } };
       const title = data.title.trim().slice(0, MAX_DESK_TITLE);
-      await settings.set("title", title);
+      await settings.set("help_desk_title", title);
       pushToInstance(sfiId, { type: "hd_title_changed", sfi_id: sfiId, title });
       return { status: 200, body: { ok: true, title } };
     }
@@ -248,9 +248,8 @@ async function handleWrite(sfiId: string, op: string, data: any, peer: WritePeer
         submission_id: id, author_user_id: peer.user_id, author_name: authorName,
         body: data.body, created_at: Date.now(),
       });
-      const notes = await listNotes(notesTbl, id);
-      pushToInstance(sfiId, { type: "hd_note_added", sfi_id: sfiId, submission_id: id, notes });
-      return { status: 200, body: { notes } };
+      pushToInstance(sfiId, { type: "hd_note_added", sfi_id: sfiId, submission_id: id });
+      return { status: 200, body: { notes: await listNotes(notesTbl, id) } };
     }
 
     // Create field.
@@ -316,7 +315,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
   });
   const peer = parsePeerInfo(query, cookies);
   const sfiId = peer.sfi_id;
-  const anon = peer.is_anon || !peer.user_id;
+  const anon = peer.is_anon || !peer.user_id;  // v1: is_anon = not on the roster
 
   // ----- index.html: serve a single bundled response (html + inlined css + per-viewer
   // window.__peer stamp) so the UI can render without an extra /api/whoami round-trip.
@@ -333,19 +332,16 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
   if (reqPath.startsWith("/api/")) {
     if (!sfiId) return send({ error: "sfi_id missing" }, 400);
     const op = reqPath.slice("/api/".length);
-    // Local tables are always ready; the gate stays so a future graduation to
-    // synced tables needs no code change here.
     const tables = ensureTables(peer);
     if (!tables.ready) return send({ error: "table not bound" }, 503);
-    const submissions = table("submissions", sfiId);
-    const fieldsTbl   = table("field_configs", sfiId);
-    const notesTbl    = table("notes", sfiId);
+    const submissions = table("help_desk_submissions", sfiId);
+    const fieldsTbl   = table("help_desk_fields", sfiId);
+    const notesTbl    = table("help_desk_notes", sfiId);
     const settings    = frameSettings(sfiId);
 
-    // ----- public: fetch the form field config for this placement (anon or admin).
-    // Includes the placement's display title so the public view can show it.
+    // ----- public: fetch the form field config (anon or admin), with the desk's title.
     if (op === "config" && method === "GET") {
-      await ensureDefaultFields(settings, fieldsTbl);
+      await ensureDefaultFields(settings, fieldsTbl, peer);
       return send({ fields: await listFields(fieldsTbl), title: await getTitle(settings) });
     }
 
@@ -357,11 +353,11 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
       return send(r.body, r.status);
     }
 
-    // ----- admin: everything past this point requires a known user (writes are
+    // ----- admin: everything past this point requires a member (writes are
     // additionally editor-gated inside handleWrite / inline below).
     if (op.startsWith("admin/")) {
       if (anon) return send({ error: "forbidden" }, 403);
-      await ensureDefaultFields(settings, fieldsTbl);
+      await ensureDefaultFields(settings, fieldsTbl, peer);
 
       // Heartbeat — kept so the admin UI can ping cheaply; realtime is delivered via pushToInstance.
       if (op === "admin/register" && method === "POST") {

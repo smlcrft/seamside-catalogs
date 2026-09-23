@@ -1,19 +1,19 @@
 {
     "name": "Roadmap",
-    "description": "A simple, robust project roadmapping tool — one roadmap per placement. Set a project name, overview, and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in-progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Collapsed milestone headers still show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days-remaining and overdue color-coding. A milestone can only be marked done once all its tasks are complete. Everything is stored in a lightweight per-placement encrypted LocalTable database on the host and pushed live to every viewer; non-members get a read-only view.",
+    "description": "A simple, robust project roadmapping tool \u2014 one roadmap per space. Set a project name and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Milestone headers show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days remaining and overdue colour-coding. A milestone can only be marked done once all its tasks are complete. Editors change everything; viewers and anyone the frame is published to get a live read-only view. Milestones and tasks are the space's own tables, roadmap_milestones.table.jsonl and roadmap_tasks.table.jsonl, synced with the space.",
     "frame_type": "Tandem",
     "tags": ["smallbiz", "planning"],
     "permissions": {
-        "net": [],
-        "web": [],
-        "web_scripts": []
+        "net": []
     },
     "created_at": "2026-07-07T21:12:00Z",
-    "modified_at": "2026-08-04T21:00:00Z",
-    "app_version_min": "0.2.5",
+    "modified_at": "2026-09-23T05:05:32Z",
+    "app_version_min": "1.0.0",
     "depends_on_capabilities": [],
     "default_width_px": 720,
     "default_height_px": 640,
     "licensed_under_cc0": true,
-    "attribution_log": []
+    "attribution_log": [],
+    "icon": "ph:signpost",
+    "color": "c1"
 }

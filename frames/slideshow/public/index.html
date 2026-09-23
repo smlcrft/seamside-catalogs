@@ -219,10 +219,8 @@
       } catch (_) {}
       return p;
     }
-    // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
-    // dropped on Android (issue #750), the tether carries them everywhere. Fire-and-
-    // forget — resulting state arrives via the pushes below. Feature-detect: an older
-    // viewer's framelib has no busSend — fall back to the HTTP write it was using before.
+    // Writes go over frame.busSend, fire-and-forget — resulting state arrives via the pushes
+    // below. A framelib without busSend falls back to the HTTP write.
     const write = (path, body) => {
       if (typeof frame.busSend === "function") {
         frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
@@ -554,9 +552,9 @@
         },
       });
 
-      // Read-only viewers announce presence so the editor's "watching" count stays live.
+      // Read-only viewers announce presence; editors ping too, which sweeps out viewers who left.
       useEffect(() => {
-        if (!me || me.is_sfi_editor) return;
+        if (!me) return;
         const ping = () => write("api/viewer_ping", { by: SESSION }).catch(() => {});
         ping();
         const t = setInterval(ping, 10000);
@@ -567,6 +565,24 @@
         busyRef.current = false;
         if (staleRef.current) { staleRef.current = false; refresh(); }
       }
+
+      // A change that arrived while typing waits for the field to lose focus; then this
+      // editor's pending save lands first and the deck is re-read, so nothing later is
+      // saved over a deck this page never saw.
+      useEffect(() => {
+        const onOut = () => setTimeout(async () => {
+          const tag = (document.activeElement && document.activeElement.tagName) || "";
+          if (!staleRef.current || busyRef.current || tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
+          staleRef.current = false;
+          if (saveTimer.current) {
+            clearTimeout(saveTimer.current); saveTimer.current = null;
+            await frame.api("api/save", { show: showRef.current, by: SESSION }).catch(() => {});
+          }
+          refresh();
+        }, 0);
+        window.addEventListener("focusout", onOut);
+        return () => window.removeEventListener("focusout", onOut);
+      }, []);
 
       // keyboard nav (present mode, and read-only browsing for viewers)
       useEffect(() => {
@@ -607,6 +623,7 @@
       function scheduleSave() {
         clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => {
+          saveTimer.current = null;
           write("api/save", { show: showRef.current, by: SESSION }).catch(() => {});
         }, 300);
       }
@@ -788,7 +805,8 @@
         const start = sh.settings.syncPresent ? sharedPresentRef.current : curRef.current;
         setPIdx(clamp(start, 0, Math.max(0, sh.slides.length - 1)));
         setPresent(true);
-        try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); } catch (_) {}
+        // The manifest asks for fullscreen; where it is still refused, present mode fills the frame.
+        document.documentElement.requestFullscreen?.()?.catch(() => {});
       }
       function exitPresent() { setPresent(false); try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) {} }
       function nav(dir) { setCur((c) => clamp(c + dir, 0, Math.max(0, showRef.current.slides.length - 1))); }

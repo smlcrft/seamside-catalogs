@@ -335,7 +335,7 @@
   <script type="module">
     import {
       frame, html, render, useState, useEffect, useLayoutEffect, useRef, useMemo,
-      useFramePush, Modal, applyChannel,
+      useFramePush, Modal, applyChannel, Editable,
     } from "./lib/js/framelib.js";
 
     const DAY = 86400000;
@@ -672,9 +672,9 @@
               ${isBucket
                 ? html`<span class="ms-title static">${m.title}</span>`
                 : (isEditor
-                  ? html`<span class="ms-title"><input value=${m.title} maxlength="200"
+                  ? html`<span class="ms-title"><${Editable} value=${m.title} maxlength="200"
                       onClick=${(e) => e.stopPropagation()}
-                      onBlur=${(e) => { const v = e.target.value.trim(); if (v && v !== m.title) call("api/milestone/" + m.id, { title: v }); }}
+                      onSave=${(val) => { const v = val.trim(); if (v && v !== m.title) call("api/milestone/" + m.id, { title: v }); }}
                       onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} /></span>`
                   : html`<span class="ms-title static">${m.title}</span>`)}
 
@@ -814,8 +814,8 @@
               <i class="flag ph-light ph-signpost"></i>
               <div class="proj">
                 ${isEditor
-                  ? html`<div class="proj-name"><input value=${meta.name} maxlength="160" placeholder="Untitled Roadmap"
-                      onBlur=${(e) => { const v = e.target.value.trim(); if (v !== meta.name) saveMeta({ name: v }); }}
+                  ? html`<div class="proj-name"><${Editable} value=${meta.name} maxlength="160" placeholder="Untitled Roadmap"
+                      onSave=${(val) => { const v = val.trim(); if (v !== meta.name) saveMeta({ name: v }); }}
                       onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} /></div>`
                   : html`<div class="proj-name"><span class=${meta.name ? "" : "placeholder"}>${meta.name || "Untitled Roadmap"}</span></div>`}
               </div>

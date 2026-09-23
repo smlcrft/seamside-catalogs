@@ -4,8 +4,9 @@
 // Design axes:
 //   privacy:        privacy-space-users  — anyone in the space can study; space editors
 //                                           write the cards.
-//   data_storage:   storage-local        — LocalTables, no contract. Nothing else acts on
-//                                           these rows (docs/schema-contracts.md).
+//   data_storage:   the space's tables   — `flashcards_decks`, `flashcards` (the cards) and
+//                                           `flashcards_reviews`, files at the space's root,
+//                                           synced with it; no contract (docs/schema-contracts.md).
 //   view_realtime:  view-collaborative    — deck and card edits push, so a group building a
 //                                           deck together sees it grow. Reviews do NOT push
 //                                           (see below).
@@ -16,6 +17,8 @@
 // your card does not become "easy" because a classmate found it easy. That is why review
 // state is a separate table keyed by user_id rather than columns on the card, and why a
 // review never pushes: nobody else's screen should change because you answered something.
+// Separate is not secret: the reviews table is a file of the space like the others, so a
+// member who opens it sees everyone's rows. The frame shows each person only their own.
 //
 // SM-2 is implemented here rather than in the frontend. It is the whole product: a subtly
 // wrong easiness factor does not throw an error, it quietly teaches you the wrong things at
@@ -25,6 +28,10 @@ import {
   log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
   pushToInstance, sanitizeText, declareTables, ensureTables, table,
 } from "@frame-core";
+
+const DECKS = "flashcards_decks";
+const CARDS = "flashcards";
+const REVIEWS = "flashcards_reviews";
 
 const DECKS_SCHEMA = [
   { name: "name",       col_type: "text"    as const, nullable: false, default_val: "" },
@@ -50,9 +57,9 @@ const REVIEWS_SCHEMA = [
 ];
 
 declareTables([
-  { key: "decks",   title: "Decks",   description: "Card decks in this placement.", local: true, schema: DECKS_SCHEMA },
-  { key: "cards",   title: "Cards",   description: "Cards belonging to this placement's decks.", local: true, schema: CARDS_SCHEMA },
-  { key: "reviews", title: "Review progress", description: "Each person's spaced-repetition state, one row per card per person.", local: true, schema: REVIEWS_SCHEMA },
+  { key: DECKS,   title: "Decks",   description: "Card decks in this space.", local: true, schema: DECKS_SCHEMA },
+  { key: CARDS,   title: "Cards",   description: "Cards belonging to this space's decks.", local: true, schema: CARDS_SCHEMA },
+  { key: REVIEWS, title: "Review progress", description: "Each person's spaced-repetition state, one row per card per person.", local: true, schema: REVIEWS_SCHEMA },
 ]);
 
 type Peer = ReturnType<typeof parsePeerInfo>;
@@ -115,22 +122,22 @@ function schedule(prev: Sched, q: number): Sched {
 async function readyTables(peer: Peer): Promise<boolean> {
   const quiet = { ...peer, is_owner: false } as Peer;
   let r = ensureTables(quiet);
-  for (const key of ["decks", "cards", "reviews"]) {
+  for (const key of [DECKS, CARDS, REVIEWS]) {
     if (!r.byKey[key]) {
       try { await table(key, peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`flashcards: ensure "${key}" failed: ${e}`); }
       r = ensureTables(quiet);
     }
   }
-  return !!r.byKey["decks"] && !!r.byKey["cards"] && !!r.byKey["reviews"];
+  return !!r.byKey[DECKS] && !!r.byKey[CARDS] && !!r.byKey[REVIEWS];
 }
 
 /** Everything the viewer needs, with THEIR schedule folded in. A card with no review row
  * is new and therefore due — that is how a fresh deck presents itself. */
 async function readAll(sfiId: string, peer: Peer) {
   const today = dayStr(Date.now());
-  const { rows: drows } = await table("decks", sfiId).query({ order_by: [{ col: "sort_order" }] });
-  const { rows: crows } = await table("cards", sfiId).query({ limit: 5000 });
-  const { rows: rrows } = await table("reviews", sfiId).query({ limit: 20000 });
+  const { rows: drows } = await table(DECKS, sfiId).query({ order_by: [{ col: "sort_order" }] });
+  const { rows: crows } = await table(CARDS, sfiId).query({ limit: 5000 });
+  const { rows: rrows } = await table(REVIEWS, sfiId).query({ limit: 20000 });
 
   const mine: Record<string, { reps: number; ef: number; ivl: number; due: string }> = {};
   const uid = String(peer.user_id ?? "");
@@ -186,9 +193,9 @@ function notify(sfiId: string) {
 
 async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
   if (!(await readyTables(peer))) return { status: 503, body: { error: "tables not ready" } };
-  const decks = table("decks", sfiId);
-  const cards = table("cards", sfiId);
-  const reviews = table("reviews", sfiId);
+  const decks = table(DECKS, sfiId);
+  const cards = table(CARDS, sfiId);
+  const reviews = table(REVIEWS, sfiId);
 
   // Reviewing is member work, not editor work: it writes only YOUR OWN row and changes
   // nothing anyone else can see. Everything that edits the shared deck stays editor-only.

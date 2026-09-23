@@ -1,40 +1,33 @@
 // ----------------------------------------------------------------------------------------
 // Member Reachout — send updates / notifications to the people in your roster.
 //
-// Contacts (name, email, role, optional phone) live in the SAME shared "members" SyncTable
-// that the Member Manager frame uses. We declare the same table key + minimum schema; when
-// the owner places this frame they bind it to the existing Members table in the picker, so
-// both frames read one roster. This frame only READS the roster — it never mutates members.
+// Contacts (name, email, role, optional phone) are a `members` list of the space —
+// `members.table.jsonl` or a subtype such as `club.members.table.jsonl`, the roster Member
+// Manager keeps. Each session is bound to one (sessionKv `bound/members`), chosen by an
+// editor; this frame only READS it.
 //
-// Sent messages are logged to a local JSON file keyed by sfi_id (space_frame_instance_id),
-// for this device's reference only. The log records date, audience (role(s) / everyone) and
-// the send method (email or text). The actual sending happens OS-side: the frontend builds a
-// `mailto:` (all recipients bcc'd) or a per-person `sms:` link and asks the OS to open it.
+// Every send is a row of the space's `reachout_sent` table, saying which list it went to,
+// who sent it, when, to which role(s) (or everyone) and how (email or text); a session
+// shows the sends to its own list. Settings (board title, which roles' messages outsiders
+// may read) are this session's own (sessionKv `settings`). The actual sending happens
+// OS-side: the frontend builds a `mailto:` (all recipients bcc'd) or a per-person `sms:`
+// link and asks the viewer to open it.
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, pushToInstance, parsePeerInfo, onUiMessage,
-  declareTables, ensureTables, table, renderWaitingForOwner,
+  table, sessionKv,
   jsonReply, parseJsonBody, sanitizeText, clampInt,
-  loadJsonFile, saveJsonFile,
 } from "@frame-core";
 
-// Minimum schema required of the bound table. We deliberately declare only the three
-// columns the original Member Manager release shipped (name / email / role) so the binding
-// picker offers BOTH old and new Members tables (it does a superset-by-name+col_type match).
-// `phone` is read opportunistically from whatever the bound table actually has — query
-// returns every column of the real table regardless of what we declared here.
-declareTables([{
-  key: "members",
-  title: "Members",
-  description: "People and their roles — shared with the Member Manager frame.",
-  schema: [
-    { name: "name",  col_type: "text", nullable: false },
-    { name: "email", col_type: "text", nullable: false },
-    { name: "role",  col_type: "text", nullable: false },
-  ],
-}]);
+// ----- Which members list: `members` or a subtype `<name>.members`, bound per session -----
+const LIST_NAME = /^([a-z0-9][a-z0-9_-]*\.)*members$/;
+const validList = (n: unknown): n is string => typeof n === "string" && n.length <= 64 && LIST_NAME.test(n);
+async function boundList(): Promise<string | null> {
+  const v = (await sessionKv.get("bound/members"))?.value;
+  return validList(v) ? v : null;
+}
 
-// ----- Per-sfi settings (local-only JSON file) ------------------------------------------
+// ----- Settings (this session's own) ------------------------------------------------------
 type Settings = {
   title: string;
   public_roles: string[]; // role(s) whose message history is exposed to non-member viewers
@@ -45,25 +38,26 @@ const DEFAULT_SETTINGS: Settings = {
   public_roles: [],
 };
 
-const allSettings: Record<string, Settings> = loadJsonFile(import.meta.url, "settings.json", {} as Record<string, Settings>);
-
-function getSettings(sfi_id: string): Settings {
-  const s = allSettings[sfi_id];
-  if (!s) return { ...DEFAULT_SETTINGS, public_roles: [] };
+async function getSettings(): Promise<Settings> {
+  let v: Partial<Settings> = {};
+  try { v = JSON.parse((await sessionKv.get("settings"))?.value ?? "{}") ?? {}; } catch { /* defaults */ }
   return {
-    title: typeof s.title === "string" && s.title.trim() ? s.title : DEFAULT_SETTINGS.title,
-    public_roles: Array.isArray(s.public_roles) ? s.public_roles.map(String) : [],
+    title: typeof v.title === "string" && v.title.trim() ? v.title : DEFAULT_SETTINGS.title,
+    public_roles: Array.isArray(v.public_roles) ? v.public_roles.map(String) : [],
   };
 }
 
-function setSettings(sfi_id: string, next: Settings): void {
-  allSettings[sfi_id] = next;
-  saveJsonFile(import.meta.url, "settings.json", allSettings);
+async function setSettings(next: Settings): Promise<void> {
+  await sessionKv.put("settings", JSON.stringify(next));
 }
 
-// ----- Sent-message log (local-only JSON file, keyed by sfi_id) -------------------------
+// ----- Sent-message log (the space's reachout_sent table) ---------------------------------
+const SENT = "reachout_sent";
 type SentEntry = {
   id: string;
+  list: string;             // the members list it went to
+  sent_by: string;          // the sender's DID
+  sent_by_name: string;
   sent_at_ms: number;
   to_all: boolean;
   roles: string[];          // empty when to_all
@@ -74,23 +68,30 @@ type SentEntry = {
   attempted_count: number;  // text only: how many were actually tapped (== recipient_count for email)
 };
 
-const allLogs: Record<string, SentEntry[]> = loadJsonFile(import.meta.url, "sent_log.json", {} as Record<string, SentEntry[]>);
-
-function getLog(sfi_id: string): SentEntry[] {
-  const l = allLogs[sfi_id];
-  return Array.isArray(l) ? l : [];
-}
-
-function saveLog(sfi_id: string, entries: SentEntry[]): void {
-  allLogs[sfi_id] = entries;
-  saveJsonFile(import.meta.url, "sent_log.json", allLogs);
+async function sentTo(sfi_id: string, list: string): Promise<SentEntry[]> {
+  const { rows } = await table(SENT, sfi_id).query({ where: { list }, limit: 5000 });
+  return rows.map((r) => ({
+    id: r._row_id,
+    list: String(r.list ?? ""),
+    sent_by: String(r.sent_by ?? ""),
+    sent_by_name: String(r.sent_by_name ?? ""),
+    sent_at_ms: Number(r.sent_at_ms) || 0,
+    to_all: !!r.to_all,
+    roles: Array.isArray(r.roles) ? r.roles.map(String) : [],
+    method: r.method === "text" ? "text" : "email",
+    subject: String(r.subject ?? ""),
+    message: String(r.message ?? ""),
+    recipient_count: Number(r.recipient_count) || 0,
+    attempted_count: Number(r.attempted_count) || 0,
+  }));
 }
 
 // ----- Roster helpers -------------------------------------------------------------------
 type Member = { name: string; email: string; role: string; phone: string };
 
-async function loadMembers(sfi_id: string): Promise<Member[]> {
-  const { rows } = await table("members", sfi_id).query({ limit: 5000 });
+async function loadMembers(sfi_id: string, list: string | null): Promise<Member[]> {
+  if (!list) return [];
+  const { rows } = await table(list, sfi_id).query({ limit: 5000 });
   return rows.map((r: Record<string, unknown>) => ({
     name: typeof r.name === "string" ? r.name : String(r.name ?? ""),
     email: typeof r.email === "string" ? r.email : String(r.email ?? ""),
@@ -151,8 +152,8 @@ function isEntryPublic(entry: SentEntry, settings: Settings): boolean {
   return entry.roles.every((r) => pub.has(r));
 }
 
-// Public/non-member projection: strip recipient counts down to coarse info, keep the message.
-function publicEntry(e: SentEntry): Omit<SentEntry, "attempted_count"> {
+// Public/non-member projection: no sender, no tap count; the message and its audience.
+function publicEntry(e: SentEntry) {
   return {
     id: e.id,
     sent_at_ms: e.sent_at_ms,
@@ -165,29 +166,35 @@ function publicEntry(e: SentEntry): Omit<SentEntry, "attempted_count"> {
   };
 }
 
-function newId(): string {
-  return `s_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
-}
-
 // ----- Shared write logic ---------------------------------------------------------------
 // Both entry points (HTTP arms and the bus dispatcher) land here; role gates live inside.
 // Every mutation ends in a pushToInstance so all viewers — the sender included — re-render.
 type WriteResult = { status: number; body: unknown };
 
-function handleWrite(
+async function handleWrite(
   op: string,
   v: Record<string, unknown> | null,
   sfiId: string,
   peer: ReturnType<typeof parsePeerInfo>,
-): WriteResult {
+): Promise<WriteResult> {
   const p = peer.sfi_id === sfiId ? peer : { ...peer, sfi_id: sfiId };
-  const tables = ensureTables(p);
-  if (!tables.ready) return { status: 503, body: { error: "table not yet bound", missing: tables.missingKeys } };
 
-  // ---- Record a send into the local log (editor only) ---------------------------------
+  // ---- Choose this session's members list (editor only) -------------------------------
+  if (op === "bind") {
+    if (!p.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+    const name = v?.list;
+    if (!validList(name)) return { status: 400, body: { error: "a members list is named members or <name>.members" } };
+    await sessionKv.put("bound/members", name);
+    pushToInstance(sfiId, { type: "settings_changed" });
+    return { status: 200, body: { bound: name } };
+  }
+
+  // ---- Record a send into the log (editor only) ---------------------------------------
   if (op === "log") {
     if (!p.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
     if (!v) return { status: 400, body: { error: "invalid JSON" } };
+    const list = await boundList();
+    if (!list) return { status: 409, body: { error: "no members list chosen yet" } };
     const sendMethod = v.method === "text" ? "text" : "email";
     const to_all = !!v.to_all;
     const roles = Array.isArray(v.roles) ? v.roles.map((r) => sanitizeText(r, 80)).filter(Boolean) : [];
@@ -197,8 +204,10 @@ function handleWrite(
     if (!to_all && roles.length === 0) return { status: 400, body: { error: "audience required" } };
     const recipient_count = clampInt(Number(v.recipient_count) || 0, 0, 100000);
     const attempted_count = clampInt(Number(v.attempted_count ?? recipient_count) || 0, 0, recipient_count);
-    const entry: SentEntry = {
-      id: newId(),
+    const entry = {
+      list,
+      sent_by: p.user_id,
+      sent_by_name: sanitizeText(p.user_name, 120),
       sent_at_ms: Date.now(),
       to_all,
       roles: to_all ? [] : roles,
@@ -208,11 +217,9 @@ function handleWrite(
       recipient_count,
       attempted_count,
     };
-    const entries = getLog(sfiId);
-    entries.push(entry);
-    saveLog(sfiId, entries);
+    const { row_id } = await table(SENT, sfiId).upsert(null, entry);
     pushToInstance(sfiId, { type: "log_changed" });
-    return { status: 200, body: { entry } };
+    return { status: 200, body: { entry: { id: row_id, ...entry } } };
   }
 
   // ---- Delete a logged message (editor only) ------------------------------------------
@@ -220,8 +227,10 @@ function handleWrite(
     if (!p.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
     const id = String(v?.id ?? "");
     if (!id) return { status: 400, body: { error: "id required" } };
-    const entries = getLog(sfiId).filter((e) => e.id !== id);
-    saveLog(sfiId, entries);
+    const sent = table(SENT, sfiId);
+    const row = await sent.get(id);
+    if (!row || row.list !== (await boundList())) return { status: 404, body: { error: "no such message" } };
+    await sent.delete(id);
     pushToInstance(sfiId, { type: "log_changed" });
     return { status: 204, body: null };
   }
@@ -235,7 +244,7 @@ function handleWrite(
       ? Array.from(new Set(v.public_roles.map((r) => sanitizeText(r, 80)).filter(Boolean)))
       : [];
     const next: Settings = { title, public_roles };
-    setSettings(sfiId, next);
+    await setSettings(next);
     pushToInstance(sfiId, { type: "settings_changed" });
     return { status: 200, body: { settings: next } };
   }
@@ -246,12 +255,12 @@ function handleWrite(
 // ----- Bus dispatcher (frame.busSend → BusUiToFrame) ------------------------------------
 // Fire-and-forget: denied or invalid writes are logged, not answered — the UI is
 // role-gated and never sends them.
-onUiMessage((sfiId, data, peer) => {
+onUiMessage(async (sfiId, data, peer) => {
   if (!sfiId || typeof data !== "object" || data === null) return;
   const d = data as Record<string, unknown>;
   const op = typeof d.op === "string" ? d.op : "";
   if (!op) return;
-  const r = handleWrite(op, d, sfiId, peer);
+  const r = await handleWrite(op, d, sfiId, peer);
   if (r.status >= 400) log(`member_reachout: bus op ${op} → ${r.status} (${JSON.stringify(r.body)})`);
 });
 
@@ -259,16 +268,8 @@ onUiMessage((sfiId, data, peer) => {
 self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
 
-  const tables = ensureTables(peer);
-  if (!tables.ready) {
-    if (reqPath === "/index.html") return renderWaitingForOwner(replyPort, peer);
-    if (method === "GET") {
-      return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-    }
-    return jsonReply(replyPort, 503, { error: "table not yet bound", missing: tables.missingKeys });
-  }
-
-  const settings = getSettings(peer.sfi_id);
+  const settings = await getSettings();
+  const list = await boundList();
   const isEditor = peer.is_sfi_editor;
   const isMember = peer.is_sfi_member;
 
@@ -276,7 +277,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
   if (reqPath === "/api/state" && method === "GET") {
     let roles: RoleInfo[] = [];
     if (isMember) {
-      const members = await loadMembers(peer.sfi_id);
+      const members = await loadMembers(peer.sfi_id, list);
       roles = summarizeRoles(members);
     }
     return jsonReply(replyPort, 200, {
@@ -290,13 +291,15 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
         space_color: peer.space_color || "",
       },
       can_edit: isEditor,
+      bound: list,
+      can_bind: isEditor,
       roles, // editors compose against this; non-members get [] (roster structure stays private)
     });
   }
 
   // ---- The sent-message backlog -------------------------------------------------------
   if (reqPath === "/api/log" && method === "GET") {
-    const entries = getLog(peer.sfi_id).slice().sort((a, b) => b.sent_at_ms - a.sent_at_ms);
+    const entries = list ? (await sentTo(peer.sfi_id, list)).sort((a, b) => b.sent_at_ms - a.sent_at_ms) : [];
     if (isMember) {
       return jsonReply(replyPort, 200, { entries, can_edit: isEditor });
     }
@@ -307,8 +310,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
 
   // ---- Resolve an audience to concrete recipients (editor only — exposes contacts) ----
   // A read that needs its response (it builds the mailto:/sms: links), so it can't ride
-  // the bus; GET carries the audience in the query string because Android's webview
-  // drops HTTP request bodies. The POST arm stays for older cached frontends.
+  // the bus; GET carries the audience in the query string. The POST arm stays for older
+  // cached frontends.
   if (reqPath === "/api/resolve" && (method === "GET" || method === "POST")) {
     if (!isEditor) return jsonReply(replyPort, 403, { error: "editors only" });
     let to_all: boolean;
@@ -325,7 +328,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
       roles = Array.isArray(v.roles) ? v.roles.map((r) => sanitizeText(r, 80)).filter(Boolean) : [];
     }
     if (!to_all && roles.length === 0) return jsonReply(replyPort, 400, { error: "pick an audience" });
-    const members = await loadMembers(peer.sfi_id);
+    const members = await loadMembers(peer.sfi_id, list);
     const recipients = resolveRecipients(members, to_all, roles).map((m) => ({
       name: m.name, email: m.email, phone: m.phone,
     }));
@@ -333,22 +336,22 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return jsonReply(replyPort, 200, { recipients, all_have_phone });
   }
 
-  // ---- Record a send into the local log (editor only) ---------------------------------
+  // ---- Record a send into the log (editor only) ---------------------------------------
   if (reqPath === "/api/log" && method === "POST") {
-    const r = handleWrite("log", parseJsonBody(body), peer.sfi_id, peer);
+    const r = await handleWrite("log", parseJsonBody(body), peer.sfi_id, peer);
     return jsonReply(replyPort, r.status, r.body);
   }
 
   // ---- Delete a logged message (editor only) ------------------------------------------
   if (reqPath === "/api/log/delete" && method === "POST") {
-    const r = handleWrite("log/delete", parseJsonBody(body), peer.sfi_id, peer);
+    const r = await handleWrite("log/delete", parseJsonBody(body), peer.sfi_id, peer);
     if (r.status === 204) return replyPort.postMessage({ status: 204, contentType: "text/plain", body: null });
     return jsonReply(replyPort, r.status, r.body);
   }
 
   // ---- Settings (owner only) ----------------------------------------------------------
-  if (reqPath === "/api/settings" && method === "POST") {
-    const r = handleWrite("settings", parseJsonBody(body), peer.sfi_id, peer);
+  if ((reqPath === "/api/settings" || reqPath === "/api/bind") && method === "POST") {
+    const r = await handleWrite(reqPath.slice("/api/".length), parseJsonBody(body), peer.sfi_id, peer);
     return jsonReply(replyPort, r.status, r.body);
   }
 

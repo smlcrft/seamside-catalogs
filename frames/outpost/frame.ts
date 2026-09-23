@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------------------
-// Outpost — a lightweight public posting board, one per placement (sfi_id).
+// Outpost — a lightweight public posting board, one per space (sfi_id).
 //
 // Members (editors) publish short posts to share with the world; anyone with the frame's
 // share link can read them. A post carries the author's name, the moment it was shared,
@@ -18,19 +18,18 @@
 //                                           (Poll voting is a softer gate — any real Seamside
 //                                           user may vote, member or not, but NOT anonymous
 //                                           web viewers, who see results read-only.)
-//   data_storage:   storage-local-db      — LocalTables (encrypted at rest, host-local, not
-//                                           peer-synced), scoped per placement: posts / media
-//                                           rows / votes / prefs. Attached media bytes still
-//                                           live as files in a <post_id>/ subfolder under
-//                                           data/outposts/<sfi>/. The host serves its posts
-//                                           to viewers over HTTP.
+//   data_storage:   the space's tables    — outpost_posts / outpost_media / outpost_votes,
+//                                           table files at the space's root, synced with it.
+//                                           Attached media are files of the space under
+//                                           Outpost/<post_id>/, served by this worker to
+//                                           everyone who reads the board.
 //   view_realtime:  view-collaborative    — every mutation calls pushToInstance so all viewers
-//                                           of the placement refresh live.
-//   settings_scope: settings-per-sfi      — tables (and the prefs row) are per peer.sfi_id.
+//                                           refresh live.
+//   settings_scope: settings-per-sfi      — peer.sfi_id (in v1, the space being served).
 // ----------------------------------------------------------------------------------------
 import {
   log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance, onUiMessage,
-  frameDataDir, serveFileAtPath, sanitizeText, clampInt, toIntOrNull, path,
+  spaceFiles, serveFileAtPath, sanitizeText, clampInt, toIntOrNull,
   declareTables, ensureTables, table, frameSettings,
 } from "@frame-core";
 
@@ -54,38 +53,32 @@ type PostRow = {
   id: string; author: string; author_user_id: string; created_ms: number;
   kind: string; text: string; poll_options: string | null;
 };
-type MediaRow = { id: string; post_id: string; name: string; mime: string; size: number };
+type MediaRow = { id: string; post_id: string; name: string; mime: string; size: number; path: string };
 
 // ----- Limits ---------------------------------------------------------------------------
 const MAX_TEXT = 4000;
 const MAX_TAGLINE = 160;
 const MAX_TITLE = 80;
 const MAX_MEDIA_PER_POST = 6;
-const MAX_MEDIA_MB = 50;
+const MAX_MEDIA_MB = 8;    // a request body, and a file a worker writes, is at most 8 MiB
 const MAX_POLL_OPTIONS = 6;
 const MIN_POLL_OPTIONS = 2;
 const MAX_OPTION_LEN = 120;
 const DEFAULT_PAGE = 15;   // posts per feed page
 const MAX_PAGE = 50;
 
-// ----- On-disk layout (media BYTES only; rows live in LocalTables) -----------------------
-// data/outposts/<sfi_slug>/<post_id>/<media_id> — one file per attached media item.
-const OUTPOSTS_DIR = path.join(frameDataDir(import.meta.url), "outposts");
-
-function sfiSlug(sfiId: string): string {
-  return (sfiId || "").replace(/[^a-zA-Z0-9_-]/g, "_") || "default";
-}
-function postDir(sfiId: string, postId: string): string {
-  return path.join(OUTPOSTS_DIR, sfiSlug(sfiId), postId);
+// ----- Media files: Outpost/<post_id>/<name>, files of the space; the media row names it --
+const FOLDER = "Outpost";
+function postDir(postId: string): string {
+  return `${FOLDER}/${postId}`;
 }
 
-// ----- LocalTables ------------------------------------------------------------------------
+// ----- The space's tables (named for this frame, so no other frame's rows land in them) --
 declareTables([
   {
-    key: "posts",
+    key: "outpost_posts",
     title: "Outpost Posts",
     description: "Published posts for this outpost, newest first.",
-    local: true,
     schema: [
       { name: "author",         col_type: "text",    nullable: false, default_val: "" },
       { name: "author_user_id", col_type: "text",    nullable: false, default_val: "" },
@@ -96,23 +89,22 @@ declareTables([
     ],
   },
   {
-    key: "media",
+    key: "outpost_media",
     title: "Outpost Media",
-    description: "Attached-media metadata (bytes live as files beside the tables).",
-    local: true,
+    description: "Attached media; `path` is the file in the space (Outpost/<post_id>/<name>).",
     schema: [
       { name: "post_id", col_type: "text",    nullable: false, default_val: "" },
       { name: "name",    col_type: "text",    nullable: false, default_val: "" },
       { name: "mime",    col_type: "text",    nullable: false, default_val: "" },
       { name: "size",    col_type: "integer", nullable: false, default_val: "0" },
       { name: "ord",     col_type: "integer", nullable: false, default_val: "0" },
+      { name: "path",    col_type: "text",    nullable: false, default_val: "" },
     ],
   },
   {
-    key: "votes",
+    key: "outpost_votes",
     title: "Outpost Votes",
     description: "One poll vote per (post, voter); re-voting replaces the choice.",
-    local: true,
     schema: [
       { name: "post_id", col_type: "text",    nullable: false, default_val: "" },
       { name: "voter",   col_type: "text",    nullable: false, default_val: "" },
@@ -123,13 +115,13 @@ declareTables([
 
 interface Tables { settings: Settings; posts: Tbl; media: Tbl; votes: Tbl; }
 
-// Prefs live in the per-placement frameSettings key/value store — one row per key,
-// race-free (no query-then-insert), and extensible without a schema change.
+// Prefs live in the space's frameSettings store, which every frame in the space shares —
+// so the keys are prefixed with this frame's name.
 async function getPrefs(t: Tables): Promise<Prefs> {
   const [title, tagline, who] = await Promise.all([
-    t.settings.get<string>("title"),
-    t.settings.get<string>("tagline"),
-    t.settings.get<string>("who_can_post"),
+    t.settings.get<string>("outpost_title"),
+    t.settings.get<string>("outpost_tagline"),
+    t.settings.get<string>("outpost_who_can_post"),
   ]);
   return {
     title: title || DEFAULT_PREFS.title,
@@ -140,9 +132,9 @@ async function getPrefs(t: Tables): Promise<Prefs> {
 
 async function setPrefs(t: Tables, next: Prefs): Promise<void> {
   await Promise.all([
-    t.settings.set("title", next.title),
-    t.settings.set("tagline", next.tagline),
-    t.settings.set("who_can_post", next.who_can_post),
+    t.settings.set("outpost_title", next.title),
+    t.settings.set("outpost_tagline", next.tagline),
+    t.settings.set("outpost_who_can_post", next.who_can_post),
   ]);
 }
 
@@ -155,7 +147,7 @@ function rowToPost(r: any): PostRow {
 }
 
 // ----- Ids / validation -----------------------------------------------------------------
-const ID_RE = /^[0-9a-fA-F-]{8,64}$/;
+const ID_RE = /^[0-9a-zA-Z-]{8,64}$/;  // row ids are base36 time + random
 function isMediaKind(mime: string): { image: boolean; video: boolean; audio: boolean } {
   return { image: mime.startsWith("image/"), video: mime.startsWith("video/"), audio: mime.startsWith("audio/") };
 }
@@ -173,11 +165,11 @@ function canPost(peer: Peer, prefs: Prefs): boolean {
 function canDeletePost(peer: Peer, authorUserId: string): boolean {
   return peer.is_owner || (peer.is_sfi_editor && !!peer.user_id && authorUserId === peer.user_id);
 }
-// Poll voting is limited to real Seamside users (signed-in, non-anonymous) — they need not
-// be a known contact, just an actual account, not an anonymous web viewer. Anonymous readers
-// can see live results but can't cast a vote. A voter is identified by their stable user_id.
+// Poll voting is for anyone who signed in — any role, or a visitor not on the roster
+// (`is_anon` means "not on the roster"; `user_id` is set once someone signs in).
+// Nobody-named readers see live results only. A voter is identified by their user_id.
 function voterId(peer: Peer): string {
-  return (!peer.is_anon && peer.user_id) ? "u:" + peer.user_id : "";
+  return peer.user_id ? "u:" + peer.user_id : "";
 }
 function canVote(peer: Peer): boolean {
   return voterId(peer) !== "";
@@ -201,7 +193,7 @@ async function projectPosts(t: Tables, rows: PostRow[], peer: Peer, vkey: string
     order_by: [{ col: "post_id" }, { col: "ord" }],
   });
   for (const r of mediaRows) {
-    const m: MediaRow = { id: r._row_id, post_id: r.post_id as string, name: r.name as string, mime: r.mime as string, size: r.size as number };
+    const m: MediaRow = { id: r._row_id, post_id: r.post_id as string, name: r.name as string, mime: r.mime as string, size: r.size as number, path: r.path as string };
     (mediaByPost.get(m.post_id) ?? mediaByPost.set(m.post_id, []).get(m.post_id)!).push(m);
   }
   // Poll tallies: COUNT(*) per (post, choice), done by the table layer.
@@ -266,9 +258,9 @@ async function projectOne(t: Tables, id: string, peer: Peer, vkey: string) {
 function tablesFor(sfiId: string): Tables {
   return {
     settings: frameSettings(sfiId),
-    posts: table("posts", sfiId),
-    media: table("media", sfiId),
-    votes: table("votes", sfiId),
+    posts: table("outpost_posts", sfiId),
+    media: table("outpost_media", sfiId),
+    votes: table("outpost_votes", sfiId),
   };
 }
 
@@ -300,7 +292,8 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
         .slice(0, MAX_POLL_OPTIONS);
       if (options.length >= MIN_POLL_OPTIONS) pollJson = JSON.stringify(options);
     }
-    if (!text && !pollJson) return { status: 400, body: { error: "a post needs text, a poll, or media" } };
+    const mediaToFollow = clampInt(toIntOrNull(v.media_count) ?? 0, 0, MAX_MEDIA_PER_POST) > 0;
+    if (!text && !pollJson && !mediaToFollow) return { status: 400, body: { error: "a post needs text, a poll, or media" } };
 
     const { row_id } = await t.posts.upsert(null, {
       author: peer.user_name || "Someone", author_user_id: peer.user_id || "",
@@ -310,8 +303,7 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     return { status: 200, body: { post_id: row_id, post: await projectOne(t, row_id, peer, voterId(peer)) } };
   }
 
-  // Vote in a poll. Restricted to real Seamside users (non-anonymous); anonymous web viewers
-  // are rejected here and don't see the control. One vote per user_id; re-voting replaces the
+  // Vote in a poll (see canVote); everyone else is rejected here and doesn't see the control. One vote per user_id; re-voting replaces the
   // previous choice. Returns just the updated post so the reader's scroll position is untouched.
   if (op === "vote") {
     if (!canVote(peer)) return { status: 403, body: { error: "sign in to Seamside to vote" } };
@@ -341,7 +333,7 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     await t.votes.deleteWhere({ post_id: postId });
     await t.media.deleteWhere({ post_id: postId });
     await t.posts.delete(postId);
-    try { Deno.removeSync(postDir(sfiId, postId), { recursive: true }); } catch { /* no media */ }
+    await spaceFiles.remove(postDir(postId)).catch(() => { /* no media */ });
     pushToInstance(sfiId, { type: "outpost_changed" });
     return { status: 200, body: { ok: true } };
   }
@@ -382,8 +374,6 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
   }
 
-  // Local tables are always ready; the gate stays so a future graduation to
-  // synced tables needs no code change here.
   const ready = ensureTables(peer);
   if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
   const t = tablesFor(peer.sfi_id);
@@ -395,7 +385,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     const limit = clampInt(toIntOrNull(query.limit) ?? DEFAULT_PAGE, 1, MAX_PAGE);
     return jsonReply(replyPort, 200, {
       me: {
-        is_anon: peer.is_anon, is_sfi_member: peer.is_sfi_member,
+        is_anon: peer.is_anon, signed_in: !!peer.user_id, is_sfi_member: peer.is_sfi_member,
         is_sfi_editor: peer.is_sfi_editor, is_owner: peer.is_owner,
         user_name: peer.user_name, space_color: peer.space_color,
       },
@@ -435,14 +425,16 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
 
     const name = safeName(query.name);
     const mime = sanitizeText(query.mime, 120) || "application/octet-stream";
-    // Row first (its _row_id names the file on disk); best-effort undo if the write fails.
+    // Two attachments of one name get "name (2).ext".
+    const taken = new Set((await spaceFiles.list(postDir(postId)).catch(() => [])).map((e) => e.name));
+    let file = name;
+    for (let n = 2; taken.has(file); n++) file = name.replace(/(\.[^.]*)?$/, (ext) => ` (${n})${ext}`);
+    const filePath = `${postDir(postId)}/${file}`;
     const { row_id: mediaId } = await t.media.upsert(null, {
-      post_id: postId, name, mime, size: body.byteLength, ord,
+      post_id: postId, name, mime, size: body.byteLength, ord, path: filePath,
     });
     try {
-      const dir = postDir(peer.sfi_id, postId);
-      Deno.mkdirSync(dir, { recursive: true });
-      Deno.writeFileSync(path.join(dir, mediaId), new Uint8Array(body));
+      await spaceFiles.write(filePath, new Uint8Array(body));
     } catch (e) {
       await t.media.delete(mediaId);
       return jsonReply(replyPort, 500, { error: "failed to store media: " + e });
@@ -460,9 +452,11 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     const [postId, mediaId] = parts;
     const media = await t.media.get(mediaId);
     if (!media || media.post_id !== postId) return jsonReply(replyPort, 404, { error: "not found" });
-    let buf: Uint8Array;
-    try { buf = Deno.readFileSync(path.join(postDir(peer.sfi_id, postId), mediaId)); }
-    catch { return jsonReply(replyPort, 404, { error: "not found" }); }
+    // Only a file of this post's folder is served, whatever a row says.
+    const filePath = String(media.path ?? "");
+    if (!filePath.startsWith(postDir(postId) + "/")) return jsonReply(replyPort, 404, { error: "not found" });
+    const buf = await spaceFiles.read(filePath).catch(() => null);
+    if (!buf) return jsonReply(replyPort, 404, { error: "not found" });
     const mediaName = String(media.name ?? "file");
     const asciiName = mediaName.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
     return replyPort.postMessage({

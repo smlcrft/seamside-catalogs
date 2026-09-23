@@ -38,27 +38,15 @@
       flex: 0 0 auto; height: 24px; display: inline-flex; align-items: center;
       font-size: var(--os-fs-2xs); color: var(--os-text-muted); white-space: nowrap;
     }
-    .drawer {
-      flex: 0 0 auto; position: relative;
-      width: 24px; height: 24px; padding: 0;
-      background: none; border: 0; border-radius: var(--os-radius-sm); cursor: pointer;
-      display: inline-flex; align-items: center; justify-content: center;
-      color: var(--os-text-subtle); font-size: 16px; line-height: 1;
-      transition: color 150ms, background 150ms;
+    .which {
+      flex: 0 0 auto; height: 24px; display: inline-flex; align-items: center; gap: 4px;
+      font-size: var(--os-fs-2xs); color: var(--os-text-muted); white-space: nowrap;
     }
-    /* the glyph must outrank the .header > i channel-tint rule above */
-    .drawer i { font-size: 16px; line-height: 1; color: inherit; width: auto; height: auto; }
-    .drawer:hover { color: var(--os-text); background: var(--os-bg-subtle); }
-    .drawer:active { transform: scale(0.92); }
-    .drawer:focus-visible { outline: none; box-shadow: var(--os-focus-ring); }
-    .drawer.pending::after {
-      content: ""; position: absolute; top: 0; right: 0;
-      width: 5px; height: 5px; border-radius: var(--os-radius-full); background: var(--ch);
-      animation: drawer-breathe 2s ease-in-out infinite;
+    .which button {
+      background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--ch);
+      text-decoration: underline; text-underline-offset: 2px;
     }
-    @keyframes drawer-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-    @media (prefers-reduced-motion: reduce) { .drawer.pending::after { animation: none; } }
-
+    .which button:focus-visible { outline: none; box-shadow: var(--os-focus-ring); border-radius: var(--os-radius-sm); }
     .banner {
       display: flex; align-items: center; gap: var(--os-sp-xs);
       background: var(--os-bg-inset); border-radius: var(--os-radius-md);
@@ -192,12 +180,6 @@
     }
     .kept i { flex: 0 0 auto; font-size: 13px; line-height: 1.2; color: var(--ch); }
 
-    .notice {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: var(--os-sp-sm); text-align: center; padding: var(--os-sp-xl); flex: 1;
-    }
-    .notice i { font-size: 28px; color: var(--os-text-subtle); }
-    .notice p { margin: 0; font-size: var(--os-fs-sm); color: var(--os-text-secondary); max-width: 380px; }
     .empty { color: var(--os-text-muted); font-size: var(--os-fs-sm); text-align: center; padding: var(--os-sp-lg); flex: 1; }
   </style>
 </head>
@@ -215,23 +197,67 @@
     }
     const initial = (name) => (String(name).trim()[0] || "?");
 
+    // A wishes list is `wishes.table.jsonl` or a subtype of it: `christmas.wishes.table.jsonl`.
+    const LIST = /^([a-z0-9][a-z0-9_-]*\.)*wishes$/;
+    const TABLE_FILE = /\.table\.jsonl$/;
+    const listLabel = (n) => n === "wishes" ? "wishes" : n.replace(/\.wishes$/, "");
+    const slug = (s) => String(s || "").toLowerCase().trim()
+      .replace(/(\.?wishes)?(\.table\.jsonl)?$/, "").replace(/[^a-z0-9_-]+/g, "-").replace(/^[-_]+|-+$/g, "").slice(0, 48);
+
     function App() {
       const [me, setMe]           = useState(null);
       const [wishes, setWishes]   = useState(null);
       const [meName, setMeName]   = useState("");
-      const [storage, setStorage] = useState(null);
-      const [waiting, setWaiting] = useState(false);
       const [draft, setDraft]     = useState({ item: "", for_who: "" });
       const [armed, setArmed]     = useState(null);
+      const [bound, setBound]     = useState(null);
       const armTimer = useRef(null);
+      const asked = useRef(false);
 
       async function refresh() {
         const r = await frame.api("api/list").catch(() => null);
         if (!r) return;
-        if (r.storage) setStorage(r.storage);
         if (r.me_name != null) setMeName(r.me_name);
-        setWaiting(!!r.waiting_for_binding);
+        setBound(r.bound || null);
         if (r.wishes) setWishes(r.wishes);
+        if (!asked.current && r.can_bind) { asked.current = true; offerBinding(r.bound || null); }
+      }
+      async function bind(list) {
+        await frame.api("api/bind", { list }).catch((e) => frame.alert(String(e.message || e), { title: "Could not use that list" }));
+        refresh();
+      }
+      // On first load, for an editor: a table the session was opened on, else a choice.
+      async function offerBinding(current) {
+        const opened = String(seamside.data.open || "");
+        const name = opened.replace(TABLE_FILE, "");
+        if (!opened.includes("/") && TABLE_FILE.test(opened) && LIST.test(name) && name !== current) {
+          const yes = await frame.confirm(current
+            ? `Switch this gift list from “${listLabel(current)}” to “${listLabel(name)}”?`
+            : `Use “${listLabel(name)}” for this gift list?`, { title: "Wish list", okLabel: "Use it" });
+          if (yes) return bind(name);
+        }
+        if (!current) chooseList(null);
+      }
+      async function chooseList(current) {
+        const level = await seamside.data.tree("").catch(() => []);
+        const names = level.filter((e) => !e.dir && TABLE_FILE.test(e.name))
+          .map((e) => e.name.replace(TABLE_FILE, "")).filter((n) => LIST.test(n));
+        const options = await Promise.all(names.map(async (n) => {
+          const count = await seamside.table(n).all().then((rs) => rs.length).catch(() => null);
+          return { id: n, label: listLabel(n), icon: n === current ? "ph-check" : "ph-list-bullets",
+            detail: count == null ? "" : count + (count === 1 ? " wish" : " wishes") };
+        }));
+        options.push({ id: "+new", label: "New list…", icon: "ph-plus" });
+        const pick = await frame.choose(current ? "Which wish list should this use?" : "Which wish list should this use? Pick one of this space's, or start a new one.",
+          { title: "Wish list", options });
+        if (!pick) return;
+        if (pick !== "+new") return pick === current ? null : bind(pick);
+        const typed = await frame.prompt("A short name, like christmas. Blank is the space's plain wish list.",
+          { title: "New list", placeholder: "christmas", okLabel: "Create" });
+        if (typed === null) return;
+        const s = slug(typed);
+        if (!s && names.includes("wishes")) return frame.alert("This space already has its plain wish list. Give the new one a name.", { title: "New list" });
+        bind(s ? s + ".wishes" : "wishes");
       }
       const write = (path, body) => {
         if (typeof frame.busSend === "function") {
@@ -249,7 +275,7 @@
       }, []);
       useFramePush({ wishes_changed: refresh });
 
-      if (!me || wishes === null && !waiting) return html`<div></div>`;
+      if (!me || wishes === null) return html`<div></div>`;
       const isEditor = !!me.is_sfi_editor;
       const all = wishes || [];
 
@@ -261,6 +287,11 @@
       }
       function claim(w) {
         write("api/wish/" + w.id + (w.claimed_by_me ? "/unclaim" : "/claim"), {}).catch(() => {});
+      }
+      // The list says claimed but who was lost: nobody can prove it is theirs, so an editor may let it go.
+      async function release(w) {
+        if (await frame.confirm("Someone claimed this, but who is no longer known here. Let it go so it can be claimed again?",
+          { title: "Release claim", okLabel: "Let it go" })) write("api/wish/" + w.id + "/unclaim", {}).catch(() => {});
       }
       function trash(w) {
         if (armed !== w.id) {
@@ -281,33 +312,6 @@
         else frame.alert(url, { title: "Link" });
       }
 
-      // ---- the data drawer (owner-only) --------------------------------------------------
-      async function onDrawer() {
-        if (storage.pending) {
-          const stop = await frame.confirm("Stop the move to a shared table?", {
-            title: "List data", okLabel: "Stop", cancelLabel: "Keep going",
-          });
-          if (stop) { await write("api/data/cancel_graduate", {}).catch(() => null); refresh(); }
-          return;
-        }
-        if (storage.backend === "shared") {
-          await frame.alert("These wishes live in a shared table, so other frames in this space can work with the same rows.", { title: "List data" });
-          return;
-        }
-        const mode = frame.choose
-          ? await frame.choose("These wishes live on this device.", {
-              title: "List data",
-              options: [
-                { id: "convert", label: "Move to a shared table", icon: "ph-dresser",
-                  detail: "Copies these wishes so other frames can use them" },
-                { id: "adopt", label: "Use an existing shared table", icon: "ph-plugs-connected",
-                  detail: "Point this list at a table you already have" },
-              ],
-            })
-          : ((await frame.confirm("Move this list's data to a shared table?", { title: "List data", okLabel: "Move" })) ? "convert" : null);
-        if (mode) { await write("api/data/graduate", { mode }).catch(() => null); refresh(); }
-      }
-
       // ---- one panel per person; your own list leads ----------------------------------
       const byWho = new Map();
       for (const w of all) {
@@ -326,30 +330,24 @@
           <div class="header">
             <i class="ph-light ph-gift"></i>
             <h1>Gift List</h1>
+            ${bound ? html`<span class="which">list: ${listLabel(bound)}${isEditor ? html` · <button onClick=${() => chooseList(bound)}>change</button>` : null}</span>` : null}
             <span class="mode">${mode}</span>
-            ${storage && storage.can_manage ? html`
-              <button class=${"drawer" + (storage.pending ? " pending" : "")}
-                title=${storage.pending ? "Finishing a move to a shared table" : "List data"}
-                onClick=${onDrawer}>
-                <i class="ph-light ph-dresser"></i>
-              </button>` : null}
           </div>
 
-          ${waiting ? html`
-            <div class="notice">
-              <i class="ph-light ph-table"></i>
-              <p>${me.is_owner
-                ? "This list is moving to a shared table. Pick or create the table to finish."
-                : "This list is being set up. It will be back in a moment."}</p>
-            </div>`
-          : html`
             ${!isEditor ? html`
               <div class="banner">
                 <i class="ph-light ph-eye"></i>
                 <span>${me.is_anon ? "You are looking at this list." : "You can see this list but not change it."}</span>
               </div>` : null}
 
-            ${isEditor ? html`
+            ${!bound ? html`
+              <div class="banner">
+                <i class="ph-light ph-list-bullets"></i>
+                <span>${isEditor ? html`This gift list has no wish list yet. <button class="w-link" onClick=${() => chooseList(null)}>Choose one</button>`
+                  : "An editor picks which wish list this uses."}</span>
+              </div>` : null}
+
+            ${isEditor && bound ? html`
               <div class="add">
                 <i class="ph-light ph-plus"></i>
                 <input class="f-item" maxlength="200" placeholder="Add a wish…" value=${draft.item}
@@ -360,7 +358,7 @@
                   onKeyDown=${(e) => { if (e.key === "Enter") addWish(); }} />
               </div>` : null}
 
-            ${all.length === 0
+            ${!bound ? null : all.length === 0
               ? html`<div class="empty">${isEditor ? "No wishes yet. Add the first one above." : "Nothing here yet."}</div>`
               : html`
                 <div class="lists">
@@ -381,13 +379,18 @@
                           </div>
 
                           ${w.for_me ? null
-                            : w.claimed_by
-                              ? (w.claimed_by_me
-                                  ? html`<button class="tag" title="You are getting this — press to let it go"
-                                      onClick=${() => claim(w)}>
-                                      <i class="ph-light ph-check"></i>you</button>`
-                                  : html`<span class="tag" title=${w.claimed_by + " is getting this"}>
-                                      <i class="ph-light ph-tag"></i>${w.claimed_by}</span>`)
+                            : w.claimed_by_me
+                              ? html`<button class="tag" title="You are getting this — press to let it go"
+                                  onClick=${() => claim(w)}>
+                                  <i class="ph-light ph-check"></i>you</button>`
+                            : w.claimed && w.holder_known
+                              ? html`<span class="tag" title=${(w.claimed_by || "Someone") + " is getting this"}>
+                                  <i class="ph-light ph-tag"></i>${w.claimed_by || "claimed"}</span>`
+                            : w.claimed
+                              ? (isEditor
+                                  ? html`<button class="tag" title="Claimed by someone — press to let it go" onClick=${() => release(w)}>
+                                      <i class="ph-light ph-tag"></i>claimed</button>`
+                                  : html`<span class="tag" title="Someone is getting this"><i class="ph-light ph-tag"></i>claimed</span>`)
                               : html`<button class="claim" onClick=${() => claim(w)}>
                                   <i class="ph-light ph-tag"></i>i'll get it</button>`}
 
@@ -409,7 +412,6 @@
                     </div>
                   `)}
                 </div>`}
-          `}
         </main>`;
     }
 

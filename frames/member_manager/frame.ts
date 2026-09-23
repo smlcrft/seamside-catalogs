@@ -1,30 +1,28 @@
 // ----------------------------------------------------------------------------------------
 // Member Manager — view and manage people and their roles within an organization.
 //
-// Members live in a shared SyncTable (peer-to-peer synced across the space).
-// Per-placement preferences (org name, role list, owner-only edit toggle) are stored
-// in a local JSON file keyed by sfi_id (space_frame_instance_id).
+// The roster is a `members` list of the space: `members.table.jsonl`, or a subtype such as
+// `club.members.table.jsonl` when a space keeps more than one. Each session is bound to one
+// (sessionKv `bound/members`), chosen by an editor. It is a shared contract: Community
+// Library, Member Reachout and Garden Planner, bound to the same list, read the same rows.
+// Columns: name, email, phone (optional), role. Preferences (org name, role list, owner-only
+// edit) are this session's own (sessionKv `prefs`).
 // ----------------------------------------------------------------------------------------
 import {
   log, serveFileAtPath, pushToInstance, parsePeerInfo, onUiMessage,
-  declareTables, ensureTables, table, renderWaitingForOwner,
-  jsonReply, parseJsonBody, sanitizeText,
-  loadJsonFile, saveJsonFile, wireTableChangeListener,
+  table, sessionKv,
+  jsonReply, parseJsonBody, sanitizeText, wireTableChangeListener,
 } from "@frame-core";
 
-declareTables([{
-  key: "members",
-  title: "Members",
-  description: "People and their roles within the organization.",
-  schema: [
-    { name: "name",  col_type: "text", nullable: false },
-    { name: "email", col_type: "text", nullable: false },
-    { name: "phone", col_type: "text", nullable: true },
-    { name: "role",  col_type: "text", nullable: false },
-  ],
-}]);
+// ----- Which list: `members` or a subtype `<name>.members`, bound per session -------------
+const LIST_NAME = /^([a-z0-9][a-z0-9_-]*\.)*members$/;
+const validList = (n: unknown): n is string => typeof n === "string" && n.length <= 64 && LIST_NAME.test(n);
+async function boundList(): Promise<string | null> {
+  const v = (await sessionKv.get("bound/members"))?.value;
+  return validList(v) ? v : null;
+}
 
-// ----- Per-sfi preferences (local-only JSON file) ---------------------------------------
+// ----- Preferences (this session's own) ---------------------------------------------------
 type Prefs = {
   org_name: string;
   roles: string[];
@@ -37,21 +35,18 @@ const DEFAULT_PREFS: Prefs = {
   owner_only_edit: false,
 };
 
-const allPrefs: Record<string, Prefs> = loadJsonFile(import.meta.url, "prefs.json", {} as Record<string, Prefs>);
-
-function getPrefs(sfi_id: string): Prefs {
-  const p = allPrefs[sfi_id];
-  if (!p) return { ...DEFAULT_PREFS, roles: [...DEFAULT_PREFS.roles] };
+async function getPrefs(): Promise<Prefs> {
+  let p: Partial<Prefs> = {};
+  try { p = JSON.parse((await sessionKv.get("prefs"))?.value ?? "{}") ?? {}; } catch { /* defaults */ }
   return {
-    org_name: typeof p.org_name === "string" ? p.org_name : DEFAULT_PREFS.org_name,
+    org_name: typeof p.org_name === "string" && p.org_name ? p.org_name : DEFAULT_PREFS.org_name,
     roles: Array.isArray(p.roles) && p.roles.length > 0 ? p.roles.map(String) : [...DEFAULT_PREFS.roles],
     owner_only_edit: !!p.owner_only_edit,
   };
 }
 
-function setPrefs(sfi_id: string, next: Prefs): void {
-  allPrefs[sfi_id] = next;
-  saveJsonFile(import.meta.url, "prefs.json", allPrefs);
+async function setPrefs(next: Prefs): Promise<void> {
+  await sessionKv.put("prefs", JSON.stringify(next));
 }
 
 // ----- Helpers --------------------------------------------------------------------------
@@ -62,29 +57,11 @@ function canEdit(peer: ReturnType<typeof parsePeerInfo>, prefs: Prefs): boolean 
   return peer.is_sfi_editor;
 }
 
-// The `phone` column was added after the first release. Tables bound by an older
-// version don't have it, so the owner (the binding owner) evolves the schema in place.
-// Once added the binding map persists, so `"phone" in colMap` short-circuits this on
-// every later request. Returns whether the column is available for this placement.
-async function ensurePhoneColumn(
-  peer: ReturnType<typeof parsePeerInfo>,
-  colMap: Record<string, string>,
-): Promise<boolean> {
-  if ("phone" in colMap) return true;
-  if (!peer.is_owner) return false; // only the binding owner can evolve the schema
-  try {
-    await table("members", peer.sfi_id).addColumn("phone", "text", { nullable: true });
-    return true;
-  } catch (e) {
-    log("member_manager: failed to add phone column — " + e);
-    return false;
-  }
-}
-
 // ----- Shared write logic ---------------------------------------------------------------
 // Both entry points (HTTP arms and the bus dispatcher) land here; role gates live inside.
-// Member writes reach every viewer via the wired members_changed table-change push;
-// settings pushes settings_changed explicitly.
+// Member writes reach this session's viewers via the wired members_changed push (member
+// pages also watch the bound table itself, which other frames write); settings and a new
+// binding push settings_changed.
 type WriteResult = { status: number; body: unknown };
 
 async function handleWrite(
@@ -94,37 +71,15 @@ async function handleWrite(
   peer: ReturnType<typeof parsePeerInfo>,
 ): Promise<WriteResult> {
   const p = peer.sfi_id === sfiId ? peer : { ...peer, sfi_id: sfiId };
-  const tables = ensureTables(p);
-  if (!tables.ready) return { status: 503, body: { error: "table not yet bound", missing: tables.missingKeys } };
-  wireTableChangeListener("members", sfiId, "members_changed");
-  const members = table("members", sfiId);
-  const prefs = getPrefs(sfiId);
+  const prefs = await getPrefs();
 
-  if (op === "member") {
-    if (!canEdit(p, prefs)) return { status: 403, body: { error: "editing is restricted to the frame owner" } };
-    if (!v) return { status: 400, body: { error: "invalid JSON" } };
-    const hasPhone = await ensurePhoneColumn(p, tables.byKey["members"].colIdByName);
-    const name = sanitizeText(v.name, 120);
-    const email = sanitizeText(v.email, 200);
-    const phone = sanitizeText(v.phone, 40); // optional
-    const role = sanitizeText(v.role, 80);
-    if (!name) return { status: 400, body: { error: "name required" } };
-    if (!email) return { status: 400, body: { error: "email required" } };
-    if (!role) return { status: 400, body: { error: "role required" } };
-    if (!prefs.roles.includes(role)) return { status: 400, body: { error: "role not in allowed list" } };
-    const rowId = v.row_id ? String(v.row_id) : null;
-    const values: Record<string, unknown> = { name, email, role };
-    if (hasPhone) values.phone = phone; // only write phone once the column exists
-    const { row_id } = await members.upsert(rowId, values);
-    return { status: 200, body: { row_id } };
-  }
-
-  if (op === "member/delete") {
-    if (!canEdit(p, prefs)) return { status: 403, body: { error: "editing is restricted to the frame owner" } };
-    const rowId = String(v?.row_id ?? "");
-    if (!rowId) return { status: 400, body: { error: "row_id required" } };
-    await members.delete(rowId);
-    return { status: 204, body: null };
+  if (op === "bind") {
+    if (!p.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+    const name = v?.list;
+    if (!validList(name)) return { status: 400, body: { error: "a members list is named members or <name>.members" } };
+    await sessionKv.put("bound/members", name);
+    pushToInstance(sfiId, { type: "settings_changed" });
+    return { status: 200, body: { bound: name } };
   }
 
   if (op === "settings") {
@@ -140,9 +95,40 @@ async function handleWrite(
       roles,
       owner_only_edit: !!v.owner_only_edit,
     };
-    setPrefs(sfiId, next);
+    await setPrefs(next);
     pushToInstance(sfiId, { type: "settings_changed" });
     return { status: 200, body: { prefs: next } };
+  }
+
+  const list = await boundList();
+  if (!list) return { status: 409, body: { error: "no members list chosen yet" } };
+  wireTableChangeListener(list, sfiId, "members_changed");
+  const members = table(list, sfiId);
+
+  if (op === "member") {
+    if (!canEdit(p, prefs)) return { status: 403, body: { error: prefs.owner_only_edit ? "editing is restricted to the frame owner" : "editors only" } };
+    if (!v) return { status: 400, body: { error: "invalid JSON" } };
+    const name = sanitizeText(v.name, 120);
+    const email = sanitizeText(v.email, 200);
+    const phone = sanitizeText(v.phone, 40); // optional
+    const role = sanitizeText(v.role, 80);
+    if (!name) return { status: 400, body: { error: "name required" } };
+    if (!email) return { status: 400, body: { error: "email required" } };
+    if (!role) return { status: 400, body: { error: "role required" } };
+    if (!prefs.roles.includes(role)) return { status: 400, body: { error: "role not in allowed list" } };
+    const rowId = v.row_id ? String(v.row_id) : null;
+    // An id that names no row is refused, never created (upsert would phantom-create it).
+    if (rowId && !(await members.get(rowId))) return { status: 404, body: { error: "member not found" } };
+    const { row_id } = await members.upsert(rowId, { name, email, phone, role });
+    return { status: 200, body: { row_id } };
+  }
+
+  if (op === "member/delete") {
+    if (!canEdit(p, prefs)) return { status: 403, body: { error: prefs.owner_only_edit ? "editing is restricted to the frame owner" : "editors only" } };
+    const rowId = String(v?.row_id ?? "");
+    if (!rowId) return { status: 400, body: { error: "row_id required" } };
+    await members.delete(rowId);
+    return { status: 204, body: null };
   }
 
   return { status: 404, body: { error: "unknown op" } };
@@ -164,22 +150,10 @@ onUiMessage(async (sfiId, data, peer) => {
 self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, body, cookies) {
   const peer = parsePeerInfo(query, cookies);
 
-  const tables = ensureTables(peer);
-  if (!tables.ready) {
-    if (reqPath === "/index.html") {
-      return renderWaitingForOwner(replyPort, peer);
-    }
-    if (method === "GET") { // static assets are fine to serve even if tables are not ready.
-      return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-    }
-    return jsonReply(replyPort, 503, { error: "table not yet bound", missing: tables.missingKeys });
-  }
-
-  wireTableChangeListener("members", peer.sfi_id, "members_changed");
-  const members = table("members", peer.sfi_id);
-  const prefs = getPrefs(peer.sfi_id);
+  const list = await boundList();
+  if (list) wireTableChangeListener(list, peer.sfi_id, "members_changed");
+  const prefs = await getPrefs();
   const editable = canEdit(peer, prefs);
-  const hasPhone = await ensurePhoneColumn(peer, tables.byKey["members"].colIdByName);
 
   if (reqPath === "/api/state" && method === "GET") {
     return jsonReply(replyPort, 200, {
@@ -190,14 +164,17 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
         is_anon: peer.is_anon,
       },
       can_edit: editable,
-      has_phone: hasPhone,
+      bound: list,
+      can_bind: peer.is_sfi_editor,
+      has_phone: true,
     });
   }
 
-  // Open to every viewer who reaches the frame. Anonymous viewers get a reduced projection
-  // below (name + role only, no email) — that is the public view, not an access gate.
+  // Open to every viewer who reaches the frame. Anyone not on the space's roster (v1's
+  // `is_anon`) gets a reduced projection below (name + role only, no email or phone).
   if (reqPath === "/api/members" && method === "GET") {
-    const { rows } = await members.query({ limit: 1000 });
+    if (!list) return jsonReply(replyPort, 200, { rows: [], anon_view: peer.is_anon });
+    const { rows } = await table(list, peer.sfi_id).query({ limit: 1000 });
     // Group by role (in the configured role order), then alphabetically by name
     // within each role. Legacy/unknown roles sort to the end, then by name.
     const roleRank = new Map(prefs.roles.map((r, i) => [r, i]));
@@ -230,8 +207,8 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, qu
     return jsonReply(replyPort, r.status, r.body);
   }
 
-  if (reqPath === "/api/settings" && method === "POST") {
-    const r = await handleWrite("settings", parseJsonBody(body), peer.sfi_id, peer);
+  if ((reqPath === "/api/settings" || reqPath === "/api/bind") && method === "POST") {
+    const r = await handleWrite(reqPath.slice("/api/".length), parseJsonBody(body), peer.sfi_id, peer);
     return jsonReply(replyPort, r.status, r.body);
   }
 
