@@ -20,6 +20,14 @@ import binascii
 import hashlib
 import io
 import json
+try:
+    from PIL import Image
+except ImportError:  # noqa: the icon step names what it needs when it runs
+    Image = None
+try:
+    import cairosvg
+except ImportError:
+    cairosvg = None
 import re
 import shutil
 import sys
@@ -287,6 +295,37 @@ def normalize_permissions(perms: dict | None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# icons
+
+ICON_FILES = ("frameicon.svg", "frameicon.png", "frameicon.jpg", "frameicon.webp")
+ICON_THUMB_PX = 128
+
+
+def icon_data(frame_dir: Path) -> str:
+    """The frame's icon file (`frameicon.*` at its root, the app's rule) as a
+    128 px WebP in base64, inlined on the item so a person browsing sees every
+    frame without a fetch per item. '' when the frame ships none. Needs Pillow,
+    and cairosvg for an SVG source; a missing one is an error on the frame that
+    needs it, never silently no icon."""
+    src = next((frame_dir / n for n in ICON_FILES if (frame_dir / n).is_file()), None)
+    if src is None:
+        return ""
+    if Image is None:
+        raise RuntimeError("Pillow is needed to make icon thumbnails: python3 -m pip install -r scripts/requirements.txt")
+    if src.suffix == ".svg":
+        if cairosvg is None:
+            raise RuntimeError(f"{src.name} needs cairosvg to rasterise: python3 -m pip install -r scripts/requirements.txt")
+        raw = cairosvg.svg2png(url=str(src), output_width=ICON_THUMB_PX, output_height=ICON_THUMB_PX)
+        img = Image.open(io.BytesIO(raw))
+    else:
+        img = Image.open(src)
+    img = img.convert("RGBA")
+    img.thumbnail((ICON_THUMB_PX, ICON_THUMB_PX))
+    out = io.BytesIO()
+    img.save(out, format="WEBP", quality=82, method=6)
+    return base64.b64encode(out.getvalue()).decode("ascii")
+
+
 # frames
 
 def build_frames_manifest() -> tuple[int, int]:
@@ -331,6 +370,13 @@ def build_frames_manifest() -> tuple[int, int]:
             errors += 1
             continue
 
+        try:
+            thumb = icon_data(sub)
+        except Exception as e:  # noqa: BLE001 — named per frame, and the build fails
+            print(f"  ✗ ERROR {sub.name}: icon — {e}")
+            errors += 1
+            continue
+
         tar_path = FRAMES_PKG / f"{sub.name}.tar.gz"
         build_frame_tarball(sub, tar_path)
         sha = sha256_hex(tar_path)
@@ -357,6 +403,13 @@ def build_frames_manifest() -> tuple[int, int]:
             "package_url":        url,
             "package_sha256":     sha,
         }
+        # The icon: the thumbnail when the frame ships an icon file; the
+        # manifest's channel colour only where it applies (a frame with no
+        # image, since an image tile draws with no tint).
+        if thumb:
+            item["icon_data"] = thumb
+        elif re.fullmatch(r"c(1[0-2]|[1-9])", str(meta.get("color", ""))):
+            item["color"] = meta["color"]
         # Advertise the frame's declared access (net / web / web_scripts / capture
         # devices / local hardware) so a client can show it to the user BEFORE
         # install — and verify it after: the app refuses to start a frame whose

@@ -6,3 +6,7 @@
 # drifts between zlib releases, which changes each package's sha256 for no real
 # content change. The version is pinned so the bytes stay stable over time too.
 zopfli==0.4.3
+# Pillow makes each frame's icon thumbnail (a 128 px WebP inlined on its
+# catalog item); cairosvg rasterises an SVG icon for it.
+Pillow==11.3.0
+cairosvg==2.8.2
