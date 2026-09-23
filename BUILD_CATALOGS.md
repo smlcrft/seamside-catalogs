@@ -28,7 +28,7 @@ The build script:
    - Builds a deterministic gzipped tarball at `packages/frames/<dir_id>.tar.gz`. Mtimes, uids, gids, and gzip header timestamps are all zeroed, and the gzip step uses **Zopfli** (not stdlib gzip) so the compressed bytes don't vary by platform — rebuilds with no source changes produce byte-identical artifacts and a stable sha256 **on any machine** (see [Reproducible packages](#reproducible-packages)).
    - Excludes `data/`, `.DS_Store`, `__pycache__`, and `.git` from each tarball. `data/` is per-host runtime state and is preserved separately by the Seamside installer.
    - Computes the sha256 of the tarball.
-   - Reads `frame.json` and emits an entry in `frames.json` with `name`, `description`, `icon`, `modified_at`, the lightweight `frame_preview` (frame_type, default sizes, capability deps), a `package_url` pointing at the GitHub raw URL, and the recorded sha256.
+   - Reads `frame.json` and emits an entry in `frames.json` with `name`, `description`, `icon`, `modified_at`, the lightweight `frame_preview` (frame_type, default sizes), a `package_url` pointing at the GitHub raw URL, and the recorded sha256.
 2. Walks [`capabilities/`](capabilities/). For each `*.json` file (not starting with `_` or `.`):
    - Copies it as-is to `packages/capabilities/<name>.json` (capabilities ship as single JSON files, not tarballs).
    - Computes its sha256 and writes an entry in `capabilities.json` with a `capability_preview` carrying `kind` and method names.
@@ -78,8 +78,7 @@ The build script emits this shape — it mirrors the `WireCatalogManifest` struc
       "frame_preview": {                                 // null for capabilities
         "frame_type":               "Tandem",            // "Tandem" (the frame *type* — shared Deno worker — not the old product name) | "Solo" | "Hosted" | "Proxy"
         "default_width_px":         560,
-        "default_height_px":        640,
-        "depends_on_capabilities":  []
+        "default_height_px":        640
       },
       "capability_preview": null,                        // populated only for capability items
       "permissions": {                                   // frame's declared outside-resource access (frames only)
@@ -125,7 +124,7 @@ These are read from the source `frame.json` / capability JSON and surfaced into 
 ## Adding a new frame
 
 1. Drop a directory under [`frames/`](frames/) containing at minimum `frame.json` and whatever code the frame needs (`frame.ts`, `public/`, etc.). Frame-authoring conventions live in the Seamside app's [`MANUAL_FRAMEGEN_CONTEXT.md`](https://github.com/smlcrft/seamside/blob/main/tauri-app/src-tauri/chassis/bundled_catalogs/frames/MANUAL_FRAMEGEN_CONTEXT.md).
-2. Set `name`, `description`, `modified_at`, optional `default_width_px` / `default_height_px`, `permissions` (`net` / `web` / `web_scripts` — the build copies these into the manifest and the app verifies them at install), `depends_on_capabilities`, and `tags` (see Optional source fields) in `frame.json`. Bump `modified_at` whenever you ship a change you want existing installs to see as "update available".
+2. Set `name`, `description`, `modified_at`, optional `default_width_px` / `default_height_px`, `permissions` (`net` / `web` / `web_scripts` — the build copies these into the manifest and the app verifies them at install), and `tags` (see Optional source fields) in `frame.json`. Bump `modified_at` whenever you ship a change you want existing installs to see as "update available".
 3. Run `python3 scripts/build_catalogs.py`.
 4. Commit `frames.json`, the new `frames/<dir_id>/`, and `packages/frames/<dir_id>.tar.gz`.
 

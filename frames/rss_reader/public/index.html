@@ -50,6 +50,7 @@
     .content { line-height: 1.6; color: var(--os-text-secondary); overflow-wrap: anywhere; }
     .content img { max-width: 100%; height: auto; border-radius: var(--os-radius-md); }
     .content a { color: var(--ch); }
+    .content .imglink { display: inline-block; margin: var(--os-sp-xs) 0; font-size: var(--os-fs-sm); }
     .boostbtn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--os-radius-md); border: 1px solid var(--os-border-color); background: var(--os-bg-surface); color: var(--os-text); cursor: pointer; font: inherit; }
     .boostbtn.on { background: var(--ch); color: var(--ch-fg); border-color: transparent; }
     .linkbtn { background: none; border: none; color: var(--ch); cursor: pointer; font: inherit; padding: 0; }
@@ -147,9 +148,7 @@
         return frame.api("api/items?" + p.toString()).then(r => setItems(r.items || []));
       }, [sel.view, sel.groupId, sel.feedId, sel.query]);
       useEffect(() => { const t = setTimeout(load, sel.query ? 180 : 0); return () => clearTimeout(t); }, [load]);
-      useFramePush({ feeds_changed: load, "synctable-change": load });   // the backend
-      // pushes feeds_changed on every shared mutation; the synctable key is kept so a
-      // placement whose data was moved to a shared table still refreshes.
+      useFramePush({ feeds_changed: load });   // pushed on every shared mutation
 
       const open = (it) => {
         onOpen(it.id); // open the reader immediately — never gate it on a side-effect
@@ -221,15 +220,37 @@
         </div>`)}`;
     }
 
+    // A frame's page has no network: a feed's remote pictures cannot load here, so each
+    // becomes a link that opens it in the browser. A <template> parses without loading.
+    function inert(content) {
+      const t = document.createElement("template");
+      t.innerHTML = content || "";
+      for (const img of t.content.querySelectorAll("img")) {
+        const src = img.getAttribute("src") || "";
+        if (!/^https?:/i.test(src)) { img.remove(); continue; }
+        const a = document.createElement("a");
+        a.href = src; a.className = "imglink";
+        a.textContent = "picture" + (img.alt ? ": " + img.alt : "") + " ↗";
+        img.replaceWith(a);
+      }
+      for (const el of t.content.querySelectorAll("picture source, video, audio")) el.remove();
+      return t.innerHTML;
+    }
+    // Links in an item open in the browser, never inside the frame.
+    function openLink(e) {
+      const a = e.target.closest && e.target.closest("a[href]");
+      if (!a) return;
+      e.preventDefault();
+      if (/^https?:/i.test(a.href)) frame.openExternalUrl(a.href);
+    }
+
     function Reader({ itemId, boot, onChanged, onBack }) {
       const [data, setData] = useState(null);
       const [replyTo, setReplyTo] = useState(null);
       const [draft, setDraft] = useState("");
       const load = useCallback(() => frame.api(`api/items/${itemId}`).then(setData), [itemId]);
       useEffect(() => { setData(null); setReplyTo(null); setDraft(""); load(); }, [itemId]);
-      useFramePush({ feeds_changed: load, "synctable-change": load });   // the backend
-      // pushes feeds_changed on every shared mutation; the synctable key is kept so a
-      // placement whose data was moved to a shared table still refreshes.
+      useFramePush({ feeds_changed: load });   // pushed on every shared mutation
       const backBtn = onBack ? html`<button class="backbtn" onClick=${onBack}>← Back to list</button>` : null;
       if (!data) return html`<div class="reader">${backBtn}<div class="empty">Loading…</div></div>`;
       const iBoosted = data.boosts.some(f => f.user_id === boot.userId);
@@ -253,7 +274,7 @@
         </div>
         <button class="boostbtn ${iBoosted ? 'on' : ''}" onClick=${toggleBoost}>↑ ${data.boosts.length || 'Boost'}</button>
         ${boosters ? html`<div class="src" style="margin-top:6px">boosted by ${boosters}</div>` : null}
-        <div class="content" dangerouslySetInnerHTML=${{ __html: data.item.content || "" }}></div>
+        <div class="content" onClick=${openLink} dangerouslySetInnerHTML=${{ __html: inert(data.item.content) }}></div>
         <div class="cmts">
           <div class="label" style="margin-left:0">Discussion</div>
           <${CommentTree} nodes=${data.comments} parentId=${null} boot=${boot} onReply=${setReplyTo} onDelete=${del} />
@@ -291,7 +312,7 @@
       const onChanged = useCallback(() => reloadBootstrap(), [reloadBootstrap]);
 
       useEffect(() => { applyChannel(document.documentElement); reloadBootstrap(); }, []);
-      useFramePush({ "synctable-change": reloadBootstrap });
+      useFramePush({ feeds_changed: reloadBootstrap });
 
       useEffect(() => {
         const mq = window.matchMedia("(max-width: 900px)");

@@ -15,12 +15,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 640,
-        "default_height_px": 600,
-        "depends_on_capabilities": []
+        "default_height_px": 600
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/assignments.tar.gz",
-      "package_sha256": "95ef879ac508e8cb1d82abe0687e8ebc139f97c52e8b6c99ca440c0c1bf3d740",
+      "package_sha256": "39b46a12458f951b920552f954b9121b3f6d67644bd49e4ffd4afeb94900106d",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -40,12 +39,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 620,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/bookmarks.tar.gz",
-      "package_sha256": "0ba02af67b873cebe57bc8f0426cd6fc8cb23d597d88b67891f78830691cea9a",
+      "package_sha256": "49730d32c64a8d5082f26714f2e429cc414d79cbfa3a2601de24bb0df4c17662",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -65,12 +63,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 560,
-        "default_height_px": 460,
-        "depends_on_capabilities": []
+        "default_height_px": 460
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/calendar.tar.gz",
-      "package_sha256": "64f78f67d60fc1cb45148a30607be00e4773e299f46bdbaa7facc51e21867aac",
+      "package_sha256": "f54593b4379c4e95824120b9fb1017140cad02cd095417c0f14a05cfc76e65a3",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -88,12 +85,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 360,
-        "default_height_px": 380,
-        "depends_on_capabilities": []
+        "default_height_px": 380
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/camjam.tar.gz",
-      "package_sha256": "5b6bec4bc48c35c7cd0750e04775f41d87e9cc877edade7e6674e39aee43711f",
+      "package_sha256": "6cac38b99871b0ec6aacfc83bbcdbb3bdede51bfe5a7cba3155e4438b236f82d",
       "color": "c1",
       "permissions": {
         "camera": true
@@ -115,12 +111,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 420,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/checklist.tar.gz",
-      "package_sha256": "1ee8232a5fee5e363da396599e3d024c1e4467396b2b4c0728cd5825463821e3",
+      "package_sha256": "62391267e069d08ed2bcbfae844047cddff341176dc2c11345afb51e66f92928",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -138,12 +133,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 640,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/chore_chart.tar.gz",
-      "package_sha256": "5ea5444e2d5688c75f2c6ce2ca44431d299254f5a41ddd6de70591c15885992d",
+      "package_sha256": "32ed07ab1baef95b4aca2dba81ea22ab6c81d487106e1e3cce2f662771098d08",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -161,12 +155,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 720,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/class_schedule.tar.gz",
-      "package_sha256": "33ea1384c3d152125bb3ecbce6e20df36bde07ec39c07c3b70b0b0e55070b2dd",
+      "package_sha256": "d4463763fc3f6d23933236c8838f2bdcda1d149088eb10de20684a2312c9b2b0",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -186,12 +179,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
+        "default_height_px": 0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_home.tar.gz",
-      "package_sha256": "40d0072cb848fa29448abc0326d010678e679866ca30c5e64ad3ac984037d9d5",
+      "package_sha256": "9f62f37889ed19b4522ea73f84b9e951d7c6f231b8f299b45c4e75e2982cc536",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -209,12 +201,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
+        "default_height_px": 0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_library.tar.gz",
-      "package_sha256": "bbcfaeb360182ac87d41c5806aa53c1730d37d6de30bfba794b1a566b92dc30c",
+      "package_sha256": "a26fdbd3831b6217c3ef345512ef39b0eb8fe97bcde30fa2891003fa98865409",
       "color": "c8",
       "app_version_min": "1.0.0",
       "tags": [
@@ -233,12 +224,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
+        "default_height_px": 0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/discussion_channel.tar.gz",
-      "package_sha256": "6316b437eecf4b73ab55cf404c63c881da3e1891abf628b5f3347319ab8462dd",
+      "package_sha256": "9dc960ab29c530481e3e23a2d5369821b2bbec7425efe4c866e79637d2c9ce4f",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -256,12 +246,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 760,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/family_budget.tar.gz",
-      "package_sha256": "862db7b0edb79fe99470813b53ff060bc56d53aba88e78216fd9fa4850e0f31a",
+      "package_sha256": "159d3a6c683c6c402dec12843099c0ff393f0407914f8370155f9f170234c9da",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -279,12 +268,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 420,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/file_folder.tar.gz",
-      "package_sha256": "213cadfb6322d7f1e99e1675c87eb77fcf61d5d4476dad061b8177a6592ebd88",
+      "package_sha256": "7f340566d64151c5851bbf5ee22d0bda547ab904a8675f3baa4b3d8947e7a30e",
       "color": "c4",
       "app_version_min": "1.0.0",
       "tags": [
@@ -302,12 +290,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 560,
-        "default_height_px": 480,
-        "depends_on_capabilities": []
+        "default_height_px": 480
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/flashcards.tar.gz",
-      "package_sha256": "c732e2dbb84e8f6cd1c00aedfc4d35ecf3e765d5425f7e3ab08272f1fd9eab99",
+      "package_sha256": "3f24eb70005cdd0d50a27f588d2b93b3cb93410b54c048e2e644caf0c3d5501c",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -327,12 +314,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 380,
-        "default_height_px": 460,
-        "depends_on_capabilities": []
+        "default_height_px": 460
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/focus_timer.tar.gz",
-      "package_sha256": "5111a3360b867dbba1dda14785295ab4209eeadee532f3dc63c527b72643d894",
+      "package_sha256": "4869e9670a8efc38d035f16547a9d63535f5d3c121e52f2e0a0053612b166f66",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -352,12 +338,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
+        "default_height_px": 0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_ascii_runner.tar.gz",
-      "package_sha256": "90399fff090aebcc226018dd7312d44bed87dcd7e00f886899aa06f052b370eb",
+      "package_sha256": "308ce85c95f8095a25d3fca6ad5b931acf74b6af1a255cdeb61bdb168bc8afeb",
       "color": "c9",
       "app_version_min": "1.0.0",
       "tags": [
@@ -376,12 +361,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
+        "default_height_px": 0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_dice_roller.tar.gz",
-      "package_sha256": "1ebe7922c4ae33767ea15df05bf577a97585a947f591796d9910078709caf88f",
+      "package_sha256": "da5c4c53ce10b98de4a1b5273702d6252532469ca7b8eb6848b6acf2772bda43",
       "color": "c2",
       "app_version_min": "1.0.0",
       "tags": [
@@ -400,12 +384,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 400.0,
-        "default_height_px": 640.0,
-        "depends_on_capabilities": []
+        "default_height_px": 640.0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/game_pancake_stacker.tar.gz",
-      "package_sha256": "c7f174ff9f5817269725a075ed3024ca9b8b598702f6cf2d4bdef31dbeb0d820",
+      "package_sha256": "cf87c0fffbb1c64e37b67c58a364421f1751dd966ace4a8da0b776f29a6bb9a0",
       "color": "c8",
       "app_version_min": "1.0.0",
       "tags": [
@@ -424,12 +407,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 560,
-        "default_height_px": 640,
-        "depends_on_capabilities": []
+        "default_height_px": 640
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/garden_gnome.tar.gz",
-      "package_sha256": "34e37df35758dcfad41eb7014fd299029e6a7cf417d3c34634958ce544816cb9",
+      "package_sha256": "7cf0a7ff2f066cd03bfadcb9aabe680486f4517e803a09db02ea40f5d8cde282",
       "color": "c5",
       "permissions": {
         "net": [
@@ -454,12 +436,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 900,
-        "default_height_px": 700,
-        "depends_on_capabilities": []
+        "default_height_px": 700
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/garden_planner.tar.gz",
-      "package_sha256": "a26f09589fe3768b6307b1764a264c1db6f261ef8be1574dde3ba5474f2aec79",
+      "package_sha256": "5ef09b56d5e7e02db3c86274f4892736a417408ba6be0d39bbe8e577b9720839",
       "color": "c5",
       "permissions": {
         "net": [
@@ -484,12 +465,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 560,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/gift_list.tar.gz",
-      "package_sha256": "932c257ed75cc1643fd4c856573e5bcd54c0ba0130054648feeadd8c951af380",
+      "package_sha256": "3aba670817f081cae7af6280e1d951cf39d355e4a5f2185597f6308b1db2c7b7",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -508,12 +488,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 520,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/grocery_list.tar.gz",
-      "package_sha256": "ac8a71604b31e5260b73444ec5052a697d0d04d99d66e8ed19472851a3320d70",
+      "package_sha256": "f3deedbfeceb751a80f1ce4b110d8117cc9dcfafa7cb9abb2e85757d4770498c",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -531,12 +510,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 560,
-        "default_height_px": 420,
-        "depends_on_capabilities": []
+        "default_height_px": 420
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/habit_tracker.tar.gz",
-      "package_sha256": "06ce4cdc8a3ded869cf37d614aa98808f5962d5bd1b9a80cf242196160c6ac78",
+      "package_sha256": "d4e8a1fa380701f926a2c5ea8fb88abbf2da527d73c571c71dbb78ea8a33cb6e",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -555,12 +533,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
+        "default_height_px": 0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/help_desk.tar.gz",
-      "package_sha256": "6d50b5680f216e2548af5be72e3a052bf8502b2833f770f07b1249086cab2abe",
+      "package_sha256": "9458c785efb5c9b0a5a0d3bfb8dd291988f32acf1d193d744127ded876079b88",
       "color": "c2",
       "app_version_min": "1.0.0",
       "tags": [
@@ -579,12 +556,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 760,
-        "default_height_px": 520,
-        "depends_on_capabilities": []
+        "default_height_px": 520
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/kanban.tar.gz",
-      "package_sha256": "6bdef6165c626489f43f46e3d57c34844206a8cc8d6e1e55c0e3ca8240046148",
+      "package_sha256": "8d05f86b9600045b1828f47bf370dd44d1a460938d31f778fb92b19674533c01",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -592,33 +568,6 @@
         "tasks",
         "planning"
       ]
-    },
-    {
-      "kind": "Frames",
-      "id": "local_device_controller",
-      "name": "Local Device Controller",
-      "description": "Generic control panel for a local Upline serial device: builds its interface from the device's own schema. Place it more than once to control several devices independently.",
-      "icon": "",
-      "modified_at": "2026-08-10T20:17:21Z",
-      "frame_preview": {
-        "frame_type": "Tandem",
-        "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
-      },
-      "capability_preview": null,
-      "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/local_device_controller.tar.gz",
-      "package_sha256": "c4fc1cc5da9a8e7c85bffef5d52abd8e1e2147fc2153c37c76ffc408cf3abee0",
-      "permissions": {
-        "local_devices": [
-          {
-            "key": "sensor",
-            "description": "read and control any connected device",
-            "mode": "command"
-          }
-        ]
-      },
-      "app_version_min": "0.2.6"
     },
     {
       "kind": "Frames",
@@ -630,12 +579,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 720,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/market_weather.tar.gz",
-      "package_sha256": "cad69e98cbcf0b2696e5eed3b8cc83b9333a304823dfae4b1bdbe8907886fa62",
+      "package_sha256": "9860aa6efbf3e443983c0fff21046924e9605deda2ba385b5ca58e5e41020fa5",
       "color": "c2",
       "permissions": {
         "net": [
@@ -659,12 +607,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 760,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/meal_planner.tar.gz",
-      "package_sha256": "911d868825c46c28ecc86c99ca7d7abdfe0d08962762d1b458ffb484d7956d20",
+      "package_sha256": "a1566d25f57831d424934699a8020eb864b43d8f52b22f124192509dcd125273",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -683,12 +630,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
+        "default_height_px": 0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/member_manager.tar.gz",
-      "package_sha256": "d55e818924a6c16ce2d7823b0f9abdc95bd2a336a8a8d0a2c18b7a471acd4794",
+      "package_sha256": "62bc5d749a62708ea0d96d085a907ea14778bb220a195e5399b5f15b56ff0e16",
       "color": "c7",
       "app_version_min": "1.0.0",
       "tags": [
@@ -706,12 +652,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
+        "default_height_px": 0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/member_reachout.tar.gz",
-      "package_sha256": "7d864a49624de1ee5fa9f094a6828299ed7f48d4698673ee892ce7babb08034a",
+      "package_sha256": "0d8fa550fc96467f6be57881170f49b0c7e995038fae2389ff60b0368484352d",
       "color": "c7",
       "app_version_min": "1.0.0",
       "tags": [
@@ -729,12 +674,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 460,
-        "default_height_px": 600,
-        "depends_on_capabilities": []
+        "default_height_px": 600
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/notes.tar.gz",
-      "package_sha256": "54516522bdcb1127cc7e14efb15893fbba34f809e2632de93e1d965fbcf496f0",
+      "package_sha256": "76b63f71e0d38751d0405bbfcd20fb431b2e58300e4303cf788b8e24a2d083e5",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -753,12 +697,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 480,
-        "default_height_px": 640,
-        "depends_on_capabilities": []
+        "default_height_px": 640
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/outpost.tar.gz",
-      "package_sha256": "fd513d012fae1f8ca7b5e6c16e287244b813a63654314319114b2184ea1932f7",
+      "package_sha256": "46f4d2d931fb791d52662132a1c3235881f81d9979b88207114306cf7f0abda9",
       "color": "c6",
       "app_version_min": "1.0.0",
       "tags": [
@@ -776,12 +719,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 640,
-        "default_height_px": 480,
-        "depends_on_capabilities": []
+        "default_height_px": 480
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/picture_frame.tar.gz",
-      "package_sha256": "08f982945b44489ba97816a814f169313c645a90a7f215a23693c163b78372c1",
+      "package_sha256": "9537cb9615e96bc58f89b5f74d92a62dc214782b5bcd1a4973358470275876d8",
       "color": "c7",
       "app_version_min": "1.0.0",
       "tags": [
@@ -800,12 +742,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 760,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/recipe_box.tar.gz",
-      "package_sha256": "16367d52b92916fda0f64e9d3a82649103d8181032eab5e3b2393305d66c6c4d",
+      "package_sha256": "77ecd815af783931caa84b3adfbadba55e8cebdbe4b24453fc4c0cf3652f1189",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -823,12 +764,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 720,
-        "default_height_px": 640,
-        "depends_on_capabilities": []
+        "default_height_px": 640
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roadmap.tar.gz",
-      "package_sha256": "299432d56a9f65e693f103405bd0fcb98fd74af6f43ec35d94e4f68c07325842",
+      "package_sha256": "15ff7e6da6376e88734f4ea204da398d53d319a172a9b0fc7141db7f9b8b5495",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -846,12 +786,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
+        "default_height_px": 0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roundtable.tar.gz",
-      "package_sha256": "2af9c59f2acc94cf583835ad41885bc11dae10ea702fc3f9c3fdccef3d99adc9",
+      "package_sha256": "3ddfde2a93883365fa01a9be636aa1db8db1cb488444453483c98b9b112e9990",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -863,24 +802,24 @@
       "kind": "Frames",
       "id": "rss_reader",
       "name": "RSS Reader",
-      "description": "A reader for the open web, shared with the people you read alongside. Paste any site or feed address and the frame finds the feed, pulls the items in, and keeps them in groups you name. What you have read is yours alone; what you boost and what you say about an item is shared, so a space becomes a small room of co-readers rather than a lonely inbox. Keyboard-first: j and k move, m marks read, b boosts. Because a reader must be able to reach whatever you subscribe to, this frame asks for open network access \u2014 the platform answers by running it in a satellite process that can reach the wider internet but is blocked from your own machine and local network. Feeds, items and comments live in encrypted LocalTables scoped to the placement.",
-      "icon": "",
-      "modified_at": "2026-08-10T00:00:00Z",
+      "description": "A reader for the open web, shared with the people you read alongside. Paste any site or feed address and the frame finds the feed, pulls the items in, and keeps them in groups you name. What you boost and what you say about an item is shared with the space, so it becomes a small room of co-readers rather than a lonely inbox; members boost and comment, editors manage the feeds. Keyboard-first: j and k move, m marks read, b boosts. Because a reader must reach whatever you subscribe to, it asks to reach anything on the network \u2014 the internet, your home network and this computer \u2014 which you are shown and asked to allow before it is added. Feeds, items, boosts, comments and each person's read marks are the space's own tables (rss_*), so members can see each other's read marks.",
+      "icon": "ph:rss",
+      "modified_at": "2026-09-23T16:28:57Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 900,
-        "default_height_px": 640,
-        "depends_on_capabilities": []
+        "default_height_px": 640
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/rss_reader.tar.gz",
-      "package_sha256": "f9038f48252ba24bf868d1caaf972382ff650e7444a619c0a1f0c0ac56c7df84",
+      "package_sha256": "057948049901e82345d0704c19e3b585b529c0ae24f1919ed80fb7ac7fb666b0",
+      "color": "c2",
       "permissions": {
         "net": [
           "*"
         ]
       },
-      "app_version_min": "0.2.5",
+      "app_version_min": "1.0.0",
       "tags": [
         "everyday",
         "reading",
@@ -898,12 +837,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 480,
-        "default_height_px": 760,
-        "depends_on_capabilities": []
+        "default_height_px": 760
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/seamdeck.tar.gz",
-      "package_sha256": "66bf85996814c6dc161300197c99fc56793292c7d62aa106da3960fe9c82abee",
+      "package_sha256": "9d40724e94e247a62583c18c29de1cea3f827f1dbed38da380772a29be09d848",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -922,12 +860,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 640,
-        "default_height_px": 420,
-        "depends_on_capabilities": []
+        "default_height_px": 420
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/slideshow.tar.gz",
-      "package_sha256": "9b8587d538f42b223532db6697aa08a42f3c81efef5eb63bf95fdf8364de6eef",
+      "package_sha256": "30003d399c05d5f6eed85c28da2982b45685a2a50355a3ce506480f79eaeb91e",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -945,12 +882,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
+        "default_height_px": 0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/space_radio.tar.gz",
-      "package_sha256": "4bd16f8f581220ac6c02d2608818940824952d272d7cf56b4c70241d04f54256",
+      "package_sha256": "34bc5e1915cad513542732287e219c970576291fe5a64ac4e2178c2a7e26e3ec",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -968,12 +904,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 760,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/trip_planner.tar.gz",
-      "package_sha256": "d2d3f9526a14d88e0c6223d443fed99ed4a6fe509775d4ef67d8954ebe9a7e3d",
+      "package_sha256": "e0601e0618c54c5c0e15d4979deeff1e09f90c610b7e7a6a3a61a2326a09d5f8",
       "color": "c1",
       "permissions": {
         "net": [
@@ -998,12 +933,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 760,
-        "default_height_px": 560,
-        "depends_on_capabilities": []
+        "default_height_px": 560
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/watercolor_studio.tar.gz",
-      "package_sha256": "ba4029500feedb179b64c030520be61082898fc9de50fba271177e27da1d8d01",
+      "package_sha256": "83db39c273a0aefb7185c50fb09313cd1e18b162045f777880c12024b345d64a",
       "color": "c1",
       "app_version_min": "1.0.0",
       "tags": [
@@ -1021,12 +955,11 @@
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
-        "default_height_px": 0,
-        "depends_on_capabilities": []
+        "default_height_px": 0
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/weather_api.tar.gz",
-      "package_sha256": "7087f988615606f09bc12d77e6179a5fb205f08b17fd09c52bfcbf98d28f8af2",
+      "package_sha256": "290a20ea8e995164eab371b79216d7f9aa6d3e211e32e42383ade9d0ad901959",
       "color": "c7",
       "permissions": {
         "net": [

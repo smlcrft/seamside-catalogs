@@ -15,7 +15,6 @@
     "created_at": "2026-05-19T00:00:00Z",
     "default_height_px": 640.0,
     "default_width_px": 400.0,
-    "depends_on_capabilities": [],
     "description": "Simple solo arcade game. A pancake swings back and forth at the top of the griddle \u2014 tap, click, or hit space to drop it onto the stack. Each pancake trims to the overlap with the one below, so the tower narrows as you climb. Miss entirely and the stack topples. Everyone plays their own game; an editor's finished game is recorded and can set the space's high score, which every open page sees at once. Scores are the space's pancake_scores table, one row per player's best, so every Pancake Stacker in the space shares one board and members can read it.",
     "dir_id": "",
     "frame_type": "Tandem",

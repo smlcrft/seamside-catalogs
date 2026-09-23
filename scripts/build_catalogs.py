@@ -392,7 +392,6 @@ def build_frames_manifest() -> tuple[int, int]:
                 "frame_type":              meta.get("frame_type", "Tandem"),
                 "default_width_px":        meta.get("default_width_px", 0),
                 "default_height_px":       meta.get("default_height_px", 0),
-                "depends_on_capabilities": meta.get("depends_on_capabilities", []),
             },
             "capability_preview": None,
             # Advertise the frame's declared outside-resource access (net / web /

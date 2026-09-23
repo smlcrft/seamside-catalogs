@@ -11,7 +11,6 @@
     },
     "created_at": "2026-06-26T15:44:19Z",
     "modified_at": "2026-09-23T14:12:58Z",
-    "depends_on_capabilities": [],
     "default_width_px": 560,
     "default_height_px": 460,
     "licensed_under_cc0": true,

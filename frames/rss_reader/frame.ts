@@ -1,6 +1,6 @@
 import {
   log, serveFileAtPath, jsonReply, parseJsonBody, onUiMessage, pushToInstance,
-  declareTables, ensureTables, table, parsePeerInfo,
+  declareTables, table, parsePeerInfo,
 } from "@frame-core";
 import { parseFeed } from "./lib/parser.ts";
 import { discoverFeedUrl, looksLikeFeed } from "./lib/discovery.ts";
@@ -10,11 +10,11 @@ import { planMerge, type ExistingItem } from "./lib/merge.ts";
 const ITEM_CAP = 80;
 
 declareTables([
-  { key: "groups", title: "Groups", description: "Feed groups", local: true, schema: [
+  { key: "rss_groups", title: "Groups", description: "Feed groups", schema: [
     { name: "name", col_type: "text", nullable: false },
     { name: "sort", col_type: "integer", nullable: true, default_val: "0" },
   ]},
-  { key: "feeds", title: "Feeds", description: "Subscribed feeds", local: true, schema: [
+  { key: "rss_feeds", title: "Feeds", description: "Subscribed feeds", schema: [
     { name: "url", col_type: "text", nullable: false },
     { name: "site_url", col_type: "text", nullable: true },
     { name: "title", col_type: "text", nullable: false },
@@ -23,7 +23,7 @@ declareTables([
     { name: "last_fetched", col_type: "integer", nullable: true },
     { name: "last_error", col_type: "text", nullable: true },
   ]},
-  { key: "items", title: "Items", description: "Feed items", local: true, schema: [
+  { key: "rss_items", title: "Items", description: "Feed items", schema: [
     { name: "feed_id", col_type: "text", nullable: false },
     { name: "guid", col_type: "text", nullable: false },
     { name: "title", col_type: "text", nullable: false },
@@ -33,13 +33,13 @@ declareTables([
     { name: "published_at", col_type: "integer", nullable: true },
     { name: "fetched_at", col_type: "integer", nullable: false },
   ]},
-  { key: "boosts", title: "Boosts", description: "Co-reader boosts", local: true, schema: [
+  { key: "rss_boosts", title: "Boosts", description: "Co-reader boosts", schema: [
     { name: "item_id", col_type: "text", nullable: false },
     { name: "user_id", col_type: "text", nullable: false },
     { name: "user_name", col_type: "text", nullable: true },
     { name: "created_at", col_type: "integer", nullable: false },
   ]},
-  { key: "comments", title: "Comments", description: "Threaded comments", local: true, schema: [
+  { key: "rss_comments", title: "Comments", description: "Threaded comments", schema: [
     { name: "item_id", col_type: "text", nullable: false },
     { name: "parent_id", col_type: "text", nullable: true },
     { name: "user_id", col_type: "text", nullable: false },
@@ -47,7 +47,7 @@ declareTables([
     { name: "body", col_type: "text", nullable: false },
     { name: "created_at", col_type: "integer", nullable: false },
   ]},
-  { key: "reads", title: "Reads", description: "Per-user read state", local: true, schema: [
+  { key: "rss_reads", title: "Read marks", description: "Who has read which item", schema: [
     { name: "item_id", col_type: "text", nullable: false },
     { name: "user_id", col_type: "text", nullable: false },
     { name: "read_at", col_type: "integer", nullable: false },
@@ -56,20 +56,35 @@ declareTables([
 
 function nowMs(): number { return Date.now(); }
 
+// ----- Read state ------------------------------------------------------------------------
+// Each person's read marks are rows of the space's `rss_reads` table (one per person and
+// item), so they travel with the space — and, being a table of the space, every member can
+// read whose marks are whose.
+const safeId = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, "_");
+const readId = (userId: string, itemId: string) => `${safeId(userId)}~${safeId(itemId)}`;
+async function myReads(userId: string): Promise<Set<string>> {
+  const { rows } = await table("rss_reads").query({ where: { user_id: userId } });
+  return new Set(rows.map((r) => String(r.item_id)));
+}
+async function setRead(userId: string, itemId: string, read: boolean): Promise<void> {
+  const t = table("rss_reads");
+  if (read) await t.upsert(readId(userId, itemId), { item_id: itemId, user_id: userId, read_at: nowMs() });
+  else await t.delete(readId(userId, itemId));
+}
+async function forgetItemReads(itemId: string): Promise<void> {
+  await table("rss_reads").deleteWhere({ item_id: itemId });
+}
+
 // deno-lint-ignore no-explicit-any
 function readBody(body: any): any {
   try { return parseJsonBody(body) ?? {}; } catch { return {}; }
 }
 
 // ----- Fetching the open web ---------------------------------------------------------
-// This frame declares `permissions.net: ["*"]`, because a reader has to be able to reach
-// whatever the user subscribes to and there is no allowlist that could be written ahead of
-// time. The platform answers that grant by running this worker in a SATELLITE PROCESS
-// spawned with `--allow-net --deny-net=<loopback>`: it can reach the wider internet and is
-// blocked from the user's own machine and local network, so a hostile feed URL cannot be
-// turned into a probe of what is running on localhost. That deny list is the platform's to
-// enforce, not ours — Deno worker permissions are allow-lists only, which is exactly why
-// the sole-"*" case gets its own process (see arbiter.ts, SATELLITE WORKER HOST).
+// A reader has to reach whatever the user subscribes to, and no allowlist can be written
+// ahead of time, so this frame asks for `permissions.net: ["*"]`. Seamside v1 does not grant
+// the whole network (a frame's net is a list of hosts the keeper sees before it runs), so
+// on v1 this worker only reaches the hosts its manifest names.
 //
 // What is ours: refuse anything that isn't plainly http(s), give up rather than hang, and
 // stop reading a response that is too big to be a feed. A subscription is a URL a person
@@ -132,7 +147,8 @@ async function allRows(peer: any, key: string): Promise<any[]> {
 
 // deno-lint-ignore no-explicit-any
 async function cascadeItem(peer: any, itemRowId: string): Promise<void> {
-  for (const key of ["reads", "boosts", "comments"]) {
+  await forgetItemReads(itemRowId);
+  for (const key of ["rss_boosts", "rss_comments"]) {
     const t = table(key, peer.sfi_id);
     const rows = (await allRows(peer, key)).filter((r) => r.item_id === itemRowId);
     for (const r of rows) await t.delete(r._row_id);
@@ -143,8 +159,8 @@ async function cascadeItem(peer: any, itemRowId: string): Promise<void> {
 async function ingestFeed(peer: any, feedRowId: string, feedUrl: string): Promise<{ title: string; inserted: number }> {
   const resp = await fetchUrl(feedUrl);
   const parsed = parseFeed(resp.body, feedUrl);
-  const itemsT = table("items", peer.sfi_id);
-  const existingAll = await allRows(peer, "items");
+  const itemsT = table("rss_items", peer.sfi_id);
+  const existingAll = await allRows(peer, "rss_items");
   const existing: ExistingItem[] = existingAll.filter((i) => i.feed_id === feedRowId)
     .map((i) => ({ _row_id: i._row_id, guid: i.guid, published_at: i.published_at, fetched_at: i.fetched_at }));
   const { toInsert, toPrune } = planMerge(existing, parsed.items, ITEM_CAP);
@@ -208,7 +224,7 @@ async function handleWrite(peer: any, op: string, v: any): Promise<WriteResult> 
       }
     } catch (e) { return { status: 200, body: { error: String(e instanceof Error ? e.message : e) } }; }
 
-    const feedsT = table("feeds", sfiId);
+    const feedsT = table("rss_feeds", sfiId);
     const { row_id } = await feedsT.upsert(null, { url: feedUrl, site_url: url, title: feedUrl,
       group_id: null, added_by: peer.user_id, last_fetched: null, last_error: null });
     try {
@@ -225,9 +241,9 @@ async function handleWrite(peer: any, op: string, v: any): Promise<WriteResult> 
   }
   if (seg[0] === "feeds" && seg[1] && seg[2] === "delete") {
     const gate = editorOnly(); if (gate) return gate;
-    const items = (await allRows(peer, "items")).filter((i) => i.feed_id === seg[1]);
-    for (const it of items) { await table("items", sfiId).delete(it._row_id); await cascadeItem(peer, it._row_id); }
-    await table("feeds", sfiId).delete(seg[1]);
+    const items = (await allRows(peer, "rss_items")).filter((i) => i.feed_id === seg[1]);
+    for (const it of items) { await table("rss_items", sfiId).delete(it._row_id); await cascadeItem(peer, it._row_id); }
+    await table("rss_feeds", sfiId).delete(seg[1]);
     return done({ ok: true });
   }
   if (seg[0] === "feeds" && seg[1] && !seg[2]) {
@@ -235,7 +251,7 @@ async function handleWrite(peer: any, op: string, v: any): Promise<WriteResult> 
     const patch: Record<string, unknown> = {};
     if (v?.title !== undefined) patch.title = String(v.title);
     if (v?.group_id !== undefined) patch.group_id = v.group_id ?? null;
-    if (Object.keys(patch).length) await table("feeds", sfiId).upsert(seg[1], patch);
+    if (Object.keys(patch).length) await table("rss_feeds", sfiId).upsert(seg[1], patch);
     return done({ ok: true });
   }
 
@@ -244,15 +260,15 @@ async function handleWrite(peer: any, op: string, v: any): Promise<WriteResult> 
     const gate = editorOnly(); if (gate) return gate;
     const name = String(v?.name ?? "").trim();
     if (!name) return { status: 400, body: { error: "a name is required" } };
-    const { row_id } = await table("groups", sfiId).upsert(null, { name, sort: 0 });
+    const { row_id } = await table("rss_groups", sfiId).upsert(null, { name, sort: 0 });
     return done({ id: row_id, name });
   }
   if (seg[0] === "groups" && seg[1] && seg[2] === "delete") {
     const gate = editorOnly(); if (gate) return gate;
     // Feeds outlive their group — losing a group must not lose what you subscribed to.
-    const feeds = (await allRows(peer, "feeds")).filter((f) => f.group_id === seg[1]);
-    for (const f of feeds) await table("feeds", sfiId).upsert(f._row_id, { group_id: null });
-    await table("groups", sfiId).delete(seg[1]);
+    const feeds = (await allRows(peer, "rss_feeds")).filter((f) => f.group_id === seg[1]);
+    for (const f of feeds) await table("rss_feeds", sfiId).upsert(f._row_id, { group_id: null });
+    await table("rss_groups", sfiId).delete(seg[1]);
     return done({ ok: true });
   }
   if (seg[0] === "groups" && seg[1] && !seg[2]) {
@@ -260,7 +276,7 @@ async function handleWrite(peer: any, op: string, v: any): Promise<WriteResult> 
     const patch: Record<string, unknown> = {};
     if (v?.name !== undefined) patch.name = String(v.name).trim();
     if (v?.sort !== undefined) patch.sort = Number(v.sort) || 0;
-    if (Object.keys(patch).length) await table("groups", sfiId).upsert(seg[1], patch);
+    if (Object.keys(patch).length) await table("rss_groups", sfiId).upsert(seg[1], patch);
     return done({ ok: true });
   }
 
@@ -268,8 +284,8 @@ async function handleWrite(peer: any, op: string, v: any): Promise<WriteResult> 
   if (op === "refresh") {
     const gate = editorOnly(); if (gate) return gate;
     const feedId = v?.feed_id ? String(v.feed_id) : "";
-    const feeds = (await allRows(peer, "feeds")).filter((f) => !feedId || f._row_id === feedId);
-    const feedsT = table("feeds", sfiId);
+    const feeds = (await allRows(peer, "rss_feeds")).filter((f) => !feedId || f._row_id === feedId);
+    const feedsT = table("rss_feeds", sfiId);
     let inserted = 0;
     for (const f of feeds) {
       // One bad feed must not abort the sweep — record its error and carry on.
@@ -286,20 +302,17 @@ async function handleWrite(peer: any, op: string, v: any): Promise<WriteResult> 
   // ---- Read / boost / comment (member) -----------------------------------------------
   if (seg[0] === "items" && seg[1] && seg[2] === "read") {
     const gate = memberOnly(); if (gate) return gate;
-    const readsT = table("reads", sfiId);
-    const mine = (await allRows(peer, "reads")).find((r) => r.item_id === seg[1] && r.user_id === peer.user_id);
     const want = !!v?.read;
-    if (want && !mine) await readsT.upsert(null, { item_id: seg[1], user_id: peer.user_id, read_at: nowMs() });
-    if (!want && mine) await readsT.delete(mine._row_id);
-    // Read state is PERSONAL, so it does not push: nobody else's view changes, and a
-    // push here would make every j-keypress reload the room.
+    await setRead(peer.user_id, seg[1], want);
+    // A read mark changes only its reader's view, so it does not push: a push here would
+    // make every j-keypress reload the room.
     return { status: 200, body: { ok: true, read: want } };
   }
 
   if (seg[0] === "items" && seg[1] && seg[2] === "boost") {
     const gate = memberOnly(); if (gate) return gate;
-    const boostsT = table("boosts", sfiId);
-    const mine = (await allRows(peer, "boosts")).find((f) => f.item_id === seg[1] && f.user_id === peer.user_id);
+    const boostsT = table("rss_boosts", sfiId);
+    const mine = (await allRows(peer, "rss_boosts")).find((f) => f.item_id === seg[1] && f.user_id === peer.user_id);
     const on = !!v?.on;
     if (on && !mine) await boostsT.upsert(null, { item_id: seg[1], user_id: peer.user_id, user_name: peer.user_name, created_at: nowMs() });
     if (!on && mine) await boostsT.delete(mine._row_id);
@@ -310,7 +323,7 @@ async function handleWrite(peer: any, op: string, v: any): Promise<WriteResult> 
     const gate = memberOnly(); if (gate) return gate;
     const text = String(v?.body ?? "").trim();
     if (!text) return { status: 400, body: { error: "empty comment" } };
-    const { row_id } = await table("comments", sfiId).upsert(null, {
+    const { row_id } = await table("rss_comments", sfiId).upsert(null, {
       item_id: seg[1], parent_id: v?.parent_id ?? null, user_id: peer.user_id,
       user_name: peer.user_name, body: text, created_at: nowMs() });
     return done({ id: row_id });
@@ -318,7 +331,7 @@ async function handleWrite(peer: any, op: string, v: any): Promise<WriteResult> 
 
   if (seg[0] === "comments" && seg[1] && seg[2] === "delete") {
     const gate = memberOnly(); if (gate) return gate;
-    const all = await allRows(peer, "comments");
+    const all = await allRows(peer, "rss_comments");
     const c = all.find((x) => x._row_id === seg[1]);
     if (!c) return { status: 404, body: { error: "not found" } };
     if (c.user_id !== peer.user_id && !isEditor) return { status: 403, body: { error: "not yours" } };
@@ -331,7 +344,7 @@ async function handleWrite(peer: any, op: string, v: any): Promise<WriteResult> 
         if (x.parent_id && toDelete.has(x.parent_id) && !toDelete.has(x._row_id)) { toDelete.add(x._row_id); grew = true; }
       }
     }
-    const commentsT = table("comments", sfiId);
+    const commentsT = table("rss_comments", sfiId);
     for (const id of toDelete) await commentsT.delete(id);
     return done({ ok: true, deleted: toDelete.size });
   }
@@ -356,21 +369,18 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
 
   const peer = parsePeerInfo(query, cookies);
 
-  // Non-members get a definitive bootstrap answer without needing tables bound.
+  // Non-members get a definitive answer: the reading room is for members.
   if (reqPath === "/api/bootstrap" && method === "GET" && !peer.is_sfi_member) {
     return jsonReply(replyPort, 200, { ready: true, isMember: false });
   }
 
-  const tables = await ensureTables(peer);
-  if (!tables.ready) return jsonReply(replyPort, 503, { error: "waiting for owner" });
-
   // ---- Bootstrap (members) --------------------------------------------------
   if (reqPath === "/api/bootstrap" && method === "GET") {
-    const [groups, feeds, items, boosts, reads] = await Promise.all([
-      allRows(peer, "groups"), allRows(peer, "feeds"), allRows(peer, "items"),
-      allRows(peer, "boosts"), allRows(peer, "reads"),
+    const [groups, feeds, items, boosts] = await Promise.all([
+      allRows(peer, "rss_groups"), allRows(peer, "rss_feeds"), allRows(peer, "rss_items"),
+      allRows(peer, "rss_boosts"),
     ]);
-    const myRead = new Set(reads.filter((r) => r.user_id === peer.user_id).map((r) => r.item_id));
+    const myRead = await myReads(peer.user_id);
     const boostedItems = new Set(boosts.map((f) => f.item_id));
     const perFeedUnread: Record<string, number> = {};
     for (const it of items) if (!myRead.has(it._row_id)) perFeedUnread[it.feed_id] = (perFeedUnread[it.feed_id] ?? 0) + 1;
@@ -408,12 +418,12 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
     const qp = new URLSearchParams(query);
     const view = qp.get("view") ?? "all", groupId = qp.get("group"), feedId = qp.get("feed");
     const q = (qp.get("q") ?? "").toLowerCase();
-    const [items, feeds, boosts, comments, reads] = await Promise.all([
-      allRows(peer, "items"), allRows(peer, "feeds"), allRows(peer, "boosts"),
-      allRows(peer, "comments"), allRows(peer, "reads"),
+    const [items, feeds, boosts, comments] = await Promise.all([
+      allRows(peer, "rss_items"), allRows(peer, "rss_feeds"), allRows(peer, "rss_boosts"),
+      allRows(peer, "rss_comments"),
     ]);
     const feedById = new Map(feeds.map((f) => [f._row_id, f]));
-    const myRead = new Set(reads.filter((r) => r.user_id === peer.user_id).map((r) => r.item_id));
+    const myRead = await myReads(peer.user_id);
     const myBoost = new Set(boosts.filter((f) => f.user_id === peer.user_id).map((f) => f.item_id));
     const boostCount: Record<string, number> = {}, commentCount: Record<string, number> = {};
     for (const f of boosts) boostCount[f.item_id] = (boostCount[f.item_id] ?? 0) + 1;
@@ -437,10 +447,10 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
 
   if (m && m[1] === "items" && m[2] && !m[3] && method === "GET") {
     if (!requireMember()) return;
-    const items = await allRows(peer, "items");
+    const items = await allRows(peer, "rss_items");
     const it = items.find((i) => i._row_id === m[2]);
     if (!it) return jsonReply(replyPort, 404, { error: "not found" });
-    const [boosts, comments, reads] = await Promise.all([allRows(peer, "boosts"), allRows(peer, "comments"), allRows(peer, "reads")]);
+    const [boosts, comments] = await Promise.all([allRows(peer, "rss_boosts"), allRows(peer, "rss_comments")]);
     return jsonReply(replyPort, 200, {
       item: { id: it._row_id, title: it.title, link: it.link, author: it.author,
         content: it.content, published_at: it.published_at, feed_id: it.feed_id },
@@ -448,7 +458,7 @@ self.onNetworkRequest = async function (replyPort, reqPath, method, headers, que
       comments: comments.filter((c) => c.item_id === m[2])
         .sort((a, b) => a.created_at - b.created_at)
         .map((c) => ({ id: c._row_id, parent_id: c.parent_id, user_id: c.user_id, user_name: c.user_name, body: c.body, created_at: c.created_at })),
-      read: reads.some((r) => r.user_id === peer.user_id && r.item_id === m[2]),
+      read: (await myReads(peer.user_id)).has(m[2]),
     });
   }
 
