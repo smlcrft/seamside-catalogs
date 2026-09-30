@@ -198,7 +198,7 @@ async function gcImages(ctx: Ctx, show: Show): Promise<void> {
   for (const [id, at] of recentUploads) if (now - at > KEEP_RECENT_IMG_MS) recentUploads.delete(id);
   for (const e of await ctx.files.list(IMAGES).catch(() => [])) {
     const id = e.name.replace(/\.[^.]+$/, "");
-    if (e.dir || e.link || referenced.has(id) || recentUploads.has(id)) continue;
+    if (e.dir || referenced.has(id) || recentUploads.has(id)) continue;
     await ctx.files.remove(`${IMAGES}/${e.name}`).catch(() => { /* already gone */ });
   }
 }
