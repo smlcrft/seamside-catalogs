@@ -13,9 +13,10 @@
 //   view_realtime:  view-collaborative    — every write pushes `{ family_budget: "month" }`,
 //                                           which says what to read again and never what
 //                                           it holds, so every open page refreshes live.
-//   settings_scope: the space            — the currency symbol is the `budget_currency`
-//                                           row of `_fdata/budget_settings`, beside the
-//                                           budget it describes, its value JSON under `v`.
+//   settings_scope: the session          — the currency symbol is the `budget_currency`
+//                                           row of the session's own `settings` table
+//                                           (`ctx.own.table`), its value JSON under `v`;
+//                                           absent, it is "$".
 //
 // Categories carry a channel (c1–c12) as their identity color, an income flag, and a
 // monthly budget (the envelope; 0 = no envelope set, income categories never have one).
@@ -28,7 +29,7 @@ import { sanitizeText } from "@frame-core";
 // ----- Schemas ----------------------------------------------------------------------------
 const CATEGORIES = "budget_categories";
 const TRANSACTIONS = "budget_transactions";
-const SETTINGS = "budget_settings";
+const SETTINGS = "settings";
 
 const CATEGORIES_SCHEMA = [
   { name: "name",           col_type: "text" as const,    nullable: false, default_val: "" },
@@ -43,14 +44,17 @@ const TRANSACTIONS_SCHEMA = [
   { name: "date",        col_type: "text" as const, nullable: false, default_val: "" },
 ];
 
-// ----- The space's tables, in its frame data folder -------------------------------------
+// ----- The tables ----------------------------------------------------------------------
 
 type Row = Record<string, unknown> & { id: string };
 type Schema = typeof CATEGORIES_SCHEMA | typeof TRANSACTIONS_SCHEMA;
 
-// Every table, the settings included, is the space's frame data (`_fdata/`), shared with
-// every frame and member.
-const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
+// The budget is the space's frame data (`_fdata/`), shared with every frame and member;
+// the settings are the session's own, which only this worker reaches.
+const rows = (ctx: Ctx, name: string) =>
+  name === SETTINGS
+    ? ctx.own.table<Record<string, unknown>>(name)
+    : ctx.shared.table<Record<string, unknown>>(name);
 
 const defaultsOf = (schema: Schema): Record<string, unknown> => Object.fromEntries(
   schema.map((c) => [c.name, c.col_type === "text" ? c.default_val : Number(c.default_val)]),

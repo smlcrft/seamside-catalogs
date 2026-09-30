@@ -7,9 +7,10 @@
 //     with a "preview" toggle that renders the same public view.
 //
 // The page's blocks are the table community_blocks in the space's frame data folder
-// (_fdata/), so each space has one page, synced with it; its title and tagline are rows of
-// _fdata/community_settings beside it. A visitor reads no table: the page asks GET /api/page, and
-// every write route decides on ctx.peer.
+// (_fdata/), so each space has one page, synced with it; the marker that it was seeded is
+// _fdata/community_setup beside it. Its title and tagline are the session's own settings
+// (ctx.own.table("settings")), read with the default where none was set. A visitor reads no
+// table: the page asks GET /api/page, and every write route decides on ctx.peer.
 //
 // Realtime: a push says that the page changed and never what it holds. Every open page of
 // the frame hears it and reads again as whoever it is.
@@ -17,10 +18,12 @@
 import type { Ctx } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
-// THE SPACE'S TABLE, in its frame data folder, named for what it holds.
+// THE SPACE'S TABLES, in its frame data folder, named for what they hold; and the session's
+// own settings.
 // ----------------------------------------------------------------------------------------
 const BLOCKS = "community_blocks";
-const SETTINGS = "community_settings";
+const SETUP = "community_setup";
+const SETTINGS = "settings";
 
 // Unified page-content table. Lets admins mix sections, links, and pub_frame embeds
 // in any order. The per-kind columns stay empty for kinds that don't use them.
@@ -46,9 +49,10 @@ const BLOCK_DEFAULTS: Record<string, unknown> = Object.fromEntries(
 // ----------------------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };
 
-// Every table, the settings included, is the space's frame data (`_fdata/`), shared with
-// every frame and member.
-const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
+// The settings are the session's own; every other table is the space's frame data (`_fdata/`),
+// shared with every frame and member.
+const rows = (ctx: Ctx, name: string) =>
+  name === SETTINGS ? ctx.own.table<Record<string, unknown>>(name) : ctx.shared.table<Record<string, unknown>>(name);
 
 /** Write a row over what it held, stamped when it was made and when it changed.
  *  A row that was not there starts from `fresh`. */
@@ -100,11 +104,11 @@ function clampStr(v: unknown, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-// Page-level settings (title / tagline / updated_at) are rows of the space's
-// community_settings table, each value JSON under `v`. The default page is seeded once, by
-// the first editor to open it, and the marker sits in that table too, so no other session
-// or device seeds it again after an editor removed it; until then a reader is shown the same
-// default, unwritten.
+// Page-level settings (title / tagline / updated_at) are rows of the session's own settings
+// table, each value JSON under `v`, read as SEED's where no row is. The default block is
+// seeded once, by the first editor to open the page, and the marker is row `seeded` of the
+// space's community_setup table, so no other session or device seeds it again after an editor
+// removed it; until then a reader is shown the same default, unwritten.
 const SEED_BLOCK_ROW = "seed_about"; // fixed id so a concurrent first-load can't duplicate it
 const K = (k: string) => `community_home_${k}`;
 const SEED = {
@@ -129,12 +133,11 @@ async function setting<T>(ctx: Ctx, key: string): Promise<T | null> {
 
 const setSetting = (ctx: Ctx, key: string, value: unknown) => keep(ctx, SETTINGS, K(key), { v: JSON.stringify(value) });
 
+const seeded = async (ctx: Ctx) => (await rows(ctx, SETUP).get("seeded"))?.v === "true";
+
 async function ensurePage(ctx: Ctx): Promise<void> {
-  if (await setting(ctx, "seeded")) return;
-  await setSetting(ctx, "seeded", true);
-  await setSetting(ctx, "title", SEED.title);
-  await setSetting(ctx, "tagline", SEED.tagline);
-  await setSetting(ctx, "updated_at", Date.now());
+  if (await seeded(ctx)) return;
+  await keep(ctx, SETUP, "seeded", { v: "true" });
   await keepBlock(ctx, SEED_BLOCK_ROW, SEED.block);
 }
 
@@ -147,8 +150,8 @@ async function getPage(ctx: Ctx) {
   ]);
   all.sort((a, b) => cmp(a.sort_order, b.sort_order) || cmp(Number(a._created_at ?? 0), Number(b._created_at ?? 0)));
   return {
-    title: title ?? "",
-    tagline: tagline ?? "",
+    title: title ?? SEED.title,
+    tagline: tagline ?? SEED.tagline,
     updated_at: updatedAt ?? 0,
     blocks: all.map((r) => ({
       id: r.id, kind: r.kind, heading: r.heading, body: r.body, format: r.format,
@@ -308,7 +311,7 @@ export default {
       const you = { member, editor };
       const color = ctx.peer.space_color;
       if (editor) await ensurePage(ctx);
-      else if (!(await setting(ctx, "seeded"))) {
+      else if (!(await seeded(ctx))) {
         return json({
           title: SEED.title, tagline: SEED.tagline, updated_at: 0,
           blocks: [{ id: SEED_BLOCK_ROW, ...SEED.block }], color, you,

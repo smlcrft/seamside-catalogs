@@ -81,7 +81,7 @@
       "name": "CamJam",
       "description": "A tiny, low-bandwidth webcam feed for a space: a stop-motion camera share rather than a video call. One member at a time shares their webcam as a small JPEG still, sent on an interval and fanned out live to everyone watching, captioned with the sharer's name and how long ago the still was taken. A still every few seconds costs a fraction of a video call and reads as presence rather than surveillance. Cadence and detail are one owner setting that moves them together, from a 100px thumbnail twice a second up to a 1920px still once a minute. Any member, viewers included, can start sharing, pick which camera to use, take over an active feed or rename the feed in place; only a member who presses share is ever asked for their camera. Nothing is recorded: the current still lives in memory on the keeper's device and disappears when sharing stops, and there is no microphone or audio. Who can watch follows the space's own sharing: members, and anyone the space lets in when the frame is published.",
       "icon": "ph:video-camera",
-      "modified_at": "2026-09-30T19:01:05Z",
+      "modified_at": "2026-09-30T21:08:28Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 360,
@@ -89,7 +89,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/camjam.tar.gz",
-      "package_sha256": "b4eabbb14b0d6600e7d109767a2dddbb42c96086546464b0cb8216d2d7f6dc37",
+      "package_sha256": "f0e781c288ff3df5ea3146c1300feaf8b76102d34a3f6387bb2d8c677d4c65db",
       "color": "c1",
       "permissions": {
         "camera": true
@@ -173,9 +173,9 @@
       "kind": "Frames",
       "id": "community_home",
       "name": "Community Home",
-      "description": "A simple home page for a community. Editors set the title and tagline and add sections (plain text or HTML), links and links to public frames, in any order, and preview what visitors see; everyone else \u2014 viewers, and anyone the frame is published to \u2014 sees the page, updated live. Links open in the visitor's own browser tab. The page's blocks are the community_blocks table in the space's frame data folder; and so are its title and tagline (community_settings).",
+      "description": "A simple home page for a community. Editors set the title and tagline and add sections (plain text or HTML), links and links to public frames, in any order, and preview what visitors see; everyone else \u2014 viewers, and anyone the frame is published to \u2014 sees the page, updated live. Links open in the visitor's own browser tab. The page's blocks are the community_blocks table in the space's frame data folder; its title and tagline are the frame's own settings.",
       "icon": "ph:browsers",
-      "modified_at": "2026-09-30T20:36:49Z",
+      "modified_at": "2026-09-30T21:08:28Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -183,7 +183,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_home.tar.gz",
-      "package_sha256": "c90df65544179983fc336ad8a494db021481694f1108e1301df6e04154e8a366",
+      "package_sha256": "c0b359396a0760b8444141760bf9566541451b332ee9eb4a78fd6f39747cd7e3",
       "color": "c1",
       "app_version_min": "1.0.12",
       "tags": [
@@ -240,9 +240,9 @@
       "kind": "Frames",
       "id": "family_budget",
       "name": "Family Budget",
-      "description": "An envelope-lite family budget: money in, money out, categorized, one month at a time. Collaborators record income and expenses against colour-coded categories, set a monthly envelope per expense category, pick the currency symbol, and step through months to watch spending fill each bar; the first editor to open an empty budget gets a starter set of categories. Viewers and anyone the frame is published to see the month live and read-only. Categories and transactions are the budget_categories and budget_transactions tables in the space's frame data folder, synced with the space; and so is the currency symbol (budget_settings).",
+      "description": "An envelope-lite family budget: money in, money out, categorized, one month at a time. Collaborators record income and expenses against colour-coded categories, set a monthly envelope per expense category, pick the currency symbol, and step through months to watch spending fill each bar; the first editor to open an empty budget gets a starter set of categories. Viewers and anyone the frame is published to see the month live and read-only. Categories and transactions are the budget_categories and budget_transactions tables in the space's frame data folder, synced with the space; the currency symbol is this session's own setting.",
       "icon": "ph:wallet",
-      "modified_at": "2026-09-30T20:36:49Z",
+      "modified_at": "2026-09-30T21:08:28Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 760,
@@ -250,7 +250,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/family_budget.tar.gz",
-      "package_sha256": "94c6cc34bf753b93c910ca9f551f276732904efcda26f36e49de43687e539900",
+      "package_sha256": "ff9e452b36e9cd41fa71d0c07095c86ea3e8e5bd8312ac1da0f35931bd2065d7",
       "color": "c1",
       "app_version_min": "1.0.12",
       "tags": [
@@ -515,9 +515,9 @@
       "kind": "Frames",
       "id": "help_desk",
       "name": "Help Desk",
-      "description": "A contact form with a shared inbox. Visitors who are not on the space's roster fill in their email and the fields the editors configure; the space's members see new messages arrive live, and editors set each one's status, keep internal notes and edit the form. Every member, viewers included, can read the inbox; nobody else can. Share the frame's public link with visitors: it reaches the form and nothing else. Submissions, notes and fields are tables in the space's frame data folder (help_desk_submissions, help_desk_notes, help_desk_fields); and so is the desk's title (help_desk_settings).",
+      "description": "A contact form with a shared inbox. Visitors who are not on the space's roster fill in their email and the fields the editors configure; the space's members see new messages arrive live, and editors set each one's status, keep internal notes and edit the form. Every member, viewers included, can read the inbox; nobody else can. Share the frame's public link with visitors: it reaches the form and nothing else. Submissions, notes and fields are tables in the space's frame data folder (help_desk_submissions, help_desk_notes, help_desk_fields); the desk's title is a setting of the frame's own.",
       "icon": "ph:lifebuoy",
-      "modified_at": "2026-09-30T19:01:05Z",
+      "modified_at": "2026-09-30T21:08:28Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -525,7 +525,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/help_desk.tar.gz",
-      "package_sha256": "d8670dfe13e1597ec2e3822a6cbac7b56761f0e3cc33d9f76c4f67fdb596435e",
+      "package_sha256": "be179594ff949da10100438d27297efbbf28eb9adde2c43121b04d5733af6df5",
       "color": "c2",
       "app_version_min": "1.0.12",
       "tags": [
@@ -740,9 +740,9 @@
       "kind": "Frames",
       "id": "roadmap",
       "name": "Roadmap",
-      "description": "A simple, robust project roadmapping tool \u2014 one roadmap per space. Set a project name and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Milestone headers show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days remaining and overdue colour-coding. A milestone can only be marked done once all its tasks are complete. Editors change everything; viewers and anyone the frame is published to get a live read-only view. Milestones and tasks are tables in the space's frame data folder, roadmap_milestones.table.jsonl and roadmap_tasks.table.jsonl, synced with the space; and so are the project name, overview and links (roadmap_settings).",
+      "description": "A simple, robust project roadmapping tool \u2014 one roadmap per space. Set a project name and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Milestone headers show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days remaining and overdue colour-coding. A milestone can only be marked done once all its tasks are complete. Editors change everything; viewers and anyone the frame is published to get a live read-only view. Milestones and tasks are tables in the space's frame data folder, roadmap_milestones.table.jsonl and roadmap_tasks.table.jsonl, synced with the space; the project name, overview and links are the session's own settings, kept on this device.",
       "icon": "ph:signpost",
-      "modified_at": "2026-09-30T20:36:49Z",
+      "modified_at": "2026-09-30T21:08:28Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 720,
@@ -750,7 +750,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roadmap.tar.gz",
-      "package_sha256": "2950610e6d54f1c2cf6fa34649a9e30e6d5038f72c3403bf6dd865c9bae2c2d1",
+      "package_sha256": "2d3db0bfd807718591e8cfcb08c1fd0af0e490c314de0613153607a320b71c81",
       "color": "c1",
       "app_version_min": "1.0.12",
       "tags": [

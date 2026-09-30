@@ -25,7 +25,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.clear('.fh-title');
   await keeper.fill('.fh-title', 'Workbench');
   await keeper.press('Enter');
-  expect(await untilRows('the title', '_fdata/camjam_settings', (r) => r.find((x) => x.id === 'camjam.title' && x.cells.v === '"Workbench"' && x.cells._created_at)), 'the title is kept in the space\'s frame data');
+  expect(await untilRows('the title', '_settings', (r) => r.find((x) => x.id === 'camjam.title' && x.cells.v === '"Workbench"' && x.cells._created_at)), 'the title is kept in the session\'s own settings');
 
   // the rung, from the owner's sheet
   await keeper.click('.fh-gear');
@@ -70,7 +70,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   expect(await keeper.until('the feed to end', `!document.querySelector('.cap') && /share my camera/.test(${text})`), 'the keeper stops sharing');
   expect(await visitor.until('the stranger to be told', `!document.querySelector('.cap') && /Nobody is sharing right now\\./.test(${text})`), 'and the stranger sees nobody sharing');
   await visitor.shot('6-stranger-idle');
-  const kept = [...await rows('_settings'), ...await rows('_fdata/camjam_settings')];
+  const kept = await rows('_settings');
   expect(!kept.some((x) => /base64|jpeg/.test(JSON.stringify(x.cells))), 'no still was kept anywhere');
   await sleep(100);
 };

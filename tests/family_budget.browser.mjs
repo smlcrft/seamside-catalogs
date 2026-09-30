@@ -33,7 +33,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.clear('.framelib-prompt-input');
   await keeper.fill('.framelib-prompt-input', '€');
   await keeper.click('.framelib-dialog-host .framelib-btn-primary');
-  expect(await untilRows('the currency', '_fdata/budget_settings', (r) => r.find((x) => x.id === 'budget_currency' && x.cells.v === '"€"')), 'the currency is kept as a setting, its value JSON under v');
+  expect(await untilRows('the currency', '_settings', (r) => r.find((x) => x.id === 'budget_currency' && x.cells.v === '"€"')), 'the currency is kept as a setting, its value JSON under v');
   expect(await keeper.until('the currency to draw', `document.querySelector('.sum-val').textContent === '€0'`), 'and every amount is drawn with it');
 
   // ---- categories: one by Enter, one by leaving the box

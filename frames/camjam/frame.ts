@@ -7,11 +7,8 @@
 //   data_storage:   (none) + settings-per-sfi — the live still is deliberately EPHEMERAL:
 //                                          it lives in a module-level Map on the host and is
 //                                          never written to disk. Only the rung and the
-//                                          title persist: the title, which names the
-//                                          feed for every frame and member, as a row of
-//                                          the space's `_fdata/camjam_settings` table;
-//                                          the rung, the owner's choice of what this
-//                                          device sends, in the session's own `settings`.
+//                                          title persist, each a row of the session's own
+//                                          `settings` table, which only this worker reaches.
 //   view_realtime:  view-collaborative   — every new still pushes a tick to all viewers;
 //                                          the tick says to read again and carries nothing.
 //   settings_scope: settings-per-sfi     — each space is its own independent feed.
@@ -119,25 +116,21 @@ const KEY_INTERVAL = "camjam.interval_ms";
 const KEY_TITLE = "camjam.title";
 const MAX_TITLE = 80;
 
-// One row per key, the value as JSON under `v`. The title describes the feed, so it is the
-// space's, beside nothing else in its frame data; the rung is owner-only, so it stays in the
-// session's own table, where no collaborator can write it at the door.
-const settings = (ctx: Ctx, key: string) =>
-  key === KEY_TITLE
-    ? ctx.shared.table<Record<string, unknown>>("camjam_settings")
-    : ctx.own.table<Record<string, unknown>>("settings");
+// One row per key, the value as JSON under `v`, in the session's own table: nothing reaches
+// it but this worker, so who may change what is decided by the routes below alone.
+const settings = (ctx: Ctx) => ctx.own.table<Record<string, unknown>>("settings");
 
 async function setting(ctx: Ctx, key: string): Promise<unknown> {
-  const row = await settings(ctx, key).get(key);
+  const row = await settings(ctx).get(key);
   if (row?.v == null) return null;
   try { return JSON.parse(String(row.v)); } catch { return null; }
 }
 
 /** Write a setting over its row, stamped when it was made and when it changed. */
 async function setSetting(ctx: Ctx, key: string, value: unknown): Promise<void> {
-  const was = await settings(ctx, key).get(key);
+  const was = await settings(ctx).get(key);
   const now = Date.now();
-  await settings(ctx, key).upsert({ ...(was ?? { _created_at: now }), id: key, v: JSON.stringify(value), _modified_at: now });
+  await settings(ctx).upsert({ ...(was ?? { _created_at: now }), id: key, v: JSON.stringify(value), _modified_at: now });
 }
 
 async function readPrefs(ctx: Ctx): Promise<{ step: Step; title: string }> {

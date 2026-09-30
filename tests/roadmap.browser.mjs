@@ -21,8 +21,8 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   // the project's name, saved on Enter
   await keeper.fill('.proj-name input', 'Spring launch');
   await keeper.press('Enter');
-  const named = await untilRows('the name', '_fdata/roadmap_settings', (r) => r.find((x) => x.id === 'roadmap_name'));
-  expect(named?.cells.v === '"Spring launch"' && named?.cells._created_at, 'the name is a row of roadmap_settings, JSON under v');
+  const named = await untilRows('the name', '_settings', (r) => r.find((x) => x.id === 'roadmap_name'));
+  expect(named?.cells.v === '"Spring launch"' && named?.cells._created_at, 'the name is a row of the session\'s own settings, JSON under v');
   expect(await untilRows('the buckets', '_fdata/roadmap_milestones', (r) => r.some((x) => x.id === 'bucket:backburner' && x.cells.completed_ms === 0)), 'and the first write made the two buckets');
 
   // a milestone, dated
@@ -163,7 +163,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.shot('5-settings');
   await mark(keeper, 'button', 'Save', 'save');
   await keeper.click('[data-t="save"]');
-  const links = await untilRows('the links', '_fdata/roadmap_settings', (r) => r.find((x) => x.id === 'roadmap_links' && /board/.test(x.cells.v)));
+  const links = await untilRows('the links', '_settings', (r) => r.find((x) => x.id === 'roadmap_links' && /board/.test(x.cells.v)));
   expect(links && JSON.parse(links.cells.v)[0]?.url === 'https://example.com/board', 'Save keeps the link as JSON under v');
   expect(await keeper.until('the chip', `/Board/.test(document.querySelector('.links')?.textContent ?? '') && !document.querySelector('.framelib-modal')`), 'and the page shows it as a chip, the settings closed');
   expect(await visitor.until('the chip for the stranger', `/Board/.test(document.querySelector('.links')?.textContent ?? '')`), 'and the stranger sees it too');

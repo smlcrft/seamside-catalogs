@@ -25,9 +25,10 @@
     { "why": "deletes no task", "do": "POST {api}/task/delete/t1", "body": {}, "status": 403 },
     { "why": "a stranger writes no row at the door", "do": "KV.PUT t/_fdata%2Froadmap_tasks/x", "body": { "text": "x" }, "status": 403 },
     { "why": "and reads no table there", "do": "KV.LIST t/_fdata%2Froadmap_tasks/", "lacks": ["Write docs", "Ana"] },
-    { "why": "nor writes a setting", "do": "KV.PUT t/_fdata%2Froadmap_settings/roadmap_name", "body": { "v": "\"Mine\"" }, "status": 403 },
+    { "why": "nor reads a setting, the session's own", "do": "KV.GET t/_settings/roadmap_name f:{id}", "status": 403, "lacks": ["Spring launch"] },
+    { "why": "nor writes one", "do": "KV.PUT t/_settings/roadmap_name f:{id}", "body": { "v": "\"Mine\"" }, "status": 403 },
     { "why": "the roadmap is as it was", "table": "_fdata/roadmap_tasks", "has": ["Write docs", "Ship build", "Plan it"], "lacks": ["sneak", "\"x\""] },
-    { "why": "and its name", "table": "_fdata/roadmap_settings", "has": ["Spring launch"], "lacks": ["Mine"] },
+    { "why": "and its name", "table": "_settings", "has": ["Spring launch"], "lacks": ["Mine"] },
 
     { "why": "someone signed in and on no roster is a visitor too", "as": "signed", "do": "GET {api}/whoami", "is": { "/is_anon": true, "/is_sfi_member": false, "/is_sfi_editor": false, "/user_id": "{did:signed}" } },
     { "why": "who reads the roadmap", "as": "signed", "do": "GET {api}/state", "status": 200, "is": { "/tasks/0/text": "Write docs" } },
@@ -46,8 +47,11 @@
 
     { "why": "a collaborator may edit", "as": "collaborator", "do": "GET {api}/whoami", "is": { "/is_sfi_member": true, "/is_sfi_editor": true, "/user_id": "{did:collaborator}" } },
     { "why": "a collaborator renames the project and sets its links, an unsafe one dropped", "as": "collaborator", "do": "POST {api}/settings", "body": { "name": "  Summer launch ", "overview": "The big one", "links": [{ "label": "Board", "url": " https://example.com/board " }, { "label": "Bad", "url": "javascript:alert(1)" }, { "label": "", "url": "https://example.com/x" }] }, "status": 200, "is": { "/meta/name": "Summer launch", "/meta/overview": "The big one", "/meta/links/0/label": "Board", "/meta/links/0/url": "https://example.com/board" }, "absent": ["/meta/links/1"] },
-    { "why": "each a row of the space's roadmap_settings, its value JSON under v", "table": "_fdata/roadmap_settings", "has": ["roadmap_name", "Summer launch", "roadmap_overview", "roadmap_links", "https://example.com/board", "roadmap_updated_ms", "_created_at", "_modified_at"], "lacks": ["javascript:", "Spring launch"] },
-    { "why": "which a collaborator reads at the door, as the space's frame data", "as": "collaborator", "at": "space", "do": "KV.GET t/_fdata%2Froadmap_settings/roadmap_name", "status": 200, "has": ["Summer launch"] },
+    { "why": "each a row of the session's own settings, its value JSON under v", "table": "_settings", "has": ["roadmap_name", "Summer launch", "roadmap_overview", "roadmap_links", "https://example.com/board", "roadmap_updated_ms", "_created_at", "_modified_at"], "lacks": ["javascript:", "Spring launch"] },
+    { "why": "which a collaborator does not read at the door", "as": "collaborator", "at": "space", "do": "KV.GET t/_settings/roadmap_name f:{id}", "status": 403, "lacks": ["Summer launch"] },
+    { "why": "nor writes there", "as": "collaborator", "at": "space", "do": "KV.PUT t/_settings/roadmap_name f:{id}", "body": { "v": "\"Hijack\"" }, "status": 403 },
+    { "why": "a viewer reads none there either", "as": "viewer", "at": "space", "do": "KV.GET t/_settings/roadmap_name f:{id}", "status": 403, "lacks": ["Summer launch"] },
+    { "why": "the frame's own route is how the name is read", "as": "viewer", "do": "GET {api}/state", "status": 200, "is": { "/meta/name": "Summer launch", "/meta/overview": "The big one" } },
     { "why": "an editor's first write made the two buckets, from the schema's defaults", "table": "_fdata/roadmap_milestones", "has": ["bucket:backburner", "bucket:maybelater", "\"kind\":\"backburner\"", "\"title\":\"Back Burner\"", "\"sort_order\":1000000", "\"completed_ms\":0", "_created_at"] },
 
     { "why": "a milestone is added after the real ones, ahead of the buckets", "as": "collaborator", "do": "POST {api}/milestone/add", "body": { "title": " Launch ", "target_ms": 1950000000000 }, "status": 200, "is": { "/milestones/2/title": "Launch", "/milestones/2/sort_order": 2, "/milestones/2/target_ms": 1950000000000, "/milestones/2/completed": 0, "/milestones/2/completed_ms": 0, "/milestones/3/id": "bucket:backburner" }, "save": { "launch": "/milestones/2/id" } },

@@ -12,12 +12,13 @@
 //                                          roadmap per space.
 //   view_realtime:  view-collaborative   — every write pushes `{ roadmap: "state" }`, which
 //                                          says what to read again and never what it holds.
-//   settings_scope: the space            — project meta + links are rows of
-//                                          `_fdata/roadmap_settings`, beside the roadmap
-//                                          they describe, under `roadmap_*` keys.
+//   settings_scope: the session          — project meta + links are rows of the
+//                                          session's own `settings` table, under
+//                                          `roadmap_*` keys; the worker's alone, never synced.
 //
 // Data model:
-//   meta        `roadmap_settings` rows — project name, overview, links (JSON under `v`).
+//   meta        `settings` rows (the session's own) — project name, overview, links (JSON
+//               under `v`); an absent row reads as empty.
 //   milestones  real milestones (kind='milestone', with a target date + completed flag)
 //               PLUS two auto-created singleton buckets, kind='backburner' / 'maybelater',
 //               which hold parked tasks and never appear on the timeline.
@@ -32,10 +33,10 @@
 import type { Ctx } from "@frame-core";
 import { sanitizeText, toIntOrNull, clampInt } from "@frame-core";
 
-// ----- The space's tables, in its frame data folder -------------------------------------
+// ----- The space's tables, in its frame data folder; the settings the session's own -------
 const MILESTONES = "roadmap_milestones";
 const TASKS = "roadmap_tasks";
-const SETTINGS = "roadmap_settings";
+const SETTINGS = "settings";
 
 type Column = { name: string; col_type: "text" | "integer"; nullable: boolean; default_val?: string };
 const SCHEMAS: Record<string, Column[]> = {
@@ -80,9 +81,10 @@ function isSafeUrl(u: string): boolean {
 // ----- Rows -----------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };
 
-// Every table, the settings included, is the space's frame data (`_fdata/`), shared with
-// every frame and member.
-const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
+// The settings are the session's own table; every other table is the space's frame data
+// (`_fdata/`), shared with every frame and member.
+const rows = (ctx: Ctx, name: string) =>
+  name === SETTINGS ? ctx.own.table<Record<string, unknown>>(name) : ctx.shared.table<Record<string, unknown>>(name);
 
 const defaultsOf = (name: string): Record<string, unknown> => Object.fromEntries(
   (SCHEMAS[name] ?? [])

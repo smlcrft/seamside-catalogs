@@ -54,7 +54,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   expect(await keeper.until('the field to list', `[...document.querySelectorAll('.hd-field-row .label')].some((l) => l.textContent === 'Phone')`), 'and listed');
   await keeper.fill('.hd-title-edit input', 'Front desk');
   await keeper.inFrame(`document.querySelector('.hd-title-edit input').blur(); return true;`);
-  expect(await untilRows('the title', '_fdata/help_desk_settings', (r) => r.find((x) => x.id === 'help_desk_title' && x.cells.v === '"Front desk"')), 'the title is kept beside the desk\'s tables');
+  expect(await untilRows('the title', '_settings', (r) => r.find((x) => x.id === 'help_desk_title' && x.cells.v === '"Front desk"')), 'the title is kept as a setting of the frame\'s own');
   await keeper.shot('5-fields');
 
   await visitor.send('Page.reload');

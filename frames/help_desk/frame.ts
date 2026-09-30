@@ -9,7 +9,9 @@
 //     a table file of the space, which every member can read anyway — and only editors
 //     (collaborator and up) change status, add notes, or edit the form.
 //   - Submissions, fields and notes are tables in the space's frame data folder
-//     (_fdata/help_desk_submissions, _fdata/help_desk_fields, _fdata/help_desk_notes).
+//     (_fdata/help_desk_submissions, _fdata/help_desk_fields, _fdata/help_desk_notes),
+//     beside _fdata/help_desk_setup, whose `seeded` row says the form was seeded once.
+//     The desk's title is a setting, a row of this session's own settings table.
 //     A stranger reaches none of them: the page reads no table, and every route below
 //     decides on ctx.peer, who the door proved is asking.
 //
@@ -25,9 +27,12 @@ import { declareTables } from "@frame-core";
 const SUBMISSIONS = "help_desk_submissions";
 const FIELDS = "help_desk_fields";
 const NOTES = "help_desk_notes";
-// Settings (title, one-time seed marker) are rows of the space's help_desk_settings table,
-// beside the fields the marker guards. Each value is JSON under `v`.
-const SETTINGS = "help_desk_settings";
+// The one-time seed marker describes the shared fields, so it is shared too: the `seeded`
+// row of this table, beside the fields it guards.
+const SETUP = "help_desk_setup";
+// Settings (the title), one row per key, each value JSON under `v`: this session's own
+// table, which only this worker reaches. A row that is absent reads as its default.
+const SETTINGS = "settings";
 
 declareTables([
   {
@@ -72,9 +77,10 @@ declareTables([
 // ----------------------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };
 
-// Every table, the settings included, is the space's frame data (`_fdata/`), shared with
-// every frame and member.
-const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
+// The settings are this session's own table; every other table is the space's frame data
+// (`_fdata/`), shared with every frame and member.
+const rows = (ctx: Ctx, name: string) =>
+  name === SETTINGS ? ctx.own.table<Record<string, unknown>>(SETTINGS) : ctx.shared.table<Record<string, unknown>>(name);
 
 /** Write a row over what it held, stamped when it was made and when it changed. */
 async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
@@ -165,12 +171,12 @@ const setSetting = (ctx: Ctx, key: string, value: unknown) => keep(ctx, SETTINGS
 // duplicate "Message" fields. User-added fields keep random ids.
 const DEFAULT_FIELD_ROW = "default_message";
 
-// Seed a default "Message" field the first time the desk is opened. The "seeded" setting
-// is the one-time marker — after the initial seed the admin can delete or replace the
+// Seed a default "Message" field the first time the desk is opened. The shared `seeded`
+// row is the one-time marker — after the initial seed the admin can delete or replace the
 // field and subsequent requests, from any session or device, won't re-seed.
 async function ensureDefaultFields(ctx: Ctx): Promise<void> {
-  if (await setting(ctx, "help_desk_seeded", false)) return;
-  await setSetting(ctx, "help_desk_seeded", true);
+  if (await rows(ctx, SETUP).get("seeded")) return;
+  await keep(ctx, SETUP, "seeded", { v: "true" });
   await keep(ctx, FIELDS, DEFAULT_FIELD_ROW, {
     label: "Message", type: "textarea", options_json: "[]", required: 0, sort_order: 0,
   });
