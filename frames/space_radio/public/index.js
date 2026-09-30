@@ -4,43 +4,33 @@
 //   • Private-frame notice (non-member, /api/state returned 403)
 //   • Player shell (member) — station dropdown + transport + local-only volume / mute
 //
-// Shared state (station + playing) is read from /api/state, again on each radio_state push.
-// Local state (volume + mute) is per-device only — saved in the host page's localStorage
-// via framelib (frame.localStorageSetItem/GetItem) as a single JSON entry. It never
-// travels through the backend and is not synced across viewers.
+// Shared state (station + playing) is read from /api/state, again on each playstate push.
+// Local state (volume + mute) is per-device only — saved in seamside.prefs as a single
+// JSON entry. It never travels through the backend and is not synced across viewers.
 // ----------------------------------------------------------------------------------------
-import { frame, applyChannel } from "./lib/js/framelib.js";
+import { applyChannel } from "/lib/js/framelib.js";
 
 (() => {
   const app = document.getElementById("app");
-  const peer = window.__peer || {};
   let canEdit = false;
+  let spaceColor = "";
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[m]));
 
-  // Thin wrapper over frame.api that extracts the backend's `{error: "…"}` body
-  // (when present) onto the thrown Error's `.message` so existing showHint()
-  // callers see the readable error instead of "frame.api POST … → 400".
-  // Writes (bodied calls) go over the tether (frame.busSend → BusUiToFrame): HTTP POST
-  // bodies are dropped on Android (issue #750), the tether carries them everywhere.
-  // Fire-and-forget — the resulting playstate is re-read on the radio_state push, which is
-  // how this UI already renders every change. Feature-detect: an older viewer's framelib
-  // has no busSend — fall back to the HTTP write it was using before.
-  async function api(path, body, method) {
-    if (body !== undefined && typeof frame.busSend === "function") {
-      frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-      return {};
-    }
-    try { return (await frame.api(path, body, method)) || {}; }
-    catch (err) {
-      let msg = err && err.message;
-      try { const j = JSON.parse((err && err.body) || ""); if (j && j.error) msg = j.error; } catch (_) { /* keep raw msg */ }
-      const e = new Error(msg);
-      e.status = err && err.status;
+  // The worker's answer, or an Error carrying its `{error: "…"}` so showHint() callers
+  // see the readable reason. A body makes it a POST.
+  async function api(path, body) {
+    const r = await window.seamside.fetch("/" + path, body !== undefined ? { method: "POST", body: JSON.stringify(body) } : {});
+    let v = {};
+    try { v = r.json() || {}; } catch { /* the status says it */ }
+    if (!r.ok) {
+      const e = new Error(v.error || `${path} → ${r.status}`);
+      e.status = r.status;
       throw e;
     }
+    return v;
   }
 
   let stations = [];
@@ -48,9 +38,8 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   let playstate = { station_id: null, playing: false, updated_at: 0, updated_by_name: "" };
 
   // ---------------------------------------------------------------------------------------
-  // LOCAL (per-device) STATE — volume + mute, persisted in the host page's localStorage via
-  // framelib as a single JSON entry under LOCAL_PREFS_KEY (frames are sandboxed and can't
-  // touch window.localStorage directly). lastVolume is purely in-memory — it just lets
+  // LOCAL (per-device) STATE — volume + mute, persisted in seamside.prefs as a single JSON
+  // entry under LOCAL_PREFS_KEY. lastVolume is purely in-memory — it just lets
   // unmute restore the pre-mute level within a session. First-run default is intentionally
   // quiet (15%) — a radio that blasts on first play is a worse first impression than one a
   // user has to turn up. Persisted prefs override this once loaded.
@@ -60,11 +49,11 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   let lastVolume = 15;
   let muted = false;
 
-  // Load this device's saved volume/mute from localStorage (via the host). Async; the
-  // single JSON entry holds both fields. Missing/corrupt → keep the quiet defaults.
+  // Load this device's saved volume/mute. The single JSON entry holds both fields.
+  // Missing/corrupt → keep the quiet defaults.
   async function loadLocalPrefs() {
     try {
-      const raw = await frame.localStorageGetItem(LOCAL_PREFS_KEY);
+      const raw = await window.seamside.prefs.get(LOCAL_PREFS_KEY);
       if (!raw) return;
       const p = JSON.parse(raw);
       if (typeof p.volume === "number" && Number.isFinite(p.volume)) {
@@ -79,35 +68,34 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   // Boot
   // ---------------------------------------------------------------------------------------
   async function load() {
+    await window.seamside.ready;
     const data = await api("api/state");
     canEdit = data.can_edit === true;
+    spaceColor = data.space_color || "";
     stations = Array.isArray(data.stations) ? data.stations : [];
     stationById = new Map(stations.map((s) => [s.id, s]));
     playstate = { ...playstate, ...(data.playstate || {}) };
 
-    // Apply this device's saved volume/mute from localStorage. Defaults stay if unset.
+    // Apply this device's saved volume/mute. Defaults stay if unset.
     await loadLocalPrefs();
 
     renderShell();
     applyAudioFromState({ resetSrc: true });
   }
 
-  // Persist this device's volume/mute to localStorage (via the host) as a single JSON
-  // entry. Writes are local and cheap, but we still debounce so a burst of +/− or mute
+  // Persist this device's volume/mute as a single JSON entry. Writes are local and cheap, but we still debounce so a burst of +/− or mute
   // clicks coalesces into one write after the user stops.
   let _localSaveTimer = null;
   function saveLocalPrefsNow() {
-    // Fire-and-forget — the payload is well under framelib's 512-byte cap. A failure just
-    // means the next reload starts from defaults.
-    frame.localStorageSetItem(LOCAL_PREFS_KEY, JSON.stringify({ volume, muted })).catch(() => {});
+    // Fire-and-forget. A failure just means the next reload starts from defaults.
+    window.seamside.prefs.set(LOCAL_PREFS_KEY, JSON.stringify({ volume, muted })).catch(() => {});
   }
   function scheduleLocalSave() {
     clearTimeout(_localSaveTimer);
     _localSaveTimer = setTimeout(() => { _localSaveTimer = null; saveLocalPrefsNow(); }, 600);
   }
-  // Flush any pending save when the iframe is torn down (reload / frame close) so the last
-  // volume tap still lands. The host page outlives the iframe, so the postMessage issued by
-  // saveLocalPrefsNow is still delivered even though we don't await it here.
+  // Flush any pending save when the page is torn down (reload / frame close) so the last
+  // volume tap still lands.
   function flushLocalSaveOnExit() {
     if (_localSaveTimer === null) return;
     clearTimeout(_localSaveTimer);
@@ -122,7 +110,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   // ---------------------------------------------------------------------------------------
   function renderShell() {
     app.className = "sr-root";
-    if (peer.space_color) applyChannel(app, peer.space_color);
+    if (spaceColor) applyChannel(app, spaceColor);
     app.innerHTML = `
       <div class="sr-topline">
         <span class="sr-title"><i class="ph-light ph-radio"></i> Space Radio</span>
@@ -238,7 +226,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   }
 
   // ---------------------------------------------------------------------------------------
-  // TRANSPORT — every change pushes through /api/set so the backend broadcasts to peers.
+  // TRANSPORT — every change goes through /api/set; the push brings every page along.
   // ---------------------------------------------------------------------------------------
   function wireDropdown() {
     const sel = document.getElementById("sr-station");
@@ -249,6 +237,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
       // Empty selection clears + stops.
       try {
         await api("api/set", { station_id: id, playing: !!id });
+        await reread();
       } catch (err) {
         // Snap dropdown back to authoritative state on failure.
         sel.value = playstate.station_id || "";
@@ -265,6 +254,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
       const nextPlaying = !playstate.playing;
       try {
         await api("api/set", { playing: nextPlaying });
+        await reread();
       } catch (err) {
         showHint(err.message || "toggle failed");
       }
@@ -419,15 +409,12 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   }
 
   // ---------------------------------------------------------------------------------------
-  // REALTIME — a radio_state push says "re-read": it reaches every radio in the space, and
-  // /api/state answers with this session's own playstate.
+  // REALTIME — a `{ space_radio: "playstate" }` push says "re-read" this session's
+  // playstate.
   // ---------------------------------------------------------------------------------------
-  window.addEventListener("message", async (e) => {
-    const d = e.data;
-    if (!d || typeof d !== "object") return;
-    if (d.type !== "radio_state") return;
+  async function reread() {
     let next;
-    try { next = (await frame.api("api/state")).playstate; } catch { return; }
+    try { next = (await api("api/state")).playstate; } catch { return; }
     if (!next) return;
     const stationChanged = next.station_id !== playstate.station_id;
     playstate = { ...playstate, ...next };
@@ -435,6 +422,10 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
     renderMeta();
     renderLive();
     applyAudioFromState({ resetSrc: stationChanged });
+  }
+  window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (d && typeof d === "object" && d.space_radio === "playstate") reread();
   });
 
   load().catch((err) => {

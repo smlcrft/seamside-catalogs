@@ -3,27 +3,27 @@
 //
 // Contacts (name, email, role, optional phone) are a `members` list of the space —
 // `members.table.jsonl` or a subtype such as `club.members.table.jsonl`, the roster Member
-// Manager keeps. Each session is bound to one (sessionKv `bound/members`), chosen by an
+// Manager keeps. Each session is bound to one (ctx.kv `bound/members`), chosen by an
 // editor; this frame only READS it.
 //
 // Every send is a row of the space's `reachout_sent` table, saying which list it went to,
 // who sent it, when, to which role(s) (or everyone) and how (email or text); a session
 // shows the sends to its own list. Settings (board title, which roles' messages outsiders
-// may read) are this session's own (sessionKv `settings`). The actual sending happens
-// OS-side: the frontend builds a `mailto:` (all recipients bcc'd) or a per-person `sms:`
-// link and asks the viewer to open it.
+// may read) are this session's own: the `settings` row of `__fc_settings`, which no wire
+// serves. The actual sending happens OS-side: the frontend builds a `mailto:` (all
+// recipients bcc'd) or a per-person `sms:` link and asks the viewer to open it.
+//
+// The page reads the log and the roster's shape from the routes here, which decide on
+// ctx.peer what each visitor is handed. A push says what changed and never what it holds.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, pushToInstance, parsePeerInfo, onUiMessage,
-  table, sessionKv,
-  jsonReply, parseJsonBody, sanitizeText, clampInt,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { sanitizeText, clampInt } from "@frame-core";
 
 // ----- Which members list: `members` or a subtype `<name>.members`, bound per session -----
 const LIST_NAME = /^([a-z0-9][a-z0-9_-]*\.)*members$/;
 const validList = (n: unknown): n is string => typeof n === "string" && n.length <= 64 && LIST_NAME.test(n);
-async function boundList(): Promise<string | null> {
-  const v = (await sessionKv.get("bound/members"))?.value;
+async function boundList(ctx: Ctx): Promise<string | null> {
+  const v = (await ctx.kv.get("bound/members"))?.value;
   return validList(v) ? v : null;
 }
 
@@ -38,17 +38,40 @@ const DEFAULT_SETTINGS: Settings = {
   public_roles: [],
 };
 
-async function getSettings(): Promise<Settings> {
+const SETTINGS = "__fc_settings";
+
+/** The row stamped when it was made and when it changed. */
+async function keepSettings(ctx: Ctx, v: string): Promise<void> {
+  const table = ctx.table<Row>(SETTINGS);
+  const was = await table.get("settings");
+  const now = Date.now();
+  await table.upsert({ ...(was ?? { _created_at: now }), v, id: "settings", _modified_at: now });
+}
+
+/** The stored JSON: the settings row, else what an older copy kept in the session key,
+ *  which a stranger could read and a collaborator write, moved into the row once. The row
+ *  is written on the first read either way, so a key written at the door later is ignored. */
+async function storedSettings(ctx: Ctx): Promise<string> {
+  const row = await ctx.table<Row>(SETTINGS).get("settings");
+  if (row?.v != null) return String(row.v);
+  const old = (await ctx.kv.get("settings"))?.value;
+  const v = old ?? JSON.stringify(DEFAULT_SETTINGS);
+  await keepSettings(ctx, v);
+  if (old != null) await ctx.kv.del("settings");
+  return v;
+}
+
+async function getSettings(ctx: Ctx): Promise<Settings> {
   let v: Partial<Settings> = {};
-  try { v = JSON.parse((await sessionKv.get("settings"))?.value ?? "{}") ?? {}; } catch { /* defaults */ }
+  try { v = JSON.parse(await storedSettings(ctx)) ?? {}; } catch { /* defaults */ }
   return {
     title: typeof v.title === "string" && v.title.trim() ? v.title : DEFAULT_SETTINGS.title,
     public_roles: Array.isArray(v.public_roles) ? v.public_roles.map(String) : [],
   };
 }
 
-async function setSettings(next: Settings): Promise<void> {
-  await sessionKv.put("settings", JSON.stringify(next));
+async function setSettings(ctx: Ctx, next: Settings): Promise<void> {
+  await keepSettings(ctx, JSON.stringify(next));
 }
 
 // ----- Sent-message log (the space's reachout_sent table) ---------------------------------
@@ -68,10 +91,12 @@ type SentEntry = {
   attempted_count: number;  // text only: how many were actually tapped (== recipient_count for email)
 };
 
-async function sentTo(sfi_id: string, list: string): Promise<SentEntry[]> {
-  const { rows } = await table(SENT, sfi_id).query({ where: { list }, limit: 5000 });
+type Row = Record<string, unknown>;
+
+async function sentTo(ctx: Ctx, list: string): Promise<SentEntry[]> {
+  const rows = (await ctx.table<Row>(SENT).all()).filter((r) => r.list === list).slice(0, 5000);
   return rows.map((r) => ({
-    id: r._row_id,
+    id: r.id,
     list: String(r.list ?? ""),
     sent_by: String(r.sent_by ?? ""),
     sent_by_name: String(r.sent_by_name ?? ""),
@@ -89,10 +114,10 @@ async function sentTo(sfi_id: string, list: string): Promise<SentEntry[]> {
 // ----- Roster helpers -------------------------------------------------------------------
 type Member = { name: string; email: string; role: string; phone: string };
 
-async function loadMembers(sfi_id: string, list: string | null): Promise<Member[]> {
+async function loadMembers(ctx: Ctx, list: string | null): Promise<Member[]> {
   if (!list) return [];
-  const { rows } = await table(list, sfi_id).query({ limit: 5000 });
-  return rows.map((r: Record<string, unknown>) => ({
+  const rows = (await ctx.table<Row>(list).all()).slice(0, 5000);
+  return rows.map((r) => ({
     name: typeof r.name === "string" ? r.name : String(r.name ?? ""),
     email: typeof r.email === "string" ? r.email : String(r.email ?? ""),
     role: typeof r.role === "string" ? r.role : String(r.role ?? ""),
@@ -166,200 +191,163 @@ function publicEntry(e: SentEntry) {
   };
 }
 
-// ----- Shared write logic ---------------------------------------------------------------
-// Both entry points (HTTP arms and the bus dispatcher) land here; role gates live inside.
-// Every mutation ends in a pushToInstance so all viewers — the sender included — re-render.
-type WriteResult = { status: number; body: unknown };
+// ----- Replies ---------------------------------------------------------------------------
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
 
-async function handleWrite(
-  op: string,
-  v: Record<string, unknown> | null,
-  sfiId: string,
-  peer: ReturnType<typeof parsePeerInfo>,
-): Promise<WriteResult> {
-  const p = peer.sfi_id === sfiId ? peer : { ...peer, sfi_id: sfiId };
-
-  // ---- Choose this session's members list (editor only) -------------------------------
-  if (op === "bind") {
-    if (!p.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-    const name = v?.list;
-    if (!validList(name)) return { status: 400, body: { error: "a members list is named members or <name>.members" } };
-    await sessionKv.put("bound/members", name);
-    pushToInstance(sfiId, { type: "settings_changed" });
-    return { status: 200, body: { bound: name } };
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
   }
-
-  // ---- Record a send into the log (editor only) ---------------------------------------
-  if (op === "log") {
-    if (!p.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-    if (!v) return { status: 400, body: { error: "invalid JSON" } };
-    const list = await boundList();
-    if (!list) return { status: 409, body: { error: "no members list chosen yet" } };
-    const sendMethod = v.method === "text" ? "text" : "email";
-    const to_all = !!v.to_all;
-    const roles = Array.isArray(v.roles) ? v.roles.map((r) => sanitizeText(r, 80)).filter(Boolean) : [];
-    const message = sanitizeText(v.message, 5000);
-    const subject = sendMethod === "email" ? sanitizeText(v.subject, 200) : "";
-    if (!message) return { status: 400, body: { error: "message required" } };
-    if (!to_all && roles.length === 0) return { status: 400, body: { error: "audience required" } };
-    const recipient_count = clampInt(Number(v.recipient_count) || 0, 0, 100000);
-    const attempted_count = clampInt(Number(v.attempted_count ?? recipient_count) || 0, 0, recipient_count);
-    const entry = {
-      list,
-      sent_by: p.user_id,
-      sent_by_name: sanitizeText(p.user_name, 120),
-      sent_at_ms: Date.now(),
-      to_all,
-      roles: to_all ? [] : roles,
-      method: sendMethod,
-      subject,
-      message,
-      recipient_count,
-      attempted_count,
-    };
-    const { row_id } = await table(SENT, sfiId).upsert(null, entry);
-    pushToInstance(sfiId, { type: "log_changed" });
-    return { status: 200, body: { entry: { id: row_id, ...entry } } };
-  }
-
-  // ---- Delete a logged message (editor only) ------------------------------------------
-  if (op === "log/delete") {
-    if (!p.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-    const id = String(v?.id ?? "");
-    if (!id) return { status: 400, body: { error: "id required" } };
-    const sent = table(SENT, sfiId);
-    const row = await sent.get(id);
-    if (!row || row.list !== (await boundList())) return { status: 404, body: { error: "no such message" } };
-    await sent.delete(id);
-    pushToInstance(sfiId, { type: "log_changed" });
-    return { status: 204, body: null };
-  }
-
-  // ---- Settings (owner only) ----------------------------------------------------------
-  if (op === "settings") {
-    if (!p.is_owner) return { status: 403, body: { error: "only the frame owner can change settings" } };
-    if (!v) return { status: 400, body: { error: "invalid JSON" } };
-    const title = sanitizeText(v.title, 80) || DEFAULT_SETTINGS.title;
-    const public_roles = Array.isArray(v.public_roles)
-      ? Array.from(new Set(v.public_roles.map((r) => sanitizeText(r, 80)).filter(Boolean)))
-      : [];
-    const next: Settings = { title, public_roles };
-    await setSettings(next);
-    pushToInstance(sfiId, { type: "settings_changed" });
-    return { status: 200, body: { settings: next } };
-  }
-
-  return { status: 404, body: { error: "unknown op" } };
 }
 
-// ----- Bus dispatcher (frame.busSend → BusUiToFrame) ------------------------------------
-// Fire-and-forget: denied or invalid writes are logged, not answered — the UI is
-// role-gated and never sends them.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  const op = typeof d.op === "string" ? d.op : "";
-  if (!op) return;
-  const r = await handleWrite(op, d, sfiId, peer);
-  if (r.status >= 400) log(`member_reachout: bus op ${op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx, what: "log" | "settings") => ctx.push({ member_reachout: what });
+
+const rolesIn = (v: unknown): string[] =>
+  Array.isArray(v) ? v.map((r) => sanitizeText(r, 80)).filter(Boolean) : [];
 
 // ----- HTTP handler ---------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const url = new URL(request.url);
+    const route = `${request.method} ${url.pathname}`;
+    const peer = ctx.peer;
+    const isEditor = peer.is_sfi_editor || peer.is_owner;
+    const isMember = isEditor || peer.is_sfi_member;
 
-  const settings = await getSettings();
-  const list = await boundList();
-  const isEditor = peer.is_sfi_editor;
-  const isMember = peer.is_sfi_member;
-
-  // ---- State: who am I, what can I do, what roles exist --------------------------------
-  if (reqPath === "/api/state" && method === "GET") {
-    let roles: RoleInfo[] = [];
-    if (isMember) {
-      const members = await loadMembers(peer.sfi_id, list);
-      roles = summarizeRoles(members);
+    // ---- State: who am I, what can I do, what roles exist --------------------------------
+    if (route === "GET /api/state") {
+      const list = await boundList(ctx);
+      const roles = isMember ? summarizeRoles(await loadMembers(ctx, list)) : [];
+      return json({
+        settings: await getSettings(ctx),
+        viewer: {
+          user_name: peer.user_name || "anon",
+          is_owner: peer.is_owner,
+          is_anon: peer.is_anon,
+          is_sfi_member: isMember,
+          is_sfi_editor: isEditor,
+          space_color: peer.space_color || "",
+        },
+        can_edit: isEditor,
+        bound: list,
+        can_bind: isEditor,
+        roles, // editors compose against this; non-members get [] (roster structure stays private)
+      });
     }
-    return jsonReply(replyPort, 200, {
-      settings,
-      viewer: {
-        user_name: peer.user_name || "anon",
-        is_owner: peer.is_owner,
-        is_anon: peer.is_anon,
-        is_sfi_member: isMember,
-        is_sfi_editor: isEditor,
-        space_color: peer.space_color || "",
-      },
-      can_edit: isEditor,
-      bound: list,
-      can_bind: isEditor,
-      roles, // editors compose against this; non-members get [] (roster structure stays private)
-    });
-  }
 
-  // ---- The sent-message backlog -------------------------------------------------------
-  if (reqPath === "/api/log" && method === "GET") {
-    const entries = list ? (await sentTo(peer.sfi_id, list)).sort((a, b) => b.sent_at_ms - a.sent_at_ms) : [];
-    if (isMember) {
-      return jsonReply(replyPort, 200, { entries, can_edit: isEditor });
+    // ---- The sent-message backlog -------------------------------------------------------
+    if (route === "GET /api/log") {
+      const list = await boundList(ctx);
+      const entries = list ? (await sentTo(ctx, list)).sort((a, b) => b.sent_at_ms - a.sent_at_ms) : [];
+      if (isMember) return json({ entries, can_edit: isEditor });
+      // Anonymous / non-member: only the publicly-exposed role messages, stripped down.
+      const settings = await getSettings(ctx);
+      return json({ entries: entries.filter((e) => isEntryPublic(e, settings)).map(publicEntry), anon_view: true });
     }
-    // Anonymous / non-member: only the publicly-exposed role messages, stripped down.
-    const pub = entries.filter((e) => isEntryPublic(e, settings)).map(publicEntry);
-    return jsonReply(replyPort, 200, { entries: pub, anon_view: true });
-  }
 
-  // ---- Resolve an audience to concrete recipients (editor only — exposes contacts) ----
-  // A read that needs its response (it builds the mailto:/sms: links), so it can't ride
-  // the bus; GET carries the audience in the query string. The POST arm stays for older
-  // cached frontends.
-  if (reqPath === "/api/resolve" && (method === "GET" || method === "POST")) {
-    if (!isEditor) return jsonReply(replyPort, 403, { error: "editors only" });
-    let to_all: boolean;
-    let roles: string[];
-    if (method === "GET") {
-      to_all = query.to_all === "1";
-      let parsed: unknown = [];
-      try { parsed = JSON.parse(String(query.roles ?? "[]")); } catch { parsed = []; }
-      roles = Array.isArray(parsed) ? parsed.map((r) => sanitizeText(r, 80)).filter(Boolean) : [];
-    } else {
-      const v = parseJsonBody<{ to_all?: unknown; roles?: unknown }>(body);
-      if (!v) return jsonReply(replyPort, 400, { error: "invalid JSON" });
-      to_all = !!v.to_all;
-      roles = Array.isArray(v.roles) ? v.roles.map((r) => sanitizeText(r, 80)).filter(Boolean) : [];
+    // ---- Resolve an audience to concrete recipients (editor only — exposes contacts) ----
+    // GET carries the audience in the query string; POST carries it as JSON.
+    if (route === "GET /api/resolve" || route === "POST /api/resolve") {
+      if (!isEditor) return refuse(403, "editors only");
+      let to_all: boolean;
+      let roles: string[];
+      if (request.method === "GET") {
+        to_all = url.searchParams.get("to_all") === "1";
+        let parsed: unknown = [];
+        try { parsed = JSON.parse(url.searchParams.get("roles") ?? "[]"); } catch { parsed = []; }
+        roles = rolesIn(parsed);
+      } else {
+        const v = await body(request);
+        if (!v) return refuse(400, "invalid JSON");
+        to_all = !!v.to_all;
+        roles = rolesIn(v.roles);
+      }
+      if (!to_all && roles.length === 0) return refuse(400, "pick an audience");
+      const members = await loadMembers(ctx, await boundList(ctx));
+      const recipients = resolveRecipients(members, to_all, roles).map((m) => ({
+        name: m.name, email: m.email, phone: m.phone,
+      }));
+      const all_have_phone = recipients.length > 0 && recipients.every((r) => r.phone.length > 0);
+      return json({ recipients, all_have_phone });
     }
-    if (!to_all && roles.length === 0) return jsonReply(replyPort, 400, { error: "pick an audience" });
-    const members = await loadMembers(peer.sfi_id, list);
-    const recipients = resolveRecipients(members, to_all, roles).map((m) => ({
-      name: m.name, email: m.email, phone: m.phone,
-    }));
-    const all_have_phone = recipients.length > 0 && recipients.every((r) => r.phone.length > 0);
-    return jsonReply(replyPort, 200, { recipients, all_have_phone });
-  }
 
-  // ---- Record a send into the log (editor only) ---------------------------------------
-  if (reqPath === "/api/log" && method === "POST") {
-    const r = await handleWrite("log", parseJsonBody(body), peer.sfi_id, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    // ---- Choose this session's members list (editor only) -------------------------------
+    if (route === "POST /api/bind") {
+      if (!isEditor) return refuse(403, "editors only");
+      const name = (await body(request))?.list;
+      if (!validList(name)) return refuse(400, "a members list is named members or <name>.members");
+      await ctx.kv.put("bound/members", name);
+      tell(ctx, "settings");
+      return json({ bound: name });
+    }
 
-  // ---- Delete a logged message (editor only) ------------------------------------------
-  if (reqPath === "/api/log/delete" && method === "POST") {
-    const r = await handleWrite("log/delete", parseJsonBody(body), peer.sfi_id, peer);
-    if (r.status === 204) return replyPort.postMessage({ status: 204, contentType: "text/plain", body: null });
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    // ---- Record a send into the log (editor only) ---------------------------------------
+    if (route === "POST /api/log") {
+      if (!isEditor) return refuse(403, "editors only");
+      const v = await body(request);
+      if (!v) return refuse(400, "invalid JSON");
+      const list = await boundList(ctx);
+      if (!list) return refuse(409, "no members list chosen yet");
+      const sendMethod = v.method === "text" ? "text" : "email";
+      const to_all = !!v.to_all;
+      const roles = rolesIn(v.roles);
+      const message = sanitizeText(v.message, 5000);
+      const subject = sendMethod === "email" ? sanitizeText(v.subject, 200) : "";
+      if (!message) return refuse(400, "message required");
+      if (!to_all && roles.length === 0) return refuse(400, "audience required");
+      const recipient_count = clampInt(Number(v.recipient_count) || 0, 0, 100000);
+      const attempted_count = clampInt(Number(v.attempted_count ?? recipient_count) || 0, 0, recipient_count);
+      const entry = {
+        list,
+        sent_by: peer.user_id,
+        sent_by_name: sanitizeText(peer.user_name, 120),
+        sent_at_ms: Date.now(),
+        to_all,
+        roles: to_all ? [] : roles,
+        method: sendMethod,
+        subject,
+        message,
+        recipient_count,
+        attempted_count,
+      };
+      const now = Date.now();
+      const row = await ctx.table<Row>(SENT).upsert({ _created_at: now, ...entry, _modified_at: now });
+      tell(ctx, "log");
+      return json({ entry: { id: row.id, ...entry } });
+    }
 
-  // ---- Settings (owner only) ----------------------------------------------------------
-  if ((reqPath === "/api/settings" || reqPath === "/api/bind") && method === "POST") {
-    const r = await handleWrite(reqPath.slice("/api/".length), parseJsonBody(body), peer.sfi_id, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    // ---- Delete a logged message (editor only) ------------------------------------------
+    if (route === "POST /api/log/delete") {
+      if (!isEditor) return refuse(403, "editors only");
+      const id = String((await body(request))?.id ?? "");
+      if (!id) return refuse(400, "id required");
+      const sent = ctx.table<Row>(SENT);
+      const row = await sent.get(id);
+      if (!row || row.list !== (await boundList(ctx))) return refuse(404, "no such message");
+      await sent.delete(id);
+      tell(ctx, "log");
+      return new Response(null, { status: 204 });
+    }
 
-  if (method === "GET") {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    // ---- Settings (owner only) ----------------------------------------------------------
+    if (route === "POST /api/settings") {
+      if (!peer.is_owner) return refuse(403, "only the frame owner can change settings");
+      const v = await body(request);
+      if (!v) return refuse(400, "invalid JSON");
+      const title = sanitizeText(v.title, 80) || DEFAULT_SETTINGS.title;
+      const next: Settings = { title, public_roles: Array.from(new Set(rolesIn(v.public_roles))) };
+      await setSettings(ctx, next);
+      tell(ctx, "settings");
+      return json({ settings: next });
+    }
 
-  return jsonReply(replyPort, 404, { error: "not found", path: reqPath });
+    if (request.method === "GET") return ctx.file(url.pathname);
+
+    return json({ error: "not found", path: url.pathname }, 404);
+  },
 };
-
-log("Member Reachout frame is up and running.");

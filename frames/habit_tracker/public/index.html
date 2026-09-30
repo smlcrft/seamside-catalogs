@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Habit Tracker</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); --cell: 12px; --gap: 3px; }
     * { box-sizing: border-box; }
@@ -214,7 +214,16 @@
 <body>
   <div id="app"></div>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "/lib/js/framelib.js";
+
+    // Everything comes from this frame's own server half, which decides who may do what.
+    async function api(path, body) {
+      const r = await window.seamside.fetch(`/api/${path}`, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     // Day strings are built from LOCAL calendar fields and stepped with setDate, never by
     // adding 86400000 — that breaks across a DST boundary, which is exactly the kind of
@@ -253,24 +262,20 @@
       const prevRuns = useRef({});
 
       async function refresh() {
-        const r = await frame.api("api/list").catch(() => null);
+        const r = await api("list").catch(() => null);
         if (r && r.habits) setSt(r);
       }
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // A write answers with the grid as it now stands; a refused one reads it again.
+      const write = (path, body) => api(path, body || {}).then((r) => { if (r && r.habits) setSt(r); }).catch(refresh);
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ habits_changed: refresh });
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((d) => { if (d && d.habit_tracker === "habits") refresh(); });
 
       // Fire the run animation only when a run actually GREW, so a plain re-render or
       // someone else's edit doesn't set every number bouncing. This sits ABOVE the early
@@ -302,19 +307,19 @@
       function addHabit() {
         const name = draft.trim();
         if (!name) return;
-        write("api/habit", { name }).catch(() => {});
+        write("habit", { name });
         setDraft("");
       }
       function toggle(h, day, on) {
         if (!isEditor) return;
-        // Optimistic: the square fills under the finger, the push reconciles.
+        // Optimistic: the square fills under the finger, the answer reconciles.
         setSt((s) => s && ({
           ...s,
           habits: s.habits.map((x) => x.id !== h.id ? x : ({
             ...x, days: on ? x.days.filter((d) => d !== day) : [...x.days, day].sort(),
           })),
         }));
-        write("api/mark", { habit_id: h.id, day, done: on ? 0 : 1 }).catch(() => {});
+        write("mark", { habit_id: h.id, day, done: on ? 0 : 1 });
       }
       async function editHabit(h) {
         if (!isEditor) return;
@@ -327,10 +332,10 @@
         });
         if (what === "rename") {
           const v = await frame.prompt("Habit", { title: "Rename", defaultValue: h.name, okLabel: "Save" });
-          if (v && v.trim() && v.trim() !== h.name) write("api/habit/" + h.id, { name: v.trim() });
+          if (v && v.trim() && v.trim() !== h.name) write("habit/" + h.id, { name: v.trim() });
         } else if (what === "remove") {
           if (await frame.confirm(`Remove "${h.name}" and everything marked for it?`, { title: "Habit", okLabel: "Remove" }))
-            write("api/habit/" + h.id + "/delete");
+            write("habit/" + h.id + "/delete");
         }
       }
 
@@ -415,6 +420,7 @@
         </main>`;
     }
 
+    await window.seamside.ready;
     render(html`<${App} />`, document.getElementById("app"));
   </script>
 </body>

@@ -1,0 +1,27 @@
+{
+  "tier": "members",
+  "publish": "open",
+  "steps": [
+    { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["location-input", "/api/weather?location="] },
+    { "why": "and at the root", "do": "GET {frame}/", "status": 200, "has": ["location-input"] },
+    { "why": "the worker's own code is not a page", "do": "GET {frame}/frame.ts", "status": 404, "lacks": ["fetchWeather"] },
+    { "why": "nor reached by climbing out of public/", "do": "GET {frame}/%2e%2e/frame.ts", "lacks": ["fetchWeather"] },
+
+    { "why": "a stranger may ask, and is told what is missing", "do": "GET {api}/weather", "status": 400, "is": { "/error": "Missing ?location= parameter" } },
+    { "why": "a place of only spaces is no place", "do": "GET {api}/weather?location=%20%20", "status": 400, "is": { "/error": "Missing ?location= parameter" } },
+    { "why": "someone signed in and on no roster asks the same", "as": "signed", "do": "GET {api}/weather", "status": 400, "is": { "/error": "Missing ?location= parameter" } },
+    { "why": "a viewer too", "as": "viewer", "do": "GET {api}/weather", "status": 400, "is": { "/error": "Missing ?location= parameter" } },
+    { "why": "a collaborator too", "as": "collaborator", "do": "GET {api}/weather", "status": 400, "is": { "/error": "Missing ?location= parameter" } },
+    { "why": "and the owner", "as": "owner", "do": "GET {api}/weather", "status": 400, "is": { "/error": "Missing ?location= parameter" } },
+    { "why": "and a member at the space's own door", "as": "viewer", "at": "space", "do": "GET {api}/weather", "status": 400, "is": { "/error": "Missing ?location= parameter" } },
+
+    { "why": "the frame takes no writes: a stranger's post is not a route", "do": "POST {api}/weather", "body": { "location": "Oslo" }, "status": 404, "is": { "/code": "NOT_FOUND" } },
+    { "why": "nor the owner's", "as": "owner", "do": "POST {api}/weather", "body": { "location": "Oslo" }, "status": 404, "is": { "/code": "NOT_FOUND" } },
+    { "why": "nor anything that is not GET", "as": "collaborator", "do": "DELETE {api}/weather", "status": 404, "is": { "/code": "NOT_FOUND" } },
+
+    { "why": "a stranger writes no key at the door", "do": "KV.PUT weather_location f:{id}", "body": "\"Oslo\"", "status": 403 },
+    { "why": "nor a row", "do": "KV.PUT t/weather/x", "body": { "v": 1 }, "status": 403 },
+    { "why": "nor a viewer", "as": "viewer", "at": "space", "do": "KV.PUT t/weather/x", "body": { "v": 1 }, "status": 403 },
+    { "why": "and looking a place up left nothing in the session's keys", "as": "collaborator", "at": "space", "do": "KV.LIST weather f:{id}", "lacks": ["weather_location", "Oslo"] }
+  ]
+}

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pancake Stacker</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c8); }
     html, body { height: 100%; }
@@ -106,7 +106,16 @@
   </div>
 
   <script type="module">
-    import { frame } from "./lib/js/framelib.js";
+    import "/lib/js/framelib.js";   // window.seamside
+
+    // Everything comes from the frame's own server half; it decides whose game is recorded.
+    async function api(path, body) {
+      const r = await window.seamside.fetch(path, body ? { method: 'POST', body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || 'Something went wrong.');
+      return v;
+    }
 
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
@@ -241,7 +250,7 @@
 
     async function loadState() {
       try {
-        const s = await frame.api('api/state');
+        const s = await api('/api/state');
         best = s.score?.high ?? 0;
         holder = s.score?.holder || "";
         canRecord = !!s.can_record;
@@ -249,23 +258,21 @@
       } catch (_) {}
     }
 
-    // Score submits go over the tether (frame.busSend); feature-detect and fall back to
-    // the HTTP POST for older viewer builds. Fire-and-forget — the resulting high score
-    // arrives via the 'score' push below.
-    function submitScore(s) {
-      if (typeof frame.busSend === 'function') { frame.busSend({ op: 'submit', score: s }); return; }
-      frame.api('api/submit', { score: s }).catch(() => {});
+    function showBest(score) {
+      best = score?.high ?? best;
+      holder = score?.holder || holder;
+      $best.textContent = best;
+      const line = $result.querySelector('.holder');
+      if (line && holder) line.textContent = `best held by ${holder}`;
     }
 
-    // Every viewer — the submitter included — updates the best-score HUD from the push.
+    // The submitter's HUD follows the answer; a new best tells every other page to read again.
+    function submitScore(s) {
+      api('/api/submit', { score: s }).then((r) => { if (r.new_record) showBest(r.score); }).catch(() => {});
+    }
+
     window.addEventListener('message', (e) => {
-      if (e.data?.type === 'score' && e.data.new_record) {
-        best = e.data.score?.high ?? best;
-        holder = e.data.score?.holder || holder;
-        $best.textContent = best;
-        const line = $result.querySelector('.holder');
-        if (line && holder) line.textContent = `best held by ${holder}`;
-      }
+      if (e.data?.game_pancake_stacker === 'score') api('/api/state').then((s) => showBest(s.score)).catch(() => {});
     });
 
     function stackHeight() {
@@ -666,6 +673,7 @@
     new ResizeObserver(fit).observe(document.documentElement);
     window.addEventListener('resize', fit);
 
+    await window.seamside.ready;
     loadState().then(() => {
       initStatic();
       fit();

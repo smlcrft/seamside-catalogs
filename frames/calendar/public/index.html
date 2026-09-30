@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Calendar</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); --hour-px: 44px; }
     * { box-sizing: border-box; }
@@ -240,19 +240,17 @@
     import {
       frame, html, render, useState, useEffect, useRef, useMemo, useLayoutEffect,
       useFramePush, Modal, Overlay, applyChannel,
-    } from "./lib/js/framelib.js";
+    } from "/lib/js/framelib.js";
 
-    const SESSION = Math.random().toString(36).slice(2);
-
-    // Writes go over frame.busSend, fire-and-forget — the resulting calendar arrives via the
-    // cal_changed push, sender included. A framelib without busSend falls back to HTTP.
-    const write = (path, body) => {
-      if (typeof frame.busSend === "function") {
-        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-        return Promise.resolve({});
-      }
-      return frame.api(path, body);
-    };
+    // Everything this page knows comes from its own server half, which decides on who is asking.
+    async function api(method, path, body) {
+      await window.seamside.ready;
+      const r = await window.seamside.fetch(`/api${path}`, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "");
+      return v;
+    }
     const DOW_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
     const DOW_1 = ["S","M","T","W","T","F","S"];
     const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -766,13 +764,14 @@
       const [weekScroll, setWeekScroll] = useState(0);   // bump to re-scroll the week grid to "now"
       const [rootRef, mode] = useLayoutMode();
 
-      async function refresh() { const s = await frame.api("api/state").catch(() => null); if (s) setData(s); }
+      async function refresh() { const s = await api("GET", "/state").catch(() => null); if (s) setData(s); }
       useEffect(() => { refresh(); }, []);
 
       useEffect(() => {
-        frame.localStorageGetItem("view").then((v) => { if (v === "month" || v === "week") setViewMode(v); }).catch(() => {});
+        window.seamside.ready.then(() => window.seamside.prefs.get("view"))
+          .then((v) => { if (v === "month" || v === "week") setViewMode(v); }).catch(() => {});
       }, []);
-      function chooseView(v) { setViewMode(v); frame.localStorageSetItem("view", v).catch(() => {}); }
+      function chooseView(v) { setViewMode(v); window.seamside.prefs.set("view", v).catch(() => {}); }
 
       useEffect(() => {
         if (data && data.me) applyChannel(document.body, data.me.space_color);
@@ -783,9 +782,8 @@
         return () => clearInterval(t);
       }, []);
 
-      // Every viewer — the sender included — re-renders from the push; bus writes have
-      // no response, so the sender's own push is what confirms the write landed.
-      useFramePush({ cal_changed: refresh });
+      // A push says the events changed and nothing else: read again, as whoever this is.
+      useFramePush((d) => { if (d && d.calendar) refresh(); });
 
       const events = (data && data.events) || [];
       const effective = mode === "compact" ? "agenda" : viewMode;
@@ -798,16 +796,16 @@
 
       if (!data) return html`<div class="app" ref=${rootRef}></div>`;
       const { me, settings } = data;
-      const isEditor = me.is_sfi_editor;
+      const isEditor = me.is_sfi_editor || me.is_owner;
 
       function saveEvent(ev) {
         const prev = data;
         if (ev.id) setData({ ...data, events: events.map((e) => e.id === ev.id ? { ...e, ...ev } : e) });
         setEditing(null);
-        write("api/event", { event: ev, by: SESSION })
-          .catch(async (err) => { setData(prev); await frame.alert((err && err.body && err.body.error) || "Could not save the event."); });
+        api("POST", "/event", { event: ev }).then(refresh)
+          .catch(async (err) => { setData(prev); await frame.alert((err && err.message) || "Could not save the event."); });
       }
-      function deleteEvent(id) { setEditing(null); write("api/event_delete", { id, by: SESSION }).catch(() => {}); }
+      function deleteEvent(id) { setEditing(null); api("POST", "/event_delete", { id }).then(refresh).catch(() => {}); }
       // Delete options for a recurring event: "one" (just this day), "forward" (this day on), "all".
       // A one-time event ignores `mode` and is removed outright.
       function performDelete(mode) {

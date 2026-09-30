@@ -26,7 +26,7 @@ Where this frame could grow:
 state — restoring it on load is what brings the frame back to the same photo after a restart, and
 there is no separate "remember where I was" mechanism to keep in sync with it. Editors drive that
 state; Viewer-role members and anonymous visitors browse in local frontend state that is cleared
-whenever a `display_changed` push arrives, so they rejoin the wall instead of drifting from it.
+whenever a `{ picture_frame: "display" }` push arrives, so they rejoin the wall instead of drifting from it.
 
 **The slideshow clock.** A running show's position is computed, never stored: the backend keeps
 `slideshow_on`, `slideshow_secs`, `anchor_photo_id`, and `anchor_ms`, and every client derives the
@@ -54,16 +54,16 @@ is already within limits and is a PNG, GIF, or WebP, which go up untouched becau
 round-trip would cost transparency and animation. A second 480px copy is uploaded as the grid
 thumbnail (PNG when the source is PNG, so transparency doesn't turn black).
 
-Bytes are sent as an in-memory `ArrayBuffer`. A request past 8 MiB never reaches the worker, so
-that is the per-photo cap after the downscale.
+Bytes are sent as the request's body (`seamside.fetch` with a `Uint8Array`). A request past 8 MiB never reaches the worker, so
+that is the per-photo cap after the downscale. The page loads no picture by URL: it asks `/api/photo` and `/api/thumb` for the bytes and draws each from a blob URL, kept for the visit.
 
 The backend re-checks the mime, byte size, and a magic-byte signature before writing, and inserts
 the row *before* the file so a failed byte-write can be undone rather than stranding a row that
 points at nothing.
 
 **Image storage.** Rows are `picture_frame_photos.table.jsonl` at the space's root; each photo is a file of the space at `Picture Frame/<photo_id>/<name>` (the row's `path`, synced with the space) with its grid thumbnail beside it (`thumbnail.jpg|png`, the row's `thumb_path`). Both are served with a long `immutable` cache header — a photo id
-is never reused and a photo's bytes never change — which is what keeps a looping slideshow from
-re-fetching over the bridge. A missing thumbnail falls back to the full image, so a failed thumb
+is never reused and a photo's bytes never change — and the page asks for each photo once per visit, which is what keeps a looping slideshow from
+re-fetching. A missing thumbnail falls back to the full image, so a failed thumb
 write degrades quietly rather than leaving a hole in the grid. Deleting a photo removes the row
 and both files, then repairs the display state so the frame is never left pointing at something
 that no longer exists.

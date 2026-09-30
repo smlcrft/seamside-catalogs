@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chore Chart</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }   /* follows the space channel at runtime via applyChannel */
     * { box-sizing: border-box; }
@@ -198,7 +198,7 @@
 <body>
   <div id="app"></div>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useFramePush, applyChannel } from "./lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useFramePush, applyChannel } from "/lib/js/framelib.js";
 
     const CADENCES = ["daily", "weekly", "monthly", "once"];
     // How many turns a card holds. The row is the rhythm made visible: a daily card is a
@@ -214,34 +214,36 @@
     }
     const initial = (name) => (String(name).trim()[0] || "?");
 
+    // Everything comes from this frame's own server half, which decides who may do what.
+    async function api(path, body) {
+      const r = await window.seamside.fetch(`/api/${path}`, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
+
     function App() {
       const [me, setMe]           = useState(null);
       const [chores, setChores]   = useState(null);     // null until first load
       const [draft, setDraft]     = useState({ chore: "", assignee: "", cadence: "weekly" });
 
       async function refresh() {
-        const r = await frame.api("api/list").catch(() => null);
+        const r = await api("list").catch(() => null);
         if (!r) return;
         if (r.chores) setChores(r.chores);
       }
-      // Writes go over the tether (frame.busSend) — fire-and-forget; the board refreshes
-      // from the chores_changed push, sender included. Feature-detect: an older viewer's
-      // framelib has no busSend, so fall back to the HTTP write it was using before.
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // A write answers with the board as it now stands; a refused one reads it again.
+      const write = (path, body) => api(path, body).then((r) => { if (r.chores) setChores(r.chores); }).catch(refresh);
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ chores_changed: refresh });
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((d) => { if (d.chore_chart === "chores") refresh(); });
 
       if (!me || chores === null) return html`<div></div>`;
       const isEditor = !!me.is_sfi_editor;
@@ -251,17 +253,17 @@
       function addChore() {
         const chore = draft.chore.trim();
         if (!chore) return;
-        write("api/chore", { chore, assignee: draft.assignee.trim(), cadence: draft.cadence }).catch(() => {});
+        write("chore", { chore, assignee: draft.assignee.trim(), cadence: draft.cadence });
         // keep who and rhythm: adding a run of chores for one person is the common case
         setDraft({ chore: "", assignee: draft.assignee, cadence: draft.cadence });
       }
-      // Optimistic: flip locally, reconcile from the push — ticking a chore off must feel
+      // Optimistic: flip locally, reconcile from the answer — ticking a chore off must feel
       // instant, and it is the one thing a kid at the fridge tablet actually does.
       function tick(c) {
         if (!isEditor) return;
         const done = !c.done;
         setChores((xs) => xs && xs.map((x) => x.id === c.id ? { ...x, done } : x));
-        write("api/chore/" + c.id + (done ? "/done" : "/undo"), {}).catch(() => {});
+        write("chore/" + c.id + (done ? "/done" : "/undo"), {});
       }
 
       // One menu per chore rather than a rail of icons on every row: the big tick stays
@@ -283,21 +285,21 @@
           : "rename");
         if (what === "rename") {
           const name = await frame.prompt("Chore", { title: "Rename", defaultValue: c.chore, okLabel: "Save" });
-          if (name && name.trim() && name.trim() !== c.chore) write("api/chore/" + c.id, { chore: name.trim() }).catch(() => {});
+          if (name && name.trim() && name.trim() !== c.chore) write("chore/" + c.id, { chore: name.trim() });
         } else if (what === "who") {
           const who = await frame.prompt("Leave it empty for anyone.", { title: "Who does it", defaultValue: c.assignee, okLabel: "Save" });
-          if (who !== null) write("api/chore/" + c.id, { assignee: who.trim() }).catch(() => {});
+          if (who !== null) write("chore/" + c.id, { assignee: who.trim() });
         } else if (what === "cadence") {
           const pick = await frame.choose("How often does this come back?", {
             title: "Rhythm",
             options: CADENCES.map((k) => ({ id: k, label: k, icon: k === "once" ? "ph-check" : "ph-repeat" })),
           });
-          if (pick) write("api/chore/" + c.id, { cadence: pick }).catch(() => {});
+          if (pick) write("chore/" + c.id, { cadence: pick });
         } else if (what === "remove") {
           const sure = await frame.confirm(`Remove "${c.chore}" from the chart?`, { title: "Chore", okLabel: "Remove" });
           if (sure) {
             setChores((xs) => xs && xs.filter((x) => x.id !== c.id));
-            write("api/chore/" + c.id + "/delete", {}).catch(() => {});
+            write("chore/" + c.id + "/delete", {});
           }
         }
       }
@@ -405,6 +407,7 @@
         </main>`;
     }
 
+    await window.seamside.ready;
     render(html`<${App} />`, document.getElementById("app"));
   </script>
 </body>

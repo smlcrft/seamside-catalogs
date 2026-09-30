@@ -20,7 +20,7 @@ Ideas, roughly in order of value:
 - **Cursor ties.** Paging keys on `created_ms` alone; two posts sharing an exact millisecond
   could straddle a page boundary. If that ever matters, extend the cursor to `(created_ms, id)`.
 - **Link previews.** URLs are auto-linked and open via the host's browser-confirm flow.
-  A backend `permissions.net` fetch of OpenGraph tags could render a title/thumbnail card
+  A backend `permissions_backend.net` fetch of OpenGraph tags could render a title/thumbnail card
   (see `_garden_plotter` for the net-permission + backend-`fetch` shape).
 - **Feeds.** A read-only `/api/feed.json` (or RSS/Atom) endpoint would let the public link
   be followed by external readers, not just viewed in-frame.

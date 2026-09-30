@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Slideshow</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }
     * { box-sizing: border-box; }
@@ -200,7 +200,7 @@
   <script type="module">
     import {
       frame, html, render, useState, useEffect, useRef, useLayoutEffect, useFramePush, Overlay, applyChannel,
-    } from "./lib/js/framelib.js";
+    } from "/lib/js/framelib.js";
 
     // ---- constants & helpers ----------------------------------------------------------
     const ASPECTS = { "16:9": [1280, 720], "4:3": [1200, 900], "1:1": [960, 960] };
@@ -212,22 +212,38 @@
     const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
     const clone = (o) => JSON.parse(JSON.stringify(o));   // deck is pure JSON — avoids structuredClone gaps in older webviews
     function genId() { let s = ""; for (let i = 0; i < 32; i++) s += Math.floor(Math.random() * 16).toString(16); return s; }
-    function withSfi(p) {
-      try {
-        const sfi = new URLSearchParams(location.search).get("sfi");
-        if (sfi && !/[?&]sfi=/.test(p)) return p + (p.includes("?") ? "&" : "?") + "sfi=" + encodeURIComponent(sfi);
-      } catch (_) {}
-      return p;
+    // Everything this page knows comes from its own server half (/api/…), which decides who
+    // may do what; a refused request throws the worker's own words.
+    async function api(path, body) {
+      const r = await window.seamside.fetch(`/api/${path}`, body === undefined ? {} : { method: "POST", body: JSON.stringify(body) });
+      let v = {};
+      try { v = r.json(); } catch (_) { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || `Request failed (${r.status})`);
+      return v;
     }
-    // Writes go over frame.busSend, fire-and-forget — resulting state arrives via the pushes
-    // below. A framelib without busSend falls back to the HTTP write.
-    const write = (path, body) => {
-      if (typeof frame.busSend === "function") {
-        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-        return Promise.resolve({});
+    // An image is asked of the worker as bytes — a sandboxed page has no origin to load an
+    // <img src> from — once per id, then kept (an image id names one upload for good).
+    const images = new Map();
+    function imageUrl(id) {
+      if (!images.has(id)) {
+        const p = window.seamside.fetch(`/api/image/${id}`)
+          .then((r) => (r.ok ? URL.createObjectURL(new Blob([r.bytes()], { type: r.type })) : null))
+          .catch(() => null);
+        images.set(id, p);
+        p.then((u) => { if (!u) images.delete(id); });
       }
-      return frame.api(path, body);
-    };
+      return images.get(id);
+    }
+    function Img({ id, fit }) {
+      const [url, setUrl] = useState(null);
+      useEffect(() => {
+        let live = true;
+        imageUrl(id).then((u) => { if (live) setUrl(u); });
+        return () => { live = false; };
+      }, [id]);
+      return url ? html`<img src=${url} draggable=${false}
+        style=${{ width: "100%", height: "100%", objectFit: fit, display: "block" }} />` : null;
+    }
     // The deck follows the space channel color like every other frame. applyChannel
     // sets --ch/--ch-fg on <body>; slide fills also want a muted step, which the os
     // tokens provide per-channel (srgb color-mix fallback for custom hex colors).
@@ -279,8 +295,7 @@
       }
       if (el.type === "image") {
         if (!el.imageId) return html`<div class="imgph">no image</div>`;
-        return html`<img src=${withSfi("api/image/" + el.imageId)} draggable=${false}
-          style=${{ width: "100%", height: "100%", objectFit: el.fit, display: "block" }} />`;
+        return html`<${Img} id=${el.imageId} fit=${el.fit} />`;
       }
       // shape
       const st = { width: "100%", height: "100%" };
@@ -514,9 +529,22 @@
       useEffect(() => { curRef.current = cur; }, [cur]);
       useEffect(() => { presentRef.current = present; }, [present]);
 
+      const savingRef = useRef(0);               // deck saves on their way
+      const editRef = useRef(0);                 // bumped by every local change to the deck
+      const presentingRef = useRef(0);           // present advances on their way
+      const presentSeqRef = useRef(0);           // bumped by every local present advance
+
+      const typingNow = () => {
+        const tag = (document.activeElement && document.activeElement.tagName) || "";
+        return tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT";
+      };
+
       async function refresh() {
-        const s = await frame.api("api/state").catch(() => null);
+        const edit = editRef.current;
+        const s = await api("state").catch(() => null);
         if (!s) return;
+        // Changed here while the read was out: the save on its way lands first, then read again.
+        if (editRef.current !== edit) { staleRef.current = true; return; }
         setMe(s.me); applySpaceChannel(s.me); setShow(s.show); showRef.current = s.show;
         if (typeof s.viewers === "number") setViewerCount(s.viewers);
         if (s.present) sharedPresentRef.current = s.present.index;
@@ -527,35 +555,52 @@
       }
       useEffect(() => { refresh(); }, []);
 
-      useFramePush({
-        deck_changed: (data) => {
-          if (data && data.by === SESSION) return;
-          const tag = (document.activeElement && document.activeElement.tagName) || "";
-          const typing = tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT";
-          if (busyRef.current || typing) { staleRef.current = true; return; }
-          refresh();
-        },
-        // Live presentation moved. Fires for peers AND sibling devices of the presenter. We track
-        // the shared index always; in sync mode followers track it on-screen everywhere — present
-        // mode and the read-only browse view both.
-        present_changed: (data) => {
-          if (!data || data.by === SESSION) return;
-          sharedPresentRef.current = data.index;
-          const sh = showRef.current;
-          if (!sh || !sh.settings.syncPresent) return;
-          const idx = clamp(data.index, 0, Math.max(0, sh.slides.length - 1));
-          if (presentRef.current) setPIdx(idx);
-          else if (me && !me.is_sfi_editor) setCur(idx);
-        },
-        viewers_changed: (data) => {
-          if (data && typeof data.count === "number") setViewerCount(data.count);
-        },
+      // A change that arrived while dragging, typing or saving waits until this page is none
+      // of those; then the deck is re-read, so nothing later is saved over a deck this page
+      // never saw.
+      function settle() {
+        if (!staleRef.current || busyRef.current || typingNow() || saveTimer.current || savingRef.current) return;
+        staleRef.current = false;
+        refresh();
+      }
+      async function saveNow() {
+        clearTimeout(saveTimer.current); saveTimer.current = null;
+        savingRef.current++;
+        await api("save", { show: showRef.current }).catch(() => {});
+        savingRef.current--;
+        settle();
+      }
+
+      // The live presentation moved. We track the shared index always; in sync mode followers
+      // track it on-screen everywhere — present mode and the read-only browse view both. This
+      // page's own advances are already on screen, so a read that crossed one is dropped.
+      async function presentMoved() {
+        if (presentingRef.current) return;
+        const seq = presentSeqRef.current;
+        const s = await api("state").catch(() => null);
+        if (!s || !s.present || presentingRef.current || seq !== presentSeqRef.current) return;
+        sharedPresentRef.current = s.present.index;
+        const sh = showRef.current;
+        if (!sh || !sh.settings.syncPresent) return;
+        const idx = clamp(s.present.index, 0, Math.max(0, sh.slides.length - 1));
+        if (presentRef.current) setPIdx(idx);
+        else if (me && !me.is_sfi_editor) setCur(idx);
+      }
+
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((d) => {
+        const what = d && d.slideshow;
+        if (what === "deck") { staleRef.current = true; settle(); }
+        else if (what === "present") presentMoved();
+        else if (what === "viewers" && me && me.is_sfi_editor) {
+          api("state").then((s) => { if (typeof s.viewers === "number") setViewerCount(s.viewers); }).catch(() => {});
+        }
       });
 
       // Read-only viewers announce presence; editors ping too, which sweeps out viewers who left.
       useEffect(() => {
         if (!me) return;
-        const ping = () => write("api/viewer_ping", { by: SESSION }).catch(() => {});
+        const ping = () => api("viewer_ping", { by: SESSION }).catch(() => {});
         ping();
         const t = setInterval(ping, 10000);
         return () => clearInterval(t);
@@ -563,22 +608,15 @@
 
       function endInteraction() {
         busyRef.current = false;
-        if (staleRef.current) { staleRef.current = false; refresh(); }
+        settle();
       }
 
-      // A change that arrived while typing waits for the field to lose focus; then this
-      // editor's pending save lands first and the deck is re-read, so nothing later is
-      // saved over a deck this page never saw.
+      // Leaving a field lets a change that waited on it in: this editor's pending save lands
+      // first.
       useEffect(() => {
-        const onOut = () => setTimeout(async () => {
-          const tag = (document.activeElement && document.activeElement.tagName) || "";
-          if (!staleRef.current || busyRef.current || tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
-          staleRef.current = false;
-          if (saveTimer.current) {
-            clearTimeout(saveTimer.current); saveTimer.current = null;
-            await frame.api("api/save", { show: showRef.current, by: SESSION }).catch(() => {});
-          }
-          refresh();
+        const onOut = () => setTimeout(() => {
+          if (!staleRef.current || busyRef.current || typingNow()) return;
+          if (saveTimer.current) saveNow(); else settle();
         }, 0);
         window.addEventListener("focusout", onOut);
         return () => window.removeEventListener("focusout", onOut);
@@ -622,12 +660,9 @@
       // ---- persistence ----
       function scheduleSave() {
         clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => {
-          saveTimer.current = null;
-          write("api/save", { show: showRef.current, by: SESSION }).catch(() => {});
-        }, 300);
+        saveTimer.current = setTimeout(saveNow, 300);
       }
-      function commit(next, save = true) { showRef.current = next; setShow(next); if (save) scheduleSave(); }
+      function commit(next, save = true) { editRef.current++; showRef.current = next; setShow(next); if (save) scheduleSave(); }
 
       // ---- slide ops ----
       function addSlide() {
@@ -759,10 +794,10 @@
         try {
           const { blob, ext } = await prepImage(file);
           if (blob.size > 8 * 1024 * 1024) { await frame.alert("That image is too large even after resizing."); return; }
-          const buf = await blob.arrayBuffer();
-          const res = await frame.fetch(withSfi("api/upload?ext=" + encodeURIComponent(ext)), { method: "POST", body: buf });
-          if (!res.ok) { const m = await res.json().catch(() => ({})); await frame.alert(m.error || ("Upload failed (" + res.status + ")")); return; }
-          const { imageId } = await res.json();
+          const buf = new Uint8Array(await blob.arrayBuffer());
+          const res = await window.seamside.fetch("/api/upload?ext=" + encodeURIComponent(ext), { method: "POST", body: buf });
+          if (!res.ok) { let m = {}; try { m = res.json(); } catch (_) { /* the status says it */ } await frame.alert(m.error || ("Upload failed (" + res.status + ")")); return; }
+          const { imageId } = res.json();
           addElement((c) => freshImage(imageId, W, H, c));
         } catch (_) { await frame.alert("Could not read that image."); }
       }
@@ -811,7 +846,7 @@
       function exitPresent() { setPresent(false); try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) {} }
       function nav(dir) { setCur((c) => clamp(c + dir, 0, Math.max(0, showRef.current.slides.length - 1))); }
       // Advance the presentation. In sync mode only editors may drive, and each step is broadcast
-      // to all viewers (peers + sibling devices) via the backend; followers ignore this entirely.
+      // to every open page of the session via the backend; followers ignore this entirely.
       function presentNav(dir) {
         const sh = showRef.current;
         const isEd = me && me.is_sfi_editor;
@@ -819,8 +854,9 @@
         setPIdx((p) => {
           const n = clamp(p + dir, 0, Math.max(0, sh.slides.length - 1));
           if (sh.settings.syncPresent && isEd && n !== p) {
-            sharedPresentRef.current = n;  // our own broadcast is echo-suppressed, so track it locally too
-            write("api/present", { index: n, by: SESSION }).catch(() => {});
+            sharedPresentRef.current = n;  // our own advance is already on screen, so track it locally too
+            presentSeqRef.current++; presentingRef.current++;
+            api("present", { index: n }).catch(() => {}).finally(() => { presentingRef.current--; });
           }
           return n;
         });
@@ -926,6 +962,7 @@
       </div>`;
     }
 
+    await window.seamside.ready;
     render(html`<${App}/>`, document.body);
   </script>
 </body>

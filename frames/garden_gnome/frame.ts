@@ -1,6 +1,6 @@
 // ----------------------------------------------------------------------------------------
 // Garden Gnome — at-a-glance home garden helper. Each session's prefs (location, soil,
-// chosen plants) are its own `prefs` key (sessionKv), so two gardens in one space keep
+// chosen plants) are its own `__fc_settings` row `prefs`, so two gardens in one space keep
 // their own and they travel with the space. Open-Meteo is hit at most once every 15 minutes per location, shared by every
 // space pointing at the same place. Each ticked plant gets three color-coded dots on a +/-
 // spectrum (water, temperature, sunlight) so the gardener can see at a glance whether
@@ -22,11 +22,8 @@
 // freeze_risk_f and heat_risk_f; DROUGHT / WATERLOGGED are derived from soil moisture
 // vs. the plant's weekly water band.
 // ----------------------------------------------------------------------------------------
-import {
-  log, parsePeerInfo, serveFileAtPath, serveHtmlShell,
-  jsonReply, parseJsonBody, sanitizeText, pushToInstance, onUiMessage,
-  sessionKv,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 // ----- Plant catalog --------------------------------------------------------------------
 type PlantKey =
@@ -112,7 +109,7 @@ const SOIL_TYPES: { key: SoilKey; label: string; description: string; retention_
   { key: "chalky", label: "Chalky", description: "Stony, alkaline, drains quickly",                     retention_factor: 0.7 },
 ];
 
-// ----- Per-session preferences (the session's `prefs` key) ------------------------------
+// ----- Per-session preferences (the session's `__fc_settings` row `prefs`) ---------------
 type Prefs = {
   location: string;
   soil: SoilKey;
@@ -124,9 +121,30 @@ const DEFAULT_PREFS: Prefs = { location: "", soil: "loamy", plants: [] };
 const PLANT_KEY_SET = new Set<string>(PLANT_TYPES.map((p) => p.key));
 const SOIL_KEY_SET  = new Set<string>(SOIL_TYPES.map((s) => s.key));
 
-async function getPrefs(): Promise<Prefs> {
+// The prefs are the `__fc_settings` row `prefs`, JSON under `v`: no wire serves it. An older
+// copy kept them in the session's `prefs` key, which anyone reaching the frame reads at the
+// door; a read that finds no row moves that key into it and deletes the key.
+const SETTINGS = "__fc_settings";
+
+async function keepPrefs(ctx: Ctx, v: string): Promise<void> {
+  const was = await ctx.table(SETTINGS).get("prefs");
+  const now = Date.now();
+  await ctx.table(SETTINGS).upsert({ ...(was ?? { _created_at: now }), v, id: "prefs", _modified_at: now });
+}
+
+async function storedPrefs(ctx: Ctx): Promise<string> {
+  const row = await ctx.table(SETTINGS).get("prefs");
+  if (row) return String(row.v ?? "");
+  const old = await ctx.kv.get("prefs");
+  if (old?.value == null) return "";
+  await keepPrefs(ctx, old.value);
+  await ctx.kv.del("prefs");
+  return old.value;
+}
+
+async function getPrefs(ctx: Ctx): Promise<Prefs> {
   let stored: Partial<Prefs> = {};
-  try { const op = await sessionKv.get("prefs"); if (op?.value) stored = JSON.parse(op.value); } catch { /* unreadable → defaults */ }
+  try { stored = JSON.parse(await storedPrefs(ctx)) ?? {}; } catch { /* unreadable → defaults */ }
   const soilRaw = typeof stored.soil === "string" ? stored.soil : DEFAULT_PREFS.soil;
   const soil: SoilKey = SOIL_KEY_SET.has(soilRaw) ? (soilRaw as SoilKey) : DEFAULT_PREFS.soil;
   const plants: PlantKey[] = Array.isArray(stored.plants)
@@ -139,8 +157,8 @@ async function getPrefs(): Promise<Prefs> {
   };
 }
 
-async function setPrefs(next: Prefs): Promise<void> {
-  await sessionKv.put("prefs", JSON.stringify(next));
+async function setPrefs(ctx: Ctx, next: Prefs): Promise<void> {
+  await keepPrefs(ctx, JSON.stringify(next));
 }
 
 // ----- Weather: shared 15-minute cache keyed by location string -------------------------
@@ -180,7 +198,7 @@ function numArr(v: unknown): number[] {
   return Array.isArray(v) ? v.map(Number).map((n) => Number.isFinite(n) ? n : 0) : [];
 }
 
-async function fetchWeatherImpl(location: string): Promise<WeatherData | null> {
+async function fetchWeatherImpl(ctx: Ctx, location: string): Promise<WeatherData | null> {
   try {
     const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`;
     const geoRes = await fetch(geoUrl);
@@ -274,15 +292,15 @@ async function fetchWeatherImpl(location: string): Promise<WeatherData | null> {
     };
     const resolved_name = admin1 ? `${name}, ${admin1}` : `${name}, ${country}`;
     const data: WeatherData = { resolved_name, past_days, forecast_24h, summary, fetched_at: Date.now() };
-    log(`weather fetched | ${resolved_name}`);
+    ctx.log(`weather fetched | ${resolved_name}`);
     return data;
   } catch (e) {
-    log(`weather fetch error: ${e instanceof Error ? e.message : String(e)}`);
+    ctx.log(`weather fetch error: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
 }
 
-async function fetchWeather(location: string): Promise<WeatherData | null> {
+async function fetchWeather(ctx: Ctx, location: string): Promise<WeatherData | null> {
   const key = location.trim().toLowerCase();
   if (!key) return null;
   const cached = weatherCache.get(key);
@@ -290,7 +308,7 @@ async function fetchWeather(location: string): Promise<WeatherData | null> {
   // Coalesce concurrent fetches so a burst of viewers doesn't hammer Open-Meteo.
   const inflight = weatherInflight.get(key);
   if (inflight) return inflight;
-  const p = fetchWeatherImpl(location).finally(() => weatherInflight.delete(key));
+  const p = fetchWeatherImpl(ctx, location).finally(() => weatherInflight.delete(key));
   weatherInflight.set(key, p);
   const data = await p;
   if (data) weatherCache.set(key, data);
@@ -492,15 +510,26 @@ function statusFor(plant: PlantKey, w: WeatherData, soilFactor: number): PlantSt
   };
 }
 
-// ----- Save mutation (shared by the HTTP arm and the bus dispatcher) --------------------
-type MutPeer = ReturnType<typeof parsePeerInfo>;
-type MutResult = { status: number; body: Record<string, unknown> };
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx, what: "settings") => ctx.push({ garden_gnome: what });
 
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
+
+async function body<T>(request: Request): Promise<T | null> {
+  try {
+    return JSON.parse(await request.text()) as T;
+  } catch {
+    return null;
+  }
+}
+
+// ----- Save -----------------------------------------------------------------------------
 // Editor-only. Never gate on is_sfi_member — a Viewer-role member would slip through and
 // be able to rewrite the garden.
-async function mutSave(sfi_id: string, v: { location?: unknown; soil?: unknown; plants?: unknown } | null, peer: MutPeer): Promise<MutResult> {
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  if (!v) return { status: 400, body: { error: "invalid JSON" } };
+async function save(ctx: Ctx, v: { location?: unknown; soil?: unknown; plants?: unknown } | null): Promise<Response> {
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return refuse(403, "editors only");
+  if (!v) return refuse(400, "invalid JSON");
   const location = sanitizeText(v.location, 120);
   const soilRaw  = sanitizeText(v.soil, 20);
   const soil: SoilKey = SOIL_KEY_SET.has(soilRaw) ? (soilRaw as SoilKey) : "loamy";
@@ -516,71 +545,52 @@ async function mutSave(sfi_id: string, v: { location?: unknown; soil?: unknown; 
     }
   }
   const next: Prefs = { location, soil, plants };
-  await setPrefs(next);
-  pushToInstance(sfi_id, { type: "settings_changed" });
-  return { status: 200, body: { prefs: next } };
+  await setPrefs(ctx, next);
+  tell(ctx, "settings");
+  return json({ prefs: next });
 }
 
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (d.op !== "save") return;
-  const r = await mutSave(sfiId, d, peer);
-  if (r.status !== 200) log(`garden gnome: bus op save → ${r.status} (${JSON.stringify(r.body)})`);
-});
-
 // ----- HTTP handler ---------------------------------------------------------------------
-self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cookies) => {
-  const peer = parsePeerInfo(query, cookies);
-  const isOwner = peer.is_owner;
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
+    const peer = ctx.peer;
+    const editor = peer.is_sfi_editor || peer.is_owner;
+    const member = editor || peer.is_sfi_member;
 
-  if (reqPath === "/index.html" && method === "GET") {
-    // The script is a separate ES module file so it can import /lib/js/framelib.js —
-    // inlineJs would flatten the <script type="module"> to a non-module <script>,
-    // which can't use ES module imports, so it's intentionally omitted here.
-    return serveHtmlShell(replyPort, new URL("./public/index.html", import.meta.url), {
-      peer,
-      inlineCss: ["index.css"],
-    });
-  }
+    // Reads are open to every viewer who reaches the frame — whether a non-member can reach it
+    // at all is the platform's call (the space's tier, publishing the frame), never the frame's.
+    // Non-members get the same garden with the raw location withheld: the derived weather and
+    // plant statuses stay, the town they were computed for does not.
+    if (pathname === "/api/state" && method === "GET") {
+      const prefs = await getPrefs(ctx);
+      const soilDef = SOIL_TYPES.find((s) => s.key === prefs.soil) ?? SOIL_TYPES[1];
+      const weather = prefs.location ? await fetchWeather(ctx, prefs.location) : null;
+      const statuses: PlantStatus[] = weather
+        ? prefs.plants.map((p) => statusFor(p, weather, soilDef.retention_factor))
+        : [];
+      return json({
+        prefs: member ? prefs : { ...prefs, location: "" },
+        // Lets a viewer whose `location` was stripped still tell "not set up yet" apart from
+        // "set up, but I'm not allowed to see where".
+        has_location: !!prefs.location,
+        soil_types: SOIL_TYPES,
+        plant_types: PLANT_TYPES,
+        // The resolved place name is the location by another name: withheld alike.
+        weather: weather && !member ? { ...weather, resolved_name: "" } : weather,
+        statuses,
+        can_edit: editor,
+        is_owner: peer.is_owner,
+        now: Date.now(),
+      });
+    }
 
-  // Reads are open to every viewer who reaches the frame — whether a non-member can reach it
-  // at all is the platform's call (the space's tier, publishing the frame), never the frame's.
-  // Non-members get the same garden with the raw location withheld: the derived weather and
-  // plant statuses stay, the town they were computed for does not.
-  if (reqPath === "/api/state" && method === "GET") {
-    const prefs = await getPrefs();
-    const soilDef = SOIL_TYPES.find((s) => s.key === prefs.soil) ?? SOIL_TYPES[1];
-    const weather = prefs.location ? await fetchWeather(prefs.location) : null;
-    const statuses: PlantStatus[] = weather
-      ? prefs.plants.map((p) => statusFor(p, weather, soilDef.retention_factor))
-      : [];
-    return jsonReply(replyPort, 200, {
-      prefs: peer.is_sfi_member ? prefs : { ...prefs, location: "" },
-      // Lets a viewer whose `location` was stripped still tell "not set up yet" apart from
-      // "set up, but I'm not allowed to see where".
-      has_location: !!prefs.location,
-      soil_types: SOIL_TYPES,
-      plant_types: PLANT_TYPES,
-      // The resolved place name is the location by another name: withheld alike.
-      weather: weather && !peer.is_sfi_member ? { ...weather, resolved_name: "" } : weather,
-      statuses,
-      can_edit: peer.is_sfi_editor,
-      is_owner: isOwner,
-      now: Date.now(),
-    });
-  }
+    if (pathname === "/api/save" && method === "POST") {
+      return save(ctx, await body<{ location?: unknown; soil?: unknown; plants?: unknown }>(request));
+    }
 
-  if (reqPath === "/api/save" && method === "POST") {
-    const v = parseJsonBody<{ location?: unknown; soil?: unknown; plants?: unknown }>(body);
-    const r = await mutSave(peer.sfi_id, v, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
-
-  if (method === "GET") {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-  }
-  replyPort.postMessage({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Not found.", code: "NOT_FOUND" }) });
+    if (method === "GET") return ctx.file(pathname);
+    return json({ error: "Not found.", code: "NOT_FOUND" }, 404);
+  },
 };
-
-log("Garden Gnome frame is up.");

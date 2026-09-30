@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Picture Frame</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c7); }          /* overridden per-space by applyChannel on mount */
     * { box-sizing: border-box; }
@@ -178,8 +178,8 @@
   <script type="module">
     import {
       frame, html, render, useState, useEffect, useRef, useCallback,
-      useFramePush, applyChannel, WAITING,
-    } from "./lib/js/framelib.js";
+      useFramePush, applyChannel,
+    } from "/lib/js/framelib.js";
     import { photoAtTime, msUntilNextChange } from "./slideshow-clock.js";
 
     // Must match the caps enforced in frame.ts.
@@ -191,24 +191,43 @@
     const KEEP_ORIGINAL = new Set(["image/png", "image/gif", "image/webp"]);
     const INTERVALS = [[5, "5s"], [10, "10s"], [15, "15s"], [30, "30s"], [60, "1m"], [300, "5m"], [900, "15m"]];
 
-    // frame.api forwards ?sfi= automatically; frame.fetch does not, so binary calls add it here.
-    function withSfi(p) {
-      try {
-        const sfi = new URLSearchParams(location.search).get("sfi");
-        if (sfi && !/[?&]sfi=/.test(p)) return p + (p.includes("?") ? "&" : "?") + "sfi=" + encodeURIComponent(sfi);
-      } catch (_) { /* no search params */ }
-      return p;
+    // Everything this page knows comes from its own server half (/api/…), which decides who
+    // may do what; a refused request throws the worker's own words.
+    async function ask(path, init, what = "Request") {
+      await window.seamside.ready;
+      const r = await window.seamside.fetch(`/api/${path}`, init);
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || `${what} failed (${r.status})`);
+      return v;
     }
+    const read = (path) => ask(path);
+    const write = (path, body) => ask(path, { method: "POST", body: JSON.stringify(body || {}) });
+    const send = (path, bytes) => ask(path, { method: "POST", body: bytes }, "Upload");
 
-    // JSON writes go over frame.busSend; the push (display_changed / photos_changed) — which
-    // reaches the sender too — is the confirmation the UI renders from. A framelib without
-    // busSend falls back to the HTTP write.
-    function write(path, body) {
-      if (typeof frame.busSend === "function") {
-        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-        return Promise.resolve({});
+    // A picture is asked of the worker like anything else — a page has no network, and a
+    // sandboxed one no origin to load an <img src> from — once per path, then kept.
+    const pics = new Map();
+    function picUrl(path) {
+      if (!pics.has(path)) {
+        const p = window.seamside.ready
+          .then(() => window.seamside.fetch(`/api/${path}`))
+          .then((r) => (r.ok ? URL.createObjectURL(new Blob([r.bytes()], { type: r.type })) : null))
+          .catch(() => null);
+        pics.set(path, p);
+        p.then((u) => { if (!u) pics.delete(path); });
       }
-      return frame.api(path, body || {}, "POST");
+      return pics.get(path);
+    }
+    // An <img> whose bytes came from the worker; `onBroken` when they never do.
+    function Pic({ path, onBroken, ...rest }) {
+      const [url, setUrl] = useState(null);
+      useEffect(() => {
+        let live = true;
+        picUrl(path).then((u) => { if (!live) return; if (u) setUrl(u); else onBroken(); });
+        return () => { live = false; };
+      }, [path]);
+      return url ? html`<img src=${url} ...${rest} onError=${onBroken} />` : null;
     }
 
     // ----- Image preparation (client-side downscale) ------------------------------------
@@ -278,18 +297,19 @@
       const now = useCallback(() => Date.now() + skew.current, []);
 
       const refresh = useCallback(async () => {
-        const s = await frame.apiSafe("api/state").catch(() => null);
-        if (s && s !== WAITING && s.display) {
+        const s = await read("state").catch(() => null);
+        if (s && s.display) {
           if (typeof s.server_ms === "number") skew.current = s.server_ms - Date.now();
           setSt(s);
         }
       }, []);
 
       useEffect(() => { refresh(); }, [refresh]);
-      useFramePush({
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((m) => {
         // An editor moved the wall: everyone follows, and a local browser rejoins the show.
-        display_changed: () => { setOverride(null); refresh(); },
-        photos_changed: refresh,
+        if (m?.picture_frame === "display") { setOverride(null); refresh(); }
+        else if (m?.picture_frame === "photos") refresh();
       });
 
       useEffect(() => {
@@ -344,8 +364,8 @@
         }
         const body = { mode };
         if (photoId) body.photo_id = photoId;
-        // No response to consume: the display_changed push refreshes everyone, us included.
-        write("api/display", body).catch(() => refresh());
+        // The answer is the new state; the push brings every other page along.
+        write("display", body).then(setSt).catch(() => refresh());
       }, [canEdit, refresh]);
 
       const step = useCallback((delta) => {
@@ -359,12 +379,12 @@
         // The client holds the running show's computed position, so hand it back whenever the
         // show's shape changes — that's what lets the backend store a real photo when it stops.
         const body = { ...patch, current_photo_id: shown?.id || "" };
-        write("api/settings", body).catch(() => {});
+        write("settings", body).then(setSt).catch(() => {});
       }, [shown]);
 
       const removePhoto = useCallback(async (id) => {
         if (!(await frame.confirm("Delete this photo from the frame?", { danger: true, okLabel: "Delete" }))) return;
-        write("api/delete/" + id, {}).catch(() => refresh());
+        write("delete/" + id, {}).then(setSt).catch(() => refresh());
       }, [refresh]);
 
       const upload = useCallback(async (list) => {
@@ -381,18 +401,11 @@
             const { full, fullMime, thumb, w, h } = await prepare(f);
             if (!full) throw new Error(`Couldn't read "${f.name}".`);
             if (full.size > MAX_BYTES) throw new Error(`"${f.name}" is too large even after resizing.`);
-            const qs = `api/upload?name=${encodeURIComponent(f.name)}&mime=${encodeURIComponent(fullMime)}&w=${w}&h=${h}`;
-            const res = await frame.fetch(withSfi(qs), { method: "POST", body: await full.arrayBuffer() });
-            if (!res.ok) {
-              const j = await res.json().catch(() => ({}));
-              throw new Error(j.error || `Upload failed (${res.status})`);
-            }
-            const { photo_id } = await res.json();
+            const qs = `upload?name=${encodeURIComponent(f.name)}&mime=${encodeURIComponent(fullMime)}&w=${w}&h=${h}`;
+            const { photo_id } = await send(qs, new Uint8Array(await full.arrayBuffer()));
             if (thumb && photo_id) {
               // A missing thumbnail is survivable — the backend falls back to the full image.
-              await frame.fetch(withSfi(`api/upload/${photo_id}/thumb`), {
-                method: "POST", body: await thumb.arrayBuffer(),
-              }).catch(() => {});
+              await send(`upload/${photo_id}/thumb`, new Uint8Array(await thumb.arrayBuffer())).catch(() => {});
             }
           } catch (e) { note(e?.message || String(e)); }
         }
@@ -456,8 +469,8 @@
                     </button>` : null}
                 </div>`
               : html`
-                <img src=${withSfi("api/photo/" + shown.id)} alt=${shown.name}
-                  onClick=${() => go("grid", shown.id)} onError=${() => markBroken(shown.id)} />`}
+                <${Pic} path=${"photo/" + shown.id} alt=${shown.name}
+                  onClick=${() => go("grid", shown.id)} onBroken=${() => markBroken(shown.id)} />`}
             </div>
 
             ${many ? html`
@@ -540,8 +553,8 @@
                   onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go("single", p.id); } }}>
                   ${broken.has(p.id)
                     ? html`<div class="broken"><i class="ph-light ph-image-broken"></i></div>`
-                    : html`<img src=${withSfi("api/thumb/" + p.id)} alt=${p.name} loading="lazy"
-                        onError=${() => markBroken(p.id)} />`}
+                    : html`<${Pic} path=${"thumb/" + p.id} alt=${p.name}
+                        onBroken=${() => markBroken(p.id)} />`}
                   ${canEdit ? html`
                     <button class="del" title="Delete"
                       onClick=${(e) => { e.stopPropagation(); removePhoto(p.id); }}>

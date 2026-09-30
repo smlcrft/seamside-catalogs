@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Bookmarks</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }
     * { box-sizing: border-box; }
@@ -155,7 +155,17 @@
 <body>
   <div id="app"></div>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "/lib/js/framelib.js";
+
+    // Everything this page knows comes from its own server half (./api/…), so a stranger
+    // reads the links there and every write is checked there.
+    async function api(path, body) {
+      const r = await window.seamside.fetch("/" + path, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     // Same site, same colour, on every device — derived from the name, never handed out in
     // arrival order.
@@ -184,31 +194,27 @@
       const armTimer = useRef(null);
 
       async function refresh() {
-        const r = await frame.api("api/list").catch(() => null);
+        const r = await api("api/list").catch(() => null);
         if (r && r.bookmarks) setRows(r.bookmarks);
       }
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // Re-read after our own write, refused or not; the push brings everyone else along.
+      const write = (path, body) => api(path, body || {}).catch(() => {}).then(refresh);
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("api/whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ bookmarks_changed: refresh });
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((d) => { if (d.bookmarks === "bookmarks") refresh(); });
 
       const isEditor = !!(me && me.is_sfi_editor);
 
-      // Paste anywhere to save. Saving stays on HTTP here because the reply is what tells
-      // us whether it was a duplicate and which row to flash.
+      // Paste anywhere to save. The reply is what tells us whether it was a duplicate and
+      // which row to flash.
       async function save(url) {
-        const r = await frame.api("api/bookmark", { url }).catch(() => null);
+        const r = await api("api/bookmark", { url }).catch(() => null);
         if (!r || !r.ok) {
           await frame.alert((r && r.error) || "That didn't look like a web address.", { title: "Not saved" });
           return;
@@ -276,7 +282,7 @@
         setArmed(null);
         if (armTimer.current) clearTimeout(armTimer.current);
         setRows((xs) => xs && xs.filter((x) => x.id !== b.id));
-        write("api/bookmark/" + b.id + "/delete", {}).catch(() => {});
+        write("api/bookmark/" + b.id + "/delete", {});
       }
       function open(b) {
         if (typeof frame.openExternalUrl === "function") frame.openExternalUrl(b.url);
@@ -373,6 +379,7 @@
         </main>`;
     }
 
+    await window.seamside.ready;
     render(html`<${App} />`, document.getElementById("app"));
   </script>
 </body>

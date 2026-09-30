@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Roadmap</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c4); }
     * { box-sizing: border-box; }
@@ -336,7 +336,16 @@
     import {
       frame, html, render, useState, useEffect, useLayoutEffect, useRef, useMemo,
       useFramePush, Modal, applyChannel, Editable,
-    } from "./lib/js/framelib.js";
+    } from "/lib/js/framelib.js";
+
+    // Everything comes from this frame's own server half, which decides who may do what.
+    async function api(path, body) {
+      const r = await window.seamside.fetch(`/${path}`, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     const DAY = 86400000;
     const NEXT = { 0: 1, 1: 2, 2: 0 };
@@ -506,16 +515,16 @@
         if (snap.tasks) setTasks(snap.tasks);
       }
       async function refresh() {
-        const snap = await frame.api("api/state").catch(() => null);
+        const snap = await api("api/state").catch(() => null);
         setLoaded(true);
         setAll(snap);
       }
       useEffect(() => {
-        frame.api("api/whoami").then(setMe).catch(() => setMe({}));
+        api("api/whoami").then((m) => { setMe(m); applyChannel(document.body, m && m.space_color); }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ roadmap_changed: refresh });
-      useEffect(() => { frame.api("api/whoami").then((m) => applyChannel(document.body, m && m.space_color)).catch(() => {}); }, []);
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((d) => { if (d.roadmap === "state") refresh(); });
 
       // group tasks by milestone
       const byMs = useMemo(() => {
@@ -535,29 +544,20 @@
       const done = real.filter((m) => m.completed).sort(byTarget);
 
       // ---- mutations --------------------------------------------------------------------
-      // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
-      // dropped on Android (issue #750), the tether carries them everywhere. Fire-and-
-      // forget — the resulting state arrives via the roadmap_changed push (useFramePush
-      // above refreshes the sender too). Feature-detect: an older viewer build has no
-      // busSend — fall back to the HTTP write it was using before.
-      const call = (path, body, method) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body ?? {}) });
-          return Promise.resolve();
-        }
-        return frame.api(path, body ?? {}, method).then(setAll);
-      };
+      // A write answers with the roadmap as it now stands; a refused one reads it again.
+      // Everyone else's page follows on the push.
+      const call = (path, body) => api(path, body ?? {}).then(setAll).catch(refresh);
       async function saveMeta(patch) { await call("api/settings", patch); }
       async function addTask(mid) {
         const text = (taskDraft[mid] || "").trim();   // keeps internal newlines (Shift+Enter task)
         if (!text) return;
         setTaskDraft({ ...taskDraft, [mid]: "" });
-        await call("api/task/add", { milestone_id: mid, text }).catch(() => {});
+        await call("api/task/add", { milestone_id: mid, text });
       }
       // Pasted multi-line block → one task per line.
       async function addTasks(mid, lines) {
         setTaskDraft({ ...taskDraft, [mid]: "" });
-        await call("api/task/add", { milestone_id: mid, texts: lines }).catch(() => {});
+        await call("api/task/add", { milestone_id: mid, texts: lines });
       }
       async function cycleTask(t) {
         if (!isEditor) return;
@@ -566,40 +566,38 @@
           ? { ...x, state: next, completed_ms: next === 2 ? Date.now() : 0,
               actor_name: next === 0 ? "" : (me.user_name || "you") }
           : x));
-        await call("api/task/" + t.id, { state: next }).catch(refresh);
+        await call("api/task/" + t.id, { state: next });
       }
       async function commitTaskEdit(t, val) {
         setEditingTaskId(null);
         const v = val.trim();
-        if (v && v !== t.text) await call("api/task/" + t.id, { text: v }).catch(() => {});
+        if (v && v !== t.text) await call("api/task/" + t.id, { text: v });
       }
       async function delTask(t) {
         if (armedTask !== t.id) { setArmedTask(t.id); setTimeout(() => setArmedTask((a) => a === t.id ? null : a), 2500); return; }
         setArmedTask(null);
         setTasks(tasks.filter((x) => x.id !== t.id));
-        await call("api/task/delete/" + t.id, {}, "POST").catch(refresh);
+        await call("api/task/delete/" + t.id, {});
       }
       async function addMilestone() {
         const title = msDraft.title.trim();
         if (!title) { setAddingMs(false); return; }
         setAddingMs(false); setMsDraft({ title: "", date: "" });
-        await call("api/milestone/add", { title, target_ms: dateToMs(msDraft.date) }).catch(() => {});
+        await call("api/milestone/add", { title, target_ms: dateToMs(msDraft.date) });
       }
       async function toggleMsDone(m, allDone) {
         if (m.completed) return call("api/milestone/" + m.id, { completed: 0 });
         if (!allDone) { await frame.alert("All tasks must be done before completing a milestone.", { title: "Not done yet" }); return; }
-        try { await call("api/milestone/" + m.id, { completed: 1 }); }
+        try { setAll(await api("api/milestone/" + m.id, { completed: 1 })); }
         catch (e) {
-          let msg = "Couldn't complete this milestone.";
-          try { msg = JSON.parse(e?.body || "{}").error || msg; } catch (_) { /* keep default */ }
-          await frame.alert(msg, { title: "Hold on" }); refresh();
+          await frame.alert(e?.message || "Couldn't complete this milestone.", { title: "Hold on" }); refresh();
         }
       }
       async function delMilestone(m, count) {
         if (armedMs !== m.id) { setArmedMs(m.id); setTimeout(() => setArmedMs((a) => a === m.id ? null : a), 2500); return; }
         setArmedMs(null);
         if (count > 0 && !(await frame.confirm(`Delete “${m.title}” and its ${count} task${count === 1 ? "" : "s"}?`, { danger: true, okLabel: "Delete" }))) return;
-        await call("api/milestone/delete/" + m.id, {}, "POST").catch(() => {});
+        await call("api/milestone/delete/" + m.id, {});
       }
 
       // ---- drag & drop ------------------------------------------------------------------
@@ -644,7 +642,7 @@
         destIds.splice(to < 0 ? destIds.length : to, 0, dragId);
         // optimistic: reassign the dragged task locally
         setTasks(tasks.map((t) => t.id === dragId ? { ...t, milestone_id: destMid } : t));
-        await call("api/tasks/reorder", { milestone_id: destMid, ids: destIds }).catch(refresh);
+        await call("api/tasks/reorder", { milestone_id: destMid, ids: destIds });
       }
 
       function toggleCollapse(id) {
@@ -914,6 +912,7 @@
         <//>`;
     }
 
+    await window.seamside.ready;
     render(html`<${App}/>`, document.body);
   </script>
 </body>

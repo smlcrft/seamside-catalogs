@@ -17,18 +17,27 @@
 // Color is chosen from a tray of real watercolor pans, mixed SUBTRACTIVELY in a mixing well
 // (weighted geometric mean of reflectance — blue + yellow → green, complements → mud).
 //
-// Read-only viewers (anonymous link visitors + Viewer-role members) replay the painting and receive live
-// updates, but no /api/* mutation fires.
+// Everything this page knows comes from its own server half (/api/…), which decides who may
+// do what. Read-only viewers (anonymous link visitors + Viewer-role members) replay the
+// painting and follow along, but no /api/* mutation fires.
 // ----------------------------------------------------------------------------------------
-import { frame, applyChannel } from "./lib/js/framelib.js";
+import { frame, applyChannel } from "/lib/js/framelib.js";
 
-(() => {
+(async () => {
   const app = document.getElementById("app");
-  const peer = window.__peer || {};
-  const isOwner = !!peer.is_owner;
-  const canEdit = !!peer.is_sfi_editor;
-  const myUserId = peer.user_id || "";
-  const mySfi = peer.sfi_id || "";
+  // Who is asking, and the sheet as it stands, from the worker before anything is drawn.
+  let first;
+  try {
+    await window.seamside.ready;
+    first = await api("GET", "/api/state");
+  } catch (e) {
+    app.textContent = `failed to load: ${e.message}`;
+    return;
+  }
+  const isOwner = !!first.is_owner;
+  const canEdit = !!first.can_edit;
+  const me = first.me || {};
+  const myUserId = me.user_id || "";
 
   // --------------------------------------------------------------------------------------
   // Pigments — a limited, traditional watercolor palette (named pans, not RGB dots).
@@ -227,7 +236,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   if (!canEdit) document.getElementById("ws-deck").style.display = "none";
 
   function applySpaceColor() {
-    applyChannel(document.querySelector(".ws-root"), peer.space_color);
+    applyChannel(document.querySelector(".ws-root"), first.color);
   }
 
   // --------------------------------------------------------------------------------------
@@ -626,16 +635,16 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   // --------------------------------------------------------------------------------------
   // API helper
   // --------------------------------------------------------------------------------------
+  // A refused request throws the worker's own words, its status on the error.
   async function api(method, path, body) {
-    // Writes go over frame.busSend, fire-and-forget — resulting state arrives via the ws_*
-    // pushes below (the sender's own stroke reconciles by seed there). A framelib without
-    // busSend falls back to the HTTP write.
-    if ((method === "POST" || method === "PUT") && typeof frame.busSend === "function") {
-      frame.busSend({ op: path.replace(/^\/api\//, ""), ...(body || {}) });
-      return {};
-    }
-    const json = await frame.api("." + path, body === undefined ? undefined : body, method);
-    return json || {};
+    const r = await window.seamside.fetch(path, {
+      method,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    let v = {};
+    try { v = r.json(); } catch { /* the status says it */ }
+    if (!r.ok) throw Object.assign(new Error(v.error || `request failed (${r.status})`), { status: r.status });
+    return v || {};
   }
 
   async function commitStroke(payload) {
@@ -644,7 +653,7 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
       ...payload,
       id: tempId,
       created_by_user_id: myUserId,
-      created_by_user_name: peer.user_name || "anon",
+      created_by_user_name: me.user_name || "anon",
       created_at: Date.now(),
     };
     addStroke(local);            // optimistic — render immediately, no flicker
@@ -682,8 +691,10 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
     } else {
       removeStroke(id);   // buried under later strokes — full (chunked) repaint
     }
+    undoing.add(id);
     try { await api("POST", "/api/stroke/delete", { ids: [id] }); schedulePicture(); }
     catch (e) { toast("undo failed"); }
+    finally { undoing.delete(id); }
   }
 
   // --------------------------------------------------------------------------------------
@@ -717,17 +728,24 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
     const blob = await new Promise((r) => pic.toBlob(r, "image/png"));
     if (!blob) return;
     // 409: the sheet moved on while this rendered; whoever moved it sends the next picture.
-    await frame.fetch(`api/picture?last=${encodeURIComponent(last)}`, { method: "POST", body: await blob.arrayBuffer() }).catch(() => {});
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    await window.seamside.fetch(`/api/picture?last=${encodeURIComponent(last)}`, { method: "POST", body: bytes }).catch(() => {});
   }
 
   saveBtn.addEventListener("click", async () => {
-    const res = await frame.fetch("api/picture").catch(() => null);
+    const res = await window.seamside.fetch("/api/picture").catch(() => null);
     if (!res || !res.ok) { toast("no picture yet"); return; }
-    const url = URL.createObjectURL(await res.blob());
-    const a = document.createElement("a");
-    a.href = url; a.download = `${prefs.title || "Watercolor"}.png`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    const blob = new Blob([res.bytes()], { type: "image/png" });
+    const name = `${prefs.title || "Watercolor"}.png`;
+    // A seated frame cannot start a download itself; the viewer saves it. A page open at its
+    // own address has no viewer, and saves it as any page does.
+    await window.seamside.saveFile(name, blob).catch(() => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    });
   });
 
   // --------------------------------------------------------------------------------------
@@ -1119,66 +1137,78 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
   });
 
   // --------------------------------------------------------------------------------------
-  // Realtime push handlers
+  // Realtime — a push says what changed; the sheet is read again and laid over what is drawn.
   // --------------------------------------------------------------------------------------
+  const undoing = new Set();    // own strokes taken off here, not yet gone from the sheet
+
+  function follow(data) {
+    sheetDir = data.sheet || null;
+    const prev = prefs;
+    prefs = data.prefs || prefs;
+    if (prev.paper !== prefs.paper) applyPaper();
+    if (prev.guide !== prefs.guide) applyGuide();
+    if (isOwner && settingsPop.classList.contains("open")) renderSettingsPop();
+
+    const list = (Array.isArray(data.strokes) ? data.strokes : []).filter((s) => !undoing.has(s.id));
+    const there = new Set(list.map((s) => s.id));
+    // our own optimistic stroke, landed — adopt the authoritative id
+    for (const s of list) {
+      if (strokes.has(s.id)) continue;
+      const dup = strokeBySeed(s.seed);
+      if (dup && dup.id.startsWith("tmp_")) reconcileId(dup.id, s.id);
+    }
+    const pending = order.filter((id) => id.startsWith("tmp_"));
+    const gone = order.some((id) => !id.startsWith("tmp_") && !there.has(id));
+    if (gone) {
+      for (const id of [...strokes.keys()]) if (!id.startsWith("tmp_")) strokes.delete(id);
+      for (const s of list) strokes.set(s.id, s);
+      order = [...list.map((s) => s.id), ...pending];
+      if (prev.aspect !== prefs.aspect) layoutSheet(); else repaintAll();
+      return;
+    }
+    for (const s of list) if (!strokes.has(s.id)) addStroke(s);
+    if (prev.aspect !== prefs.aspect) layoutSheet();
+    renderMeta();
+  }
+
+  let reading = null, readAgain = false;
+  function readAgainSoon() {
+    if (reading) { readAgain = true; return; }
+    reading = (async () => {
+      try {
+        do { readAgain = false; follow(await api("GET", "/api/state")); } while (readAgain);
+      } catch { /* the next push reads again */ }
+      finally { reading = null; }
+    })();
+  }
+
   window.addEventListener("message", (e) => {
     const d = e.data || {};
-    if (d.sfi_id && mySfi && d.sfi_id !== mySfi) return;
-    if (d.type === "ws_add" && d.stroke) {
-      if (d.sheet) sheetDir = d.sheet;
-      const dup = strokes.has(d.stroke.id) ? strokes.get(d.stroke.id) : strokeBySeed(d.stroke.seed);
-      if (dup) {
-        // our own optimistic echo — adopt the authoritative id if we still hold a temp
-        if (dup.id.startsWith("tmp_")) reconcileId(dup.id, d.stroke.id);
-        return;
-      }
-      addStroke(d.stroke);
-    } else if (d.type === "ws_delete" && Array.isArray(d.ids)) {
-      let changed = false;
-      for (const id of d.ids) {
-        if (strokes.has(id)) { strokes.delete(id); changed = true; }
-      }
-      if (changed) { order = order.filter((id) => strokes.has(id)); repaintAll(); }
-    } else if (d.type === "ws_clear") {
-      strokes.clear(); order = []; myStack.length = 0; repaintAll();
-    } else if (d.type === "ws_prefs" && d.prefs) {
-      const prev = prefs;
-      prefs = d.prefs;
-      renderMeta();
-      if (prev.paper !== prefs.paper) applyPaper();
-      if (prev.guide !== prefs.guide) applyGuide();
-      if (prev.aspect !== prefs.aspect) layoutSheet();
-      if (isOwner && settingsPop.classList.contains("open")) renderSettingsPop();
-    }
+    if (d.watercolor_studio) readAgainSoon();
   });
 
   // --------------------------------------------------------------------------------------
   // Boot
   // --------------------------------------------------------------------------------------
-  async function load() {
-    try {
-      const data = await api("GET", "/api/state");
-      prefs = data.prefs || prefs;
-      sheetDir = data.sheet || null;
-      const list = Array.isArray(data.strokes) ? data.strokes : [];
-      strokes.clear(); order = [];
-      for (const s of list) { strokes.set(s.id, s); order.push(s.id); }
+  function load(data) {
+    prefs = data.prefs || prefs;
+    sheetDir = data.sheet || null;
+    const list = Array.isArray(data.strokes) ? data.strokes : [];
+    strokes.clear(); order = [];
+    for (const s of list) { strokes.set(s.id, s); order.push(s.id); }
 
-      // Seed the well with a pleasant starting pigment so painting works immediately.
-      mix = [{ id: "ultra", parts: 1 }];
-      recomputeActive();
+    // Seed the well with a pleasant starting pigment so painting works immediately.
+    mix = [{ id: "ultra", parts: 1 }];
+    recomputeActive();
 
-      applySpaceColor();
-      applyPaper();
-      applyGuide();
-      renderTools();
-      renderPalette();
-      setBrush(brush);
-      renderMeta();
-      layoutSheet(true);   // size canvases, then replay the painting stroke-by-stroke
-    } catch (e) {
-      app.textContent = `failed to load: ${e.message}`;
-    }
+    applySpaceColor();
+    applyPaper();
+    applyGuide();
+    renderTools();
+    renderPalette();
+    setBrush(brush);
+    renderMeta();
+    layoutSheet(true);   // size canvases, then replay the painting stroke-by-stroke
   }
 
   let resizeTimer = 0;
@@ -1187,5 +1217,6 @@ import { frame, applyChannel } from "./lib/js/framelib.js";
     resizeTimer = setTimeout(layoutSheet, 90);
   });
 
-  load();
+  try { load(first); }
+  catch (e) { app.textContent = `failed to load: ${e.message}`; }
 })();

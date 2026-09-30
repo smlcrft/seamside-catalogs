@@ -5,27 +5,34 @@
 //   privacy:        privacy-public-view  — non-members get a live read-only view;
 //                                           space editors get the interactive planner.
 //                                           The read-only itinerary is the showcase: a
-//                                           share link is the trip's handout.
+//                                           share link is the trip's handout. The page
+//                                           reads no table: everything comes from the
+//                                           routes below, and every write is one of them.
 //   data_storage:   the space's tables   — trips.table.jsonl plus trip_itinerary /
 //                                           trip_packing / trip_expenses rows keyed by
 //                                           trip_id, at the space's root: synced with it
 //                                           and shared by every Trip Planner in the space.
-//   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so every viewer refreshes live.
+//   view_realtime:  view-collaborative    — every write pushes `{ trip_planner: "trips" }`,
+//                                           which says what to read again and never what
+//                                           it holds, so every viewer refreshes live.
 //
 // The page has no network of its own, so the map's style, tiles, glyphs and sprites come
 // through this worker from tiles.openfreemap.org (see /tiles/ below).
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText,
-  declareTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText } from "@frame-core";
 
 // ----- The space's tables (named for the trip, so no other frame's rows land in them) -----
-declareTables([
+const TRIPS = "trips";
+const ITINERARY = "trip_itinerary";
+const PACKING = "trip_packing";
+const EXPENSES = "trip_expenses";
+
+type Col = { name: string; col_type: "text" | "integer" | "real"; nullable: boolean; default_val: string };
+
+const TABLES: Array<{ key: string; title: string; description: string; schema: Col[] }> = [
   {
-    key: "trips", title: "Trips", description: "Trips planned in this space.",
+    key: TRIPS, title: "Trips", description: "Trips planned in this space.",
     schema: [
       { name: "name",        col_type: "text",    nullable: false, default_val: "" },
       { name: "destination", col_type: "text",    nullable: false, default_val: "" },
@@ -36,7 +43,7 @@ declareTables([
     ],
   },
   {
-    key: "trip_itinerary", title: "Trip Itinerary", description: "Itinerary entries, keyed by trip.",
+    key: ITINERARY, title: "Trip Itinerary", description: "Itinerary entries, keyed by trip.",
     schema: [
       { name: "trip_id",    col_type: "text",    nullable: false, default_val: "" },
       { name: "day_date",   col_type: "text",    nullable: false, default_val: "" },
@@ -54,7 +61,7 @@ declareTables([
     ],
   },
   {
-    key: "trip_packing", title: "Trip Packing", description: "Packing list items, keyed by trip.",
+    key: PACKING, title: "Trip Packing", description: "Packing list items, keyed by trip.",
     schema: [
       { name: "trip_id",  col_type: "text",    nullable: false, default_val: "" },
       { name: "item",     col_type: "text",    nullable: false, default_val: "" },
@@ -63,7 +70,7 @@ declareTables([
     ],
   },
   {
-    key: "trip_expenses", title: "Trip Expenses", description: "Trip costs, keyed by trip.",
+    key: EXPENSES, title: "Trip Expenses", description: "Trip costs, keyed by trip.",
     schema: [
       { name: "trip_id",     col_type: "text", nullable: false, default_val: "" },
       { name: "description", col_type: "text", nullable: false, default_val: "" },
@@ -72,11 +79,62 @@ declareTables([
       { name: "date",        col_type: "text", nullable: false, default_val: "" },
     ],
   },
-]);
+];
 
-type Tbl = ReturnType<typeof table>;
-type Peer = ReturnType<typeof parsePeerInfo>;
+declareTables(TABLES);
 
+// A new row starts from the defaults its schema declares.
+const DEFAULTS: Record<string, Record<string, unknown>> = Object.fromEntries(TABLES.map((t) => [
+  t.key,
+  Object.fromEntries(t.schema.map((c) => [c.name, c.col_type === "text" ? c.default_val : Number(c.default_val)])),
+]));
+
+// ----- Rows -----------------------------------------------------------------------------
+type Row = Record<string, unknown> & { id: string };
+
+const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+
+/** Write a row over what it held (a new one from the schema's defaults), stamped. */
+async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await rows(ctx, name).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx, name).upsert({
+    ...(was ?? { ...DEFAULTS[name], _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+function cmp(a: unknown, b: unknown): number {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a ?? "").localeCompare(String(b ?? ""));
+}
+
+/** Order by these columns, each ascending; `-name` descends. */
+function by(...cols: string[]) {
+  return (a: Row, b: Row) => {
+    for (const c of cols) {
+      const [name, dir] = c.startsWith("-") ? [c.slice(1), -1] : [c, 1];
+      const d = cmp(a[name], b[name]);
+      if (d) return dir * d;
+    }
+    return 0;
+  };
+}
+
+const ofTrip = async (ctx: Ctx, name: string, tripId: string) =>
+  (await rows(ctx, name).all()).filter((r) => r.trip_id === tripId);
+
+/** The slot after the last entry of one trip's day. */
+async function nextSlot(ctx: Ctx, tripId: string, dayDate: string): Promise<number> {
+  let best: unknown = null;
+  for (const r of await ofTrip(ctx, ITINERARY, tripId)) {
+    if (r.day_date !== dayDate || r.sort_order === null || r.sort_order === undefined) continue;
+    if (best === null || cmp(r.sort_order, best) > 0) best = r.sort_order;
+  }
+  return Number(best ?? -1) + 1;
+}
 
 // ----- Helpers --------------------------------------------------------------------------
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -92,6 +150,21 @@ function cleanAmount(v: unknown): number | null {
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) return null;
   return Math.round(n * 100) / 100;
+}
+
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx) => ctx.push({ trip_planner: "trips" });
+
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+
+// deno-lint-ignore no-explicit-any
+async function body(request: Request): Promise<Record<string, any> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 // ----- Geocoding ------------------------------------------------------------------------
@@ -130,8 +203,9 @@ function geocode(q: string): Promise<[number, number]> {
   return next as Promise<[number, number]>;
 }
 
-/** Geocode a stop in the background and push the refreshed trip when it lands. Never
- * awaited by a write: a slow lookup must not hold up saving the itinerary entry.
+/** Geocode a stop in the background and push when it lands. Never awaited by a write:
+ * a slow lookup must not hold up saving the itinerary entry. `ctx` names its session,
+ * so it still acts for it after the request is answered.
  *
  * `near` is the trip's destination, and it is what makes this useful rather than
  * surreal. A stop is named the way you'd say it out loud to someone already on the
@@ -140,7 +214,7 @@ function geocode(q: string): Promise<[number, number]> {
  * destination first is the difference between a map of your holiday and a map of the
  * planet. If that finds nothing, we fall back to the bare name, because a trip can
  * legitimately include a stop far from its headline destination. */
-function geocodeSoon(sfiId: string, rowId: string, location: string, itinerary: Tbl, near: string): void {
+function geocodeSoon(ctx: Ctx, rowId: string, location: string, near: string): void {
   const q = location.trim();
   if (!q) return;
   const scoped = near.trim() && !q.toLowerCase().includes(near.trim().toLowerCase())
@@ -149,10 +223,10 @@ function geocodeSoon(sfiId: string, rowId: string, location: string, itinerary: 
   (async () => {
     let [lat, lon] = await geocode(scoped);
     if (!lat && !lon && scoped !== q) [lat, lon] = await geocode(q);
-    const row = await itinerary.get(rowId);
+    const row = await rows(ctx, ITINERARY).get(rowId);
     if (!row || String(row.location ?? "").trim() !== q) return;   // edited while we waited
-    await itinerary.upsert(rowId, { lat, lon, geo_q: q });
-    notify(sfiId);
+    await keep(ctx, ITINERARY, rowId, { lat, lon, geo_q: q });
+    tell(ctx);
   })().catch(() => {});
 }
 
@@ -162,21 +236,19 @@ function geocodeSoon(sfiId: string, rowId: string, location: string, itinerary: 
 const TILE_HOST = "https://tiles.openfreemap.org/";
 const TILE_TTL_MS = 6 * 60 * 60 * 1000;
 const TILE_CACHE_MAX = 600;
-const tileCache = new Map<string, { at: number; status: number; type: string; bytes: Uint8Array }>();
+const tileCache = new Map<string, { at: number; status: number; type: string; bytes: Uint8Array<ArrayBuffer> }>();
 
-async function serveTile(
-  replyPort: { postMessage(m: { status: number; body?: Uint8Array | string; contentType?: string; headers?: Record<string, string> }): void },
-  path: string, query: Record<string, string>,
-): Promise<void> {
+const tileReply = (status: number, bytes: Uint8Array<ArrayBuffer>, type: string) =>
+  new Response(bytes, { status, headers: { "content-type": type, "cache-control": "private, max-age=3600" } });
+
+/** `search` is the request's own query, "?" included, or "". */
+async function serveTile(path: string, search: string): Promise<Response> {
   if (!/^[A-Za-z0-9_.@{}\-\/ %,]+$/.test(path) || path.includes("..")) {
-    return replyPort.postMessage({ status: 400, body: "bad path", contentType: "text/plain" });
+    return new Response("bad path", { status: 400, headers: { "content-type": "text/plain" } });
   }
-  const qs = new URLSearchParams(query).toString();
-  const key = path + (qs ? "?" + qs : "");
+  const key = path + search;
   const hit = tileCache.get(key);
-  if (hit && Date.now() - hit.at < TILE_TTL_MS) {
-    return replyPort.postMessage({ status: hit.status, body: hit.bytes, contentType: hit.type, headers: { "Cache-Control": "private, max-age=3600" } });
-  }
+  if (hit && Date.now() - hit.at < TILE_TTL_MS) return tileReply(hit.status, hit.bytes, hit.type);
   try {
     const res = await fetch(TILE_HOST + key, { headers: { "User-Agent": GEO_UA } });
     const bytes = new Uint8Array(await res.arrayBuffer());
@@ -186,34 +258,18 @@ async function serveTile(
       if (tileCache.size >= TILE_CACHE_MAX) tileCache.delete(tileCache.keys().next().value!);
       tileCache.set(key, { at: Date.now(), status: res.status, type, bytes });
     }
-    replyPort.postMessage({ status: res.status, body: bytes, contentType: type, headers: { "Cache-Control": "private, max-age=3600" } });
+    return tileReply(res.status, bytes, type);
   } catch {
-    replyPort.postMessage({ status: 502, body: "map tiles unreachable", contentType: "text/plain" });
+    return new Response("map tiles unreachable", { status: 502, headers: { "content-type": "text/plain" } });
   }
 }
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "trip_changed" });
-}
-
-function dataTables(sfiId: string) {
-  return {
-    trips: table("trips", sfiId),
-    itinerary: table("trip_itinerary", sfiId),
-    packing: table("trip_packing", sfiId),
-    expenses: table("trip_expenses", sfiId),
-  };
-}
-
 // ----- Queries --------------------------------------------------------------------------
-async function tripsList(sfiId: string) {
-  const t = dataTables(sfiId);
-  const { rows: trips } = await t.trips.query({
-    order_by: [{ col: "start_date", dir: "desc" }, { col: "created_ms", dir: "desc" }],
-  });
-  const { rows: it } = await t.itinerary.query({});
-  const { rows: pack } = await t.packing.query({});
-  const { rows: exp } = await t.expenses.query({});
+async function tripsList(ctx: Ctx) {
+  const trips = (await rows(ctx, TRIPS).all()).sort(by("-start_date", "-created_ms"));
+  const it = await rows(ctx, ITINERARY).all();
+  const pack = await rows(ctx, PACKING).all();
+  const exp = await rows(ctx, EXPENSES).all();
 
   const days = new Map<string, Set<string>>();
   for (const r of it) {
@@ -235,47 +291,37 @@ async function tripsList(sfiId: string) {
   }
 
   return trips.map((r) => ({
-    id: r._row_id, name: r.name, destination: r.destination,
+    id: r.id, name: r.name, destination: r.destination,
     start_date: r.start_date, end_date: r.end_date,
-    days: days.get(r._row_id)?.size ?? 0,
-    packed: packed.get(r._row_id)?.packed ?? 0,
-    pack_total: packed.get(r._row_id)?.total ?? 0,
-    expense_total: Math.round((totals.get(r._row_id) ?? 0) * 100) / 100,
+    days: days.get(r.id)?.size ?? 0,
+    packed: packed.get(r.id)?.packed ?? 0,
+    pack_total: packed.get(r.id)?.total ?? 0,
+    expense_total: Math.round((totals.get(r.id) ?? 0) * 100) / 100,
   }));
 }
 
-async function tripDetail(sfiId: string, id: string) {
-  const t = dataTables(sfiId);
-  const trip = await t.trips.get(id);
+async function tripDetail(ctx: Ctx, id: string) {
+  const trip = await rows(ctx, TRIPS).get(id);
   if (!trip) return null;
-  const { rows: it } = await t.itinerary.query({
-    where: { trip_id: id },
-    order_by: [{ col: "day_date" }, { col: "sort_order" }, { col: "_created_at" }],
-  });
-  const { rows: pack } = await t.packing.query({
-    where: { trip_id: id },
-    order_by: [{ col: "category" }, { col: "item" }],
-  });
-  const { rows: exp } = await t.expenses.query({
-    where: { trip_id: id },
-    order_by: [{ col: "date" }, { col: "_created_at" }],
-  });
+  const it = (await ofTrip(ctx, ITINERARY, id)).sort(by("day_date", "sort_order", "_created_at"));
+  const pack = (await ofTrip(ctx, PACKING, id)).sort(by("category", "item"));
+  const exp = (await ofTrip(ctx, EXPENSES, id)).sort(by("date", "_created_at"));
   const total = Math.round(exp.reduce((n, r) => n + Number(r.amount), 0) * 100) / 100;
   return {
     trip: {
-      id: trip._row_id, name: trip.name, destination: trip.destination,
+      id: trip.id, name: trip.name, destination: trip.destination,
       start_date: trip.start_date, end_date: trip.end_date, notes: trip.notes,
     },
     itinerary: it.map((r) => ({
-      id: r._row_id, day_date: r.day_date, time: r.time,
+      id: r.id, day_date: r.day_date, time: r.time,
       activity: r.activity, location: r.location, sort_order: r.sort_order,
       lat: Number(r.lat) || 0, lon: Number(r.lon) || 0,
     })),
     packing: pack.map((r) => ({
-      id: r._row_id, item: r.item, category: r.category, packed: Number(r.packed) ? 1 : 0,
+      id: r.id, item: r.item, category: r.category, packed: Number(r.packed) ? 1 : 0,
     })),
     expenses: exp.map((r) => ({
-      id: r._row_id, description: r.description, amount: r.amount,
+      id: r.id, description: r.description, amount: r.amount,
       category: r.category, date: r.date,
     })),
     total,
@@ -283,31 +329,25 @@ async function tripDetail(sfiId: string, id: string) {
 }
 
 // ----- Writes ---------------------------------------------------------------------------
-// One shared mutation path for BOTH transports: the bus dispatcher below (frame.busSend →
-// onUiMessage, the primary write path) and the HTTP POST arm in onNetworkRequest (kept for
-// older viewers whose framelib has no busSend). `op` is the API path with "api/" stripped;
-// `v` is the parsed payload. Role gates live here so the two entry points can never drift.
-type WriteResult = { status: number; body: unknown };
-
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const { trips, itinerary, packing, expenses } = dataTables(sfiId);
-
+// `op` is the API path with the leading "/api/" stripped; `v` is the parsed payload.
+// deno-lint-ignore no-explicit-any
+async function write(ctx: Ctx, op: string, v: Record<string, any> | null): Promise<Response> {
   // Every op below mutates state and is editor-only. Non-members AND Viewer-role
-  // members are rejected with the same gate (never gate writes on is_sfi_member —
-  // Viewer-role members would slip through).
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  // members are rejected with the same gate.
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return json({ error: "editors only" }, 403);
 
-  const ok = (): WriteResult => {
-    notify(sfiId);
-    return { status: 200, body: { ok: true } };
+  const ok = () => {
+    tell(ctx);
+    return json({ ok: true });
   };
   const tripId = typeof v?.trip_id === "string" ? v.trip_id : "";
+  const isTrip = async (id: string) => !!id && !!(await rows(ctx, TRIPS).get(id));
 
   // --- Trips ----------------------------------------------------------------------------
   if (op === "trip") {
     const name = sanitizeText(v?.name, 120);
-    if (!name) return { status: 400, body: { error: "name required" } };
-    await trips.upsert(null, {
+    if (!name) return json({ error: "name required" }, 400);
+    await keep(ctx, TRIPS, null, {
       name,
       destination: sanitizeText(v?.destination, 120),
       start_date: cleanDate(v?.start_date),
@@ -320,103 +360,105 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
 
   if (op.startsWith("trip/")) {
     const [id, action] = op.slice("trip/".length).split("/");
-    if (!id || !(await trips.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!(await isTrip(id))) return json({ error: "bad id" }, 400);
     if (action === "delete") {
-      await itinerary.deleteWhere({ trip_id: id });
-      await packing.deleteWhere({ trip_id: id });
-      await expenses.deleteWhere({ trip_id: id });
-      await trips.delete(id);
+      for (const t of [ITINERARY, PACKING, EXPENSES]) {
+        for (const r of await ofTrip(ctx, t, id)) await rows(ctx, t).delete(r.id);
+      }
+      await rows(ctx, TRIPS).delete(id);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
+    const patch: Record<string, unknown> = {};
     if (v?.name !== undefined) {
       const name = sanitizeText(v.name, 120);
-      if (name) await trips.upsert(id, { name });
+      if (name) patch.name = name;
     }
-    if (v?.destination !== undefined) await trips.upsert(id, { destination: sanitizeText(v.destination, 120) });
-    if (v?.start_date !== undefined) await trips.upsert(id, { start_date: cleanDate(v.start_date) });
-    if (v?.end_date !== undefined) await trips.upsert(id, { end_date: cleanDate(v.end_date) });
-    if (v?.notes !== undefined) await trips.upsert(id, { notes: sanitizeText(v.notes, 2000) });
+    if (v?.destination !== undefined) patch.destination = sanitizeText(v.destination, 120);
+    if (v?.start_date !== undefined) patch.start_date = cleanDate(v.start_date);
+    if (v?.end_date !== undefined) patch.end_date = cleanDate(v.end_date);
+    if (v?.notes !== undefined) patch.notes = sanitizeText(v.notes, 2000);
+    if (Object.keys(patch).length) await keep(ctx, TRIPS, id, patch);
     return ok();
   }
 
   // --- Itinerary ------------------------------------------------------------------------
   if (op === "it") {
-    if (!tripId || !(await trips.get(tripId))) return { status: 400, body: { error: "bad trip" } };
+    if (!(await isTrip(tripId))) return json({ error: "bad trip" }, 400);
     const activity = sanitizeText(v?.activity, 200);
-    if (!activity) return { status: 400, body: { error: "activity required" } };
+    if (!activity) return json({ error: "activity required" }, 400);
     const dayDate = cleanDate(v?.day_date);
-    const sortOrder = Number(await itinerary.max("sort_order", { trip_id: tripId, day_date: dayDate }) ?? -1) + 1;
     const location = sanitizeText(v?.location, 120);
-    const { row_id: rowId } = await itinerary.upsert(null, {
+    const row = await keep(ctx, ITINERARY, null, {
       trip_id: tripId, day_date: dayDate,
       time: sanitizeText(v?.time, 24), activity,
-      location, sort_order: sortOrder,
+      location, sort_order: await nextSlot(ctx, tripId, dayDate),
     });
-    if (location && rowId) {
-      const trip = await trips.get(tripId);
-      geocodeSoon(sfiId, String(rowId), location, itinerary, String(trip?.destination ?? ""));
+    if (location) {
+      const trip = await rows(ctx, TRIPS).get(tripId);
+      geocodeSoon(ctx, row.id, location, String(trip?.destination ?? ""));
     }
     return ok();
   }
 
   // Reorder within one day — carries that day's full ordered id list after the drop.
   if (op === "it/reorder") {
-    if (!tripId || !(await trips.get(tripId))) return { status: 400, body: { error: "bad trip" } };
+    if (!(await isTrip(tripId))) return json({ error: "bad trip" }, 400);
     const dayDate = cleanDate(v?.day_date);
-    const ids = Array.isArray(v?.ids) ? v.ids.filter((x): x is string => typeof x === "string" && !!x) : [];
+    const ids = Array.isArray(v?.ids) ? v.ids.filter((x: unknown): x is string => typeof x === "string" && !!x) : [];
     // Only touch ids that actually live in this trip+day (never phantom-create).
-    const { rows } = await itinerary.query({ where: { trip_id: tripId, day_date: dayDate } });
-    const known = new Set(rows.map((r) => r._row_id));
+    const known = new Set((await ofTrip(ctx, ITINERARY, tripId)).filter((r) => r.day_date === dayDate).map((r) => r.id));
     for (let i = 0; i < ids.length; i++) {
-      if (known.has(ids[i])) await itinerary.upsert(ids[i], { sort_order: i });
+      if (known.has(ids[i])) await keep(ctx, ITINERARY, ids[i], { sort_order: i });
     }
     return ok();
   }
 
   if (op.startsWith("it/")) {
     const [id, action] = op.slice("it/".length).split("/");
-    if (!id || !(await itinerary.get(id))) return { status: 400, body: { error: "bad id" } };
+    const row = id ? await rows(ctx, ITINERARY).get(id) : null;
+    if (!row) return json({ error: "bad id" }, 400);
     if (action === "delete") {
-      await itinerary.delete(id);
+      await rows(ctx, ITINERARY).delete(id);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
+    const patch: Record<string, unknown> = {};
     if (v?.day_date !== undefined) {
       // Moving to another day re-slots the entry at that day's end.
-      const row = await itinerary.get(id);
       const dayDate = cleanDate(v.day_date);
-      if (row && dayDate !== row.day_date) {
-        const sortOrder = Number(await itinerary.max("sort_order", { trip_id: row.trip_id, day_date: dayDate }) ?? -1) + 1;
-        await itinerary.upsert(id, { day_date: dayDate, sort_order: sortOrder });
+      if (dayDate !== row.day_date) {
+        patch.day_date = dayDate;
+        patch.sort_order = await nextSlot(ctx, String(row.trip_id ?? ""), dayDate);
       }
     }
-    if (v?.time !== undefined) await itinerary.upsert(id, { time: sanitizeText(v.time, 24) });
+    if (v?.time !== undefined) patch.time = sanitizeText(v.time, 24);
     if (v?.activity !== undefined) {
       const activity = sanitizeText(v.activity, 200);
-      if (activity) await itinerary.upsert(id, { activity });
+      if (activity) patch.activity = activity;
     }
+    let lookup = "";
     if (v?.location !== undefined) {
       const location = sanitizeText(v.location, 120);
-      const prev = await itinerary.get(id);
-      await itinerary.upsert(id, { location });
+      patch.location = location;
       // Only spend a lookup when the place actually changed. Clearing it clears the pin.
-      if (!location) {
-        await itinerary.upsert(id, { lat: 0, lon: 0, geo_q: "" });
-      } else if (String(prev?.geo_q ?? "") !== location) {
-        const trip = await trips.get(String(prev?.trip_id ?? ""));
-        geocodeSoon(sfiId, id, location, itinerary, String(trip?.destination ?? ""));
-      }
+      if (!location) Object.assign(patch, { lat: 0, lon: 0, geo_q: "" });
+      else if (String(row.geo_q ?? "") !== location) lookup = location;
+    }
+    if (Object.keys(patch).length) await keep(ctx, ITINERARY, id, patch);
+    if (lookup) {
+      const trip = await rows(ctx, TRIPS).get(String(row.trip_id ?? ""));
+      geocodeSoon(ctx, id, lookup, String(trip?.destination ?? ""));
     }
     return ok();
   }
 
   // --- Packing --------------------------------------------------------------------------
   if (op === "pack") {
-    if (!tripId || !(await trips.get(tripId))) return { status: 400, body: { error: "bad trip" } };
+    if (!(await isTrip(tripId))) return json({ error: "bad trip" }, 400);
     const item = sanitizeText(v?.item, 120);
-    if (!item) return { status: 400, body: { error: "item required" } };
-    await packing.upsert(null, {
+    if (!item) return json({ error: "item required" }, 400);
+    await keep(ctx, PACKING, null, {
       trip_id: tripId, item,
       category: sanitizeText(v?.category, 40) || "general", packed: 0,
     });
@@ -425,29 +467,31 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
 
   if (op.startsWith("pack/")) {
     const [id, action] = op.slice("pack/".length).split("/");
-    if (!id || !(await packing.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!id || !(await rows(ctx, PACKING).get(id))) return json({ error: "bad id" }, 400);
     if (action === "delete") {
-      await packing.delete(id);
+      await rows(ctx, PACKING).delete(id);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
+    const patch: Record<string, unknown> = {};
     if (v?.item !== undefined) {
       const item = sanitizeText(v.item, 120);
-      if (item) await packing.upsert(id, { item });
+      if (item) patch.item = item;
     }
-    if (v?.category !== undefined) await packing.upsert(id, { category: sanitizeText(v.category, 40) || "general" });
-    if (v?.packed !== undefined) await packing.upsert(id, { packed: Number(v.packed) ? 1 : 0 });
+    if (v?.category !== undefined) patch.category = sanitizeText(v.category, 40) || "general";
+    if (v?.packed !== undefined) patch.packed = Number(v.packed) ? 1 : 0;
+    if (Object.keys(patch).length) await keep(ctx, PACKING, id, patch);
     return ok();
   }
 
   // --- Expenses -------------------------------------------------------------------------
   if (op === "exp") {
-    if (!tripId || !(await trips.get(tripId))) return { status: 400, body: { error: "bad trip" } };
+    if (!(await isTrip(tripId))) return json({ error: "bad trip" }, 400);
     const description = sanitizeText(v?.description, 200);
-    if (!description) return { status: 400, body: { error: "description required" } };
+    if (!description) return json({ error: "description required" }, 400);
     const amount = cleanAmount(v?.amount);
-    if (amount === null) return { status: 400, body: { error: "bad amount" } };
-    await expenses.upsert(null, {
+    if (amount === null) return json({ error: "bad amount" }, 400);
+    await keep(ctx, EXPENSES, null, {
       trip_id: tripId, description, amount,
       category: sanitizeText(v?.category, 40) || "other", date: cleanDate(v?.date),
     });
@@ -456,91 +500,79 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
 
   if (op.startsWith("exp/")) {
     const [id, action] = op.slice("exp/".length).split("/");
-    if (!id || !(await expenses.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!id || !(await rows(ctx, EXPENSES).get(id))) return json({ error: "bad id" }, 400);
     if (action === "delete") {
-      await expenses.delete(id);
+      await rows(ctx, EXPENSES).delete(id);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
+    const patch: Record<string, unknown> = {};
     if (v?.description !== undefined) {
       const description = sanitizeText(v.description, 200);
-      if (description) await expenses.upsert(id, { description });
+      if (description) patch.description = description;
     }
     if (v?.amount !== undefined) {
       const amount = cleanAmount(v.amount);
-      if (amount !== null) await expenses.upsert(id, { amount });
+      if (amount !== null) patch.amount = amount;
     }
-    if (v?.category !== undefined) await expenses.upsert(id, { category: sanitizeText(v.category, 40) || "other" });
-    if (v?.date !== undefined) await expenses.upsert(id, { date: cleanDate(v.date) });
+    if (v?.category !== undefined) patch.category = sanitizeText(v.category, 40) || "other";
+    if (v?.date !== undefined) patch.date = cleanDate(v.date);
+    if (Object.keys(patch).length) await keep(ctx, EXPENSES, id, patch);
     return ok();
   }
 
-  return { status: 404, body: { error: "not found" } };
+  return json({ error: "not found" }, 404);
 }
 
-// ----- Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame) --------
-// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; the
-// role gates live inside handleWrite. Denials are logged, not answered — a legitimate
-// client never sends a write it isn't allowed to make.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`trip_planner: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
-
 // ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const url = new URL(request.url);
+    const { pathname } = url;
+    const editor = ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+    const member = editor || ctx.peer.is_sfi_member;
 
-  // The map's tiles, style, glyphs and sprites, fetched here for the page (which has no
-  // network). The page rewrites every tiles.openfreemap.org URL to /tiles/<same path>.
-  if (method === "GET" && reqPath.startsWith("/tiles/")) {
-    return serveTile(replyPort, reqPath.slice("/tiles/".length), query);
-  }
+    // The map's tiles, style, glyphs and sprites, fetched here for the page (which has no
+    // network). The page asks for every tiles.openfreemap.org URL as /tiles/<same path>.
+    if (request.method === "GET" && pathname.startsWith("/tiles/")) {
+      return serveTile(pathname.slice("/tiles/".length), url.search);
+    }
 
-  // Static assets — open to everyone, including anon read-only viewers.
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    // Static assets — open to everyone, including anon read-only viewers.
+    if (request.method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  // Identity probe — drives which render mode the frontend shows.
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+    // Identity probe — drives which render mode the page shows.
+    if (pathname === "/api/whoami" && request.method === "GET") {
+      return json({
+        is_anon:       ctx.peer.is_anon,
+        is_sfi_member: member,
+        is_sfi_editor: editor,
+        is_owner:      ctx.peer.is_owner,
+        user_id:       ctx.peer.user_id,
+        user_name:     ctx.peer.user_name,
+        space_color:   ctx.peer.space_color,
+      });
+    }
 
-  // Writes — the HTTP arm of the shared write path (see handleWrite above).
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (pathname.startsWith("/api/") && (request.method === "POST" || request.method === "PUT")) {
+      return write(ctx, pathname.slice("/api/".length), await body(request));
+    }
 
-  // Reads — open to everyone (non-members get a read-only view of the space's trips).
-  // No seeding, on purpose: a fresh space is an honest empty state, and a GET never
-  // mutates.
-  if (reqPath === "/api/trips" && method === "GET") {
-    return jsonReply(replyPort, 200, { trips: await tripsList(sfiId) });
-  }
+    // Reads — open to everyone (non-members get a read-only view of the space's trips).
+    // No seeding, on purpose: a fresh space is an honest empty state, and a GET never
+    // mutates.
+    if (pathname === "/api/trips" && request.method === "GET") {
+      return json({ trips: await tripsList(ctx) });
+    }
 
-  if (reqPath === "/api/trip" && method === "GET") {
-    const id = typeof query?.id === "string" ? query.id : "";
-    if (!id) return jsonReply(replyPort, 400, { error: "id required" });
-    const detail = await tripDetail(sfiId, id);
-    if (!detail) return jsonReply(replyPort, 404, { error: "not found" });
-    return jsonReply(replyPort, 200, detail);
-  }
+    if (pathname === "/api/trip" && request.method === "GET") {
+      const id = url.searchParams.get("id") ?? "";
+      if (!id) return json({ error: "id required" }, 400);
+      const detail = await tripDetail(ctx, id);
+      if (!detail) return json({ error: "not found" }, 404);
+      return json(detail);
+    }
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Trip Planner frame is up and running!");

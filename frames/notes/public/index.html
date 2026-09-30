@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Notes</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }
     * { box-sizing: border-box; }
@@ -180,7 +180,17 @@
 <body>
   <div id="app"></div>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+    import { html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "/lib/js/framelib.js";
+
+    // Everything this page knows comes from its own server half (./api/…), so a stranger
+    // reads the stream there and every write is checked there.
+    async function api(path, body) {
+      const r = await window.seamside.fetch("/" + path, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     const DAY = 86400000;
     const dayKey = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
@@ -223,24 +233,20 @@
       const armTimer = useRef(null);
 
       async function refresh() {
-        const r = await frame.api("api/list").catch(() => null);
+        const r = await api("api/list").catch(() => null);
         if (r && r.notes) setNotes(r.notes);
       }
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // A write answers with the stream as it now stands; the push brings everyone else.
+      const write = (path, body) => api(path, body || {}).then((r) => { if (r && r.notes) setNotes(r.notes); return r; });
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("api/whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ notes_changed: refresh });
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((d) => { if (d.notes === "notes") refresh(); });
 
       // The composer grows with what you type rather than scrolling inside a fixed box —
       // a capture surface should never make you scroll to see your own sentence.
@@ -394,6 +400,7 @@
         </main>`;
     }
 
+    await window.seamside.ready;
     render(html`<${App} />`, document.getElementById("app"));
   </script>
 </body>

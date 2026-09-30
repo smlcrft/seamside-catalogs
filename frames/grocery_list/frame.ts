@@ -2,25 +2,26 @@
 // Grocery List — the realtime shared family shopping list.
 //
 // Design axes:
-//   privacy:        privacy-public-view  — non-members get a live read-only view;
-//                                           space editors get the interactive list.
+//   privacy:        privacy-public-view  — anyone who reaches the frame gets a live
+//                                           read-only view; space editors get the
+//                                           interactive list. The page reads the list
+//                                           from GET /api/list, and every write is a
+//                                           route here.
 //   data_storage:   the space's table    — `grocery.table.jsonl` at the space's root,
 //                                           synced with the space.
-//   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so all viewers refresh live; a push reaches
-//                                           every frame in the space, so the Meal
-//                                           Planner's inserts refresh this list too.
+//   view_realtime:  view-collaborative    — every write pushes `{ grocery_list: "items" }`,
+//                                           which says what to read again and never what
+//                                           it holds. A push reaches only this session's
+//                                           pages, so a member's page also watches the
+//                                           table for rows other frames write.
 //
 // This frame OWNS the `grocery` v1 contract (docs/schema-contracts.md). A Meal Planner in
 // the same space inserts ingredient rows into the same table with a `source`; this frame
 // renders those with a small provenance hint but treats them as ordinary rows (full CRUD
 // stays here, per the contract's role lines).
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText,
-  declareTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText } from "@frame-core";
 
 // ----- Schema (the `grocery` v1 contract — declared verbatim, one source of truth) ------
 const GROCERY_SCHEMA = [
@@ -33,54 +34,79 @@ const GROCERY_SCHEMA = [
 ];
 
 // ----- The space's `grocery` table (the contract name) --------------------------------
+const GROCERY = "grocery";
 declareTables([
-  { key: "grocery", title: "Grocery List", description: "The grocery list of this space.", schema: GROCERY_SCHEMA },
+  { key: GROCERY, title: "Grocery List", description: "The grocery list of this space.", schema: GROCERY_SCHEMA },
 ]);
 
-type Tbl = ReturnType<typeof table>;
-type Peer = ReturnType<typeof parsePeerInfo>;
+// ----- Helpers --------------------------------------------------------------------------
+type Row = Record<string, unknown> & { id: string };
+
+const rows = (ctx: Ctx) => ctx.table<Record<string, unknown>>(GROCERY);
+
+const DEFAULTS: Record<string, unknown> = Object.fromEntries(
+  GROCERY_SCHEMA.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),
+);
+
+/** Write a row over what it held (a new one from the schema's defaults), stamped. */
+async function keep(ctx: Ctx, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await rows(ctx).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx).upsert({
+    ...(was ?? { ...DEFAULTS, _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+function cmp(a: unknown, b: unknown): number {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a ?? "").localeCompare(String(b ?? ""));
+}
 
 // ----- Queries --------------------------------------------------------------------------
-async function listRows(t: Tbl) {
-  const { rows } = await t.query({
-    order_by: [{ col: "category" }, { col: "added_ms" }],
-  });
-  return rows.map((r) => ({
-    id: r._row_id, item: r.item, quantity: r.quantity, category: r.category,
+async function listRows(ctx: Ctx) {
+  const all = (await rows(ctx).all()).sort((a, b) => cmp(a.category, b.category) || cmp(a.added_ms, b.added_ms));
+  return all.map((r) => ({
+    id: r.id, item: r.item, quantity: r.quantity, category: r.category,
     checked: r.checked, source: r.source, added_ms: r.added_ms,
   }));
 }
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "grocery_changed" });
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx) => ctx.push({ grocery_list: "items" });
+
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 // ----- Writes ---------------------------------------------------------------------------
-// One shared mutation path for BOTH transports: the bus dispatcher below (frame.busSend →
-// onUiMessage, the primary write path) and the HTTP POST arm in onNetworkRequest (kept for
-// older viewers whose framelib has no busSend). `op` is the API path with "api/" stripped
-// (e.g. "item/<id>/delete"); `v` is the parsed payload. Role gates live here so the two
-// entry points can never drift.
-type WriteResult = { status: number; body: unknown };
-
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const t = table("grocery", sfiId);
-
+// `op` is the API path with "/api/" stripped (e.g. "item/<id>/delete"); `v` is the parsed
+// payload.
+async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<Response> {
   // Every op below mutates state and is editor-only. Non-members AND Viewer-role
   // members are rejected with the same gate (never gate writes on is_sfi_member —
   // Viewer-role members would slip through).
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return json({ error: "editors only" }, 403);
 
-  const ok = async (): Promise<WriteResult> => {
-    notify(sfiId);
-    return { status: 200, body: { items: await listRows(t) } };
+  const ok = async () => {
+    tell(ctx);
+    return json({ items: await listRows(ctx) });
   };
 
   // --- Items ----------------------------------------------------------------------------
   if (op === "item") {
     const item = sanitizeText(v?.item, 200);
-    if (!item) return { status: 400, body: { error: "item required" } };
-    await t.upsert(null, {
+    if (!item) return json({ error: "item required" }, 400);
+    await keep(ctx, null, {
       item,
       quantity: sanitizeText(v?.quantity, 40),
       category: sanitizeText(v?.category, 40).toLowerCase(),
@@ -91,87 +117,66 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
 
   if (op.startsWith("item/")) {
     const [id, action] = op.slice("item/".length).split("/");
-    if (!id || !(await t.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!id || !(await rows(ctx).get(id))) return json({ error: "bad id" }, 400);
     if (action === "delete") {
-      await t.delete(id);
+      await rows(ctx).delete(id);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
+    const next: Record<string, unknown> = {};
     if (v?.item !== undefined) {
       const item = sanitizeText(v.item, 200);
-      if (item) await t.upsert(id, { item });
+      if (item) next.item = item;
     }
-    if (v?.quantity !== undefined) {
-      await t.upsert(id, { quantity: sanitizeText(v.quantity, 40) });
-    }
-    if (v?.category !== undefined) {
-      await t.upsert(id, { category: sanitizeText(v.category, 40).toLowerCase() });
-    }
-    if (v?.checked !== undefined) {
-      await t.upsert(id, { checked: Number(v.checked) ? 1 : 0 });
-    }
+    if (v?.quantity !== undefined) next.quantity = sanitizeText(v.quantity, 40);
+    if (v?.category !== undefined) next.category = sanitizeText(v.category, 40).toLowerCase();
+    if (v?.checked !== undefined) next.checked = Number(v.checked) ? 1 : 0;
+    if (Object.keys(next).length) await keep(ctx, id, next);
     return ok();
   }
 
   // The "clear bought" sweep — delete every checked row in one pass.
   if (op === "clear_checked") {
-    await t.deleteWhere({ checked: 1 });
+    for (const r of await rows(ctx).all()) {
+      if (Number(r.checked) === 1) await rows(ctx).delete(r.id);
+    }
     return ok();
   }
 
-  return { status: 404, body: { error: "not found" } };
+  return json({ error: "not found" }, 404);
 }
 
-// ----- Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame) --------
-// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; the
-// role gates live inside handleWrite. Denials are logged, not answered — a legitimate
-// client never sends a write it isn't allowed to make.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`grocery_list: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
-
 // ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const { method } = request;
 
-  // Static assets — open to everyone, including anon read-only viewers.
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    // Static assets — open to everyone, including anon read-only viewers.
+    if (method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  // Identity probe — drives which render mode the frontend shows.
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+    // Identity probe — drives which render mode the frontend shows.
+    if (pathname === "/api/whoami" && method === "GET") {
+      const editor = ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+      return json({
+        is_anon:       ctx.peer.is_anon,
+        is_sfi_member: editor || ctx.peer.is_sfi_member,
+        is_sfi_editor: editor,
+        is_owner:      ctx.peer.is_owner,
+        user_id:       ctx.peer.user_id,
+        user_name:     ctx.peer.user_name,
+        space_color:   ctx.peer.space_color,
+      });
+    }
 
-  // Writes — the HTTP arm of the shared write path (see handleWrite above).
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (pathname.startsWith("/api/") && (method === "POST" || method === "PUT")) {
+      return write(ctx, pathname.slice("/api/".length), await body(request));
+    }
 
-  // Read — open to everyone (non-members get a read-only view of the list).
-  // No seeding: an empty grocery list is an honest empty list.
-  if (reqPath === "/api/list" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      items: await listRows(table("grocery", sfiId)),
-    });
-  }
+    // Read — open to everyone (non-members get a read-only view of the list).
+    // No seeding: an empty grocery list is an honest empty list.
+    if (pathname === "/api/list" && method === "GET") return json({ items: await listRows(ctx) });
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Grocery List frame is up and running!");

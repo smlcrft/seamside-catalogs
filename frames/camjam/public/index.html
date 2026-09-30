@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CamJam</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     /* Patterns here are the canonical ones from the _patterns reference frame:
        the 24px header rail, the three button affordances, the field shape,
@@ -172,9 +172,20 @@
 <body>
   <script type="module">
     import {
-      frame, html, render, useState, useEffect, useRef,
+      html, render, useState, useEffect, useRef,
       Editable, Modal, useFramePush, applyChannel,
-    } from "./lib/js/framelib.js";
+    } from "/lib/js/framelib.js";
+
+    await window.seamside.ready;
+
+    // This frame's own server half, throwing the worker's own `error`.
+    async function api(method, path, body) {
+      const r = await window.seamside.fetch(`/api${path}`, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     const JPEG_QUALITY = 0.6;
     // "signal lost" has to trail the cadence, not a fixed number, or a slow rung would
@@ -198,7 +209,6 @@
       const [cams, setCams]     = useState([]);
       const [camId, setCamId]   = useState("");
       const [err, setErr]       = useState("");
-      const [blocked, setBlocked] = useState(false);   // camera denied, and recoverable
       const [sheet, setSheet]   = useState(false);
       const [, setBeat]         = useState(0);      // 1s repaint so the caption age ticks
 
@@ -247,11 +257,6 @@
         setCamId((track && track.getSettings && track.getSettings().deviceId) || deviceId || "");
       }
 
-      // Blocked is the one failure with a recovery path (frame.requestMediaAccess), so it
-      // gets told apart from "no camera" and "camera busy" — those want a different
-      // action, or none.
-      const isBlocked = (e) => ["NotAllowedError", "SecurityError"].includes((e && e.name) || "");
-
       function camError(e) {
         switch ((e && e.name) || "") {
           case "NotAllowedError":
@@ -268,17 +273,23 @@
       }
 
       async function startShare() {
-        setErr(""); setBlocked(false);
+        setErr("");
         try {
           await openCam("");
         } catch (e) {
           setErr(camError(e));
-          setBlocked(isBlocked(e));
           return;
         }
         claimedAtRef.current = Date.now();
-        frame.busSend({ op: "claim" });   // claims the slot, taking over an active feed
+        try {
+          await api("POST", "/claim");   // claims the slot, taking over an active feed
+        } catch (e) {
+          dropStream();
+          setErr(e.message);
+          return;
+        }
         setSharing(true);
+        refresh();
       }
 
       function stopShare(tellHost) {
@@ -286,17 +297,17 @@
         setSharing(false);
         setCams([]);
         setCamId("");
-        if (tellHost) frame.busSend({ op: "stop" });
+        if (tellHost) api("POST", "/stop").then(refresh, () => {});
       }
 
       async function switchCam(deviceId) {
         setCamId(deviceId);
         try { setErr(""); await openCam(deviceId); }
-        catch (e) { setErr(camError(e)); setBlocked(isBlocked(e)); }
+        catch (e) { setErr(camError(e)); }
       }
 
-      // Grab one still at the rung's width and send it up the tether. Fire-and-forget:
-      // it comes back down as a cam_tick like everyone else's. The width comes from the
+      // Grab one still at the rung's width and send it up. Fire-and-forget: the push
+      // brings it back down like everyone else's. The width comes from the
       // host (`still_w`), never derived here, so the two ends can't disagree about the
       // rung and get stills bounced for exceeding its size cap.
       function sendStill(targetW) {
@@ -310,12 +321,12 @@
         c.width = w; c.height = h;
         c.getContext("2d").drawImage(v, 0, 0, w, h);
         const url = c.toDataURL("image/jpeg", JPEG_QUALITY);
-        frame.busSend({ op: "f", jpeg: url.slice(url.indexOf(",") + 1) });
+        api("POST", "/still", { jpeg: url.slice(url.indexOf(",") + 1) }).catch(() => {});
       }
 
       // ---- state -----------------------------------------------------------------
       async function refresh() {
-        const r = await frame.api("api/state").catch(() => null);
+        const r = await api("GET", "/state").catch(() => null);
         if (!r) return;
         setSt(r);
         setAnchor(Date.now());
@@ -328,7 +339,7 @@
       }
 
       useEffect(() => { refresh(); return () => dropStream(); }, []);
-      useFramePush({ cam_tick: refresh });
+      useFramePush((d) => { if (d.camjam) refresh(); });
 
       // Capture loop — restarts cleanly when the owner moves to another rung. Interval
       // and width always change together, so both are deps.
@@ -366,7 +377,7 @@
                    blurring; blur is what saves. */ ""}
               <${Editable} class="fh-title" tag="input" value=${st.title}
                 disabled=${!st.can_share} maxlength="80" aria-label="Frame title"
-                onSave=${(v) => frame.busSend({ op: "title", title: v })}
+                onSave=${(v) => api("POST", "/title", { title: v }).then(refresh, () => {})}
                 onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); }} />
             </div>
             <span class="fh-mode">${mode}</span>
@@ -426,15 +437,6 @@
                     ? html`<span class="note">${live.user_name} is sharing. This takes over.</span>`
                     : html`<span class="note">A ${stillW}px still, every ${secs(intervalMs)}. No audio.</span>`}`}
               ${err ? html`<span class="note bad">${err}</span>` : null}
-              ${/* The way back from "not now". The host forgets this frame's
-                   remembered answer and reloads the frame, so the consent prompt runs
-                   again — meaning this click tears down the current document, by design.
-                   Feature-detected: framelib is served by the VIEWING device, so an
-                   older viewer build simply doesn't offer the button. */ ""}
-              ${blocked && typeof frame.requestMediaAccess === "function" ? html`
-                <button class="btn-secondary" onClick=${() => frame.requestMediaAccess()}>
-                  <i class="ph-light ph-lock-key-open"></i>ask me again
-                </button>` : null}
             </div>` : null}
 
           <video class="cap-src" ref=${videoRef} muted playsinline autoplay></video>
@@ -446,7 +448,7 @@
                 <div class="field">
                   <label>Cadence and detail</label>
                   <select value=${String(intervalMs)}
-                    onChange=${(e) => frame.busSend({ op: "settings", interval_ms: Number(e.target.value) })}>
+                    onChange=${(e) => api("POST", "/settings", { interval_ms: Number(e.target.value) }).then(refresh, () => {})}>
                     ${(st.steps || []).map((s) => html`
                       <option key=${s.ms} value=${String(s.ms)}>
                         every ${secs(s.ms)} · ${s.w}px wide

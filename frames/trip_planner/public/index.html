@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Trip Planner</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <link rel="stylesheet" href="./vendor/maplibre-gl.css">
   <style>
     :root { --ch: var(--os-c1); }   /* follows the space channel at runtime */
@@ -421,7 +421,17 @@
        frames by design, and this needs no CDN and no API key. -->
   <script src="./vendor/maplibre-gl-csp.js"></script>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel, Modal } from "./lib/js/framelib.js";
+    import { html, render, useState, useEffect, useRef, useFramePush, applyChannel, Modal } from "/lib/js/framelib.js";
+
+    // Everything this page knows comes from its own server half: it reads no table, and
+    // every write is a route there that decides who may make it.
+    async function api(method, path, body) {
+      const r = await window.seamside.fetch(`/api/${path}`, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     // ---- the trip map ------------------------------------------------------------------
     // MapLibre is imperative and owns its own DOM, so it lives behind a ref and is told
@@ -431,6 +441,34 @@
     const TILE_HOST = "https://tiles.openfreemap.org/";
     const MAP_STYLE = TILE_HOST + "styles/positron";
 
+    // The page has no network: every OpenFreeMap URL (style, tilejson, tiles, glyphs,
+    // sprites) is asked of this frame's own worker, which fetches it. MapLibre's own
+    // worker hands a request in a protocol of ours back to this page, so it all goes
+    // through seamside.fetch, which reaches the worker wherever the page is seated.
+    const TILES = "tripplanner";
+    if (window.maplibregl) {
+      maplibregl.addProtocol(TILES, async (params) => {
+        const path = params.url.slice(TILES.length + 3).replace(/ /g, "%20");
+        const r = await window.seamside.fetch("/tiles/" + path);
+        if (!r.ok) throw new Error(`map ${r.status}: ${path}`);
+        if (params.type === "json") return { data: r.json() };
+        if (params.type === "string") return { data: r.text() };
+        return { data: r.bytes().slice().buffer };
+      });
+    }
+    // MapLibre's worker: by URL where the page has an origin; where it is inlined into a
+    // sandboxed frame there is no URL to load it from, so it is made from its bytes.
+    let workerReady = null;
+    const mapWorker = () => workerReady ??= (async () => {
+      if (location.protocol === "http:" || location.protocol === "https:") {
+        maplibregl.setWorkerUrl("./vendor/maplibre-gl-csp-worker.js");
+        return;
+      }
+      const r = await window.seamside.fetch("/vendor/maplibre-gl-csp-worker.js");
+      if (!r.ok) throw new Error(`map worker ${r.status}`);
+      maplibregl.setWorkerUrl(URL.createObjectURL(new Blob([r.bytes()], { type: "text/javascript" })));
+    })();
+
     function TripMap({ stops, selected, onSelect }) {
       const host = useRef(null);
       const map = useRef(null);
@@ -438,35 +476,43 @@
       const fitted = useRef("");
       const refit = useRef(null);   // latest framing fn, so the resize observer can re-run it
 
+      const [ready, setReady] = useState(false);   // the map exists, so pins can go on it
+
       // Create once, destroy on unmount. maplibregl is a global from the classic script.
       useEffect(() => {
         if (!host.current || !window.maplibregl) return;
-        maplibregl.setWorkerUrl("./vendor/maplibre-gl-csp-worker.js");
-        map.current = new maplibregl.Map({
-          container: host.current,
-          style: MAP_STYLE,
-          // The page has no network: every OpenFreeMap URL (style, tilejson, tiles, glyphs,
-          // sprites) is asked of this frame's own worker, which fetches it.
-          transformRequest: (url) => url.startsWith(TILE_HOST)
-            ? { url: new URL("./tiles/" + url.slice(TILE_HOST.length), document.baseURI).href }
-            : { url },
-          center: [stops[0].lon, stops[0].lat],
-          zoom: 9,
-          attributionControl: { compact: true },
-        });
-        map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-        // The map is measured at construction, but the frame is still laying out then —
-        // and the frame gets resized constantly (it's a tile in a space). Without this the
-        // first fitBounds is computed against the wrong viewport and the trip sits half
-        // off-screen. Re-measure whenever the box changes, and re-frame the stops.
-        const ro = new ResizeObserver(() => {
-          if (!map.current) return;
-          map.current.resize();
-          fitted.current = "";        // the framing was computed for a different box
-          refit.current && refit.current();
-        });
-        ro.observe(host.current);
-        return () => { ro.disconnect(); map.current && map.current.remove(); map.current = null; };
+        let gone = false, ro = null;
+        const make = () => {
+          if (gone || !host.current) return;
+          map.current = new maplibregl.Map({
+            container: host.current,
+            style: MAP_STYLE,
+            transformRequest: (url) => url.startsWith(TILE_HOST)
+              ? { url: TILES + "://" + url.slice(TILE_HOST.length) }
+              : { url },
+            center: [stops[0].lon, stops[0].lat],
+            zoom: 9,
+            attributionControl: { compact: true },
+          });
+          map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+          // A style or tile that does not come (offline, OpenFreeMap down) leaves the map
+          // blank with its pins on it; the itinerary reads on, so there is nothing to say.
+          map.current.on("error", () => {});
+          // The map is measured at construction, but the frame is still laying out then —
+          // and the frame gets resized constantly (it's a tile in a space). Without this the
+          // first fitBounds is computed against the wrong viewport and the trip sits half
+          // off-screen. Re-measure whenever the box changes, and re-frame the stops.
+          ro = new ResizeObserver(() => {
+            if (!map.current) return;
+            map.current.resize();
+            fitted.current = "";        // the framing was computed for a different box
+            refit.current && refit.current();
+          });
+          ro.observe(host.current);
+          setReady(true);
+        };
+        mapWorker().then(make, () => {});   // no worker, no map: the itinerary still reads
+        return () => { gone = true; ro && ro.disconnect(); map.current && map.current.remove(); map.current = null; };
       }, []);
 
       // Re-pin whenever the stops change. Cheap: a trip has a handful of them.
@@ -497,7 +543,7 @@
         };
         refit.current = doFit;
         if (key !== fitted.current) { fitted.current = key; doFit(); }
-      }, [stops, selected]);
+      }, [stops, selected, ready]);
 
       return html`<div class="tmap" ref=${host}></div>`;
     }
@@ -566,19 +612,12 @@
       const armTimer = useRef(null);
       const dragIt = useRef(null);                    // { id, day } while dragging
 
-      // Writes go over the tether (frame.busSend) — fire-and-forget; the UI refreshes
-      // from the trip_changed push, sender included. Feature-detect: an older viewer's
-      // framelib has no busSend, so fall back to the HTTP write it was using before.
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // A write is a request with an answer; read again once it lands. The push brings
+      // every other open page along.
+      const write = (path, body) => api("POST", path, body).finally(() => refresh());
 
       async function loadTrip(id) {
-        const d = await frame.api("api/trip?id=" + encodeURIComponent(id)).catch(() => null);
+        const d = await api("GET", "trip?id=" + encodeURIComponent(id)).catch(() => null);
         if (NAV.tripId !== id) return;
         if (d && d.trip) setTrip(d);
         else { NAV.tripId = null; setTripId(null); setTrip(null); }   // trip deleted under us
@@ -593,7 +632,7 @@
         setTripId(null); setTrip(null);
       }
       async function refresh() {
-        const r = await frame.api("api/trips").catch(() => null);
+        const r = await api("GET", "trips").catch(() => null);
         if (r && r.trips) {
           setTrips(r.trips);
           // A space with exactly one trip opens straight into it (until the user
@@ -603,13 +642,14 @@
         if (NAV.tripId) loadTrip(NAV.tripId);
       }
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("GET", "whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ trip_changed: refresh });
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((d) => { if (d.trip_planner) refresh(); });
 
       if (!me) return html`<div></div>`;
       const isEditor = !!me.is_sfi_editor;
@@ -618,7 +658,7 @@
       function createTrip() {
         const name = tripDraft.name.trim();
         if (!name) return;
-        write("api/trip", {
+        write("trip", {
           name, destination: tripDraft.destination.trim(),
           start_date: tripDraft.start, end_date: tripDraft.end,
         }).catch(() => {});
@@ -628,7 +668,7 @@
       function saveTrip(patch) {
         if (!trip) return;
         setTrip((t) => t && ({ ...t, trip: { ...t.trip, ...patch } }));
-        write("api/trip/" + trip.trip.id, patch).catch(() => {});
+        write("trip/" + trip.trip.id, patch).catch(() => {});
       }
       function deleteTrip() {
         if (!tripArmed) { setTripArmed(true); return; }
@@ -636,7 +676,7 @@
         setTripArmed(false); setEditTrip(false);
         setTrips((ts) => (ts || []).filter((x) => x.id !== id));
         back();
-        write("api/trip/" + id + "/delete", {}).catch(() => {});
+        write("trip/" + id + "/delete", {}).catch(() => {});
       }
 
       const draftFor = (day) => drafts[day] || { time: "", activity: "", location: "" };
@@ -645,7 +685,7 @@
         const activity = dr.activity.trim();
         if (!activity) return;
         setDrafts({ ...drafts, [day]: { time: "", activity: "", location: "" } });
-        write("api/it", {
+        write("it", {
           trip_id: trip.trip.id, day_date: day,
           time: dr.time.trim(), activity, location: dr.location.trim(),
         }).catch(() => {});
@@ -653,19 +693,19 @@
       function saveIt(entry, patch) {
         setTrip((t) => t && ({ ...t, itinerary: t.itinerary.map((x) => x.id === entry.id ? { ...x, ...patch } : x) }));
         setEditIt((e) => e && e.id === entry.id ? { ...e, ...patch } : e);
-        write("api/it/" + entry.id, patch).catch(() => {});
+        write("it/" + entry.id, patch).catch(() => {});
       }
       function deleteIt(entry) {
         if (!itArmed) { setItArmed(true); return; }
         setItArmed(false); setEditIt(null);
         setTrip((t) => t && ({ ...t, itinerary: t.itinerary.filter((x) => x.id !== entry.id) }));
-        write("api/it/" + entry.id + "/delete", {}).catch(() => {});
+        write("it/" + entry.id + "/delete", {}).catch(() => {});
       }
 
       function addPack() {
         const item = packDraft.item.trim();
         if (!item) return;
-        write("api/pack", { trip_id: trip.trip.id, item, category: packDraft.category.trim() }).catch(() => {});
+        write("pack", { trip_id: trip.trip.id, item, category: packDraft.category.trim() }).catch(() => {});
         setPackDraft({ item: "", category: packDraft.category });   // keep the category for a run of adds
       }
       // Optimistic: flip locally, reconcile from the push.
@@ -673,14 +713,14 @@
         if (!isEditor) return;
         const packed = p.packed ? 0 : 1;
         setTrip((t) => t && ({ ...t, packing: t.packing.map((x) => x.id === p.id ? { ...x, packed } : x) }));
-        write("api/pack/" + p.id, { packed }).catch(() => {});
+        write("pack/" + p.id, { packed }).catch(() => {});
       }
 
       function addExp() {
         const description = expDraft.description.trim();
         const amount = Number(expDraft.amount);
         if (!description || !Number.isFinite(amount) || amount <= 0) return;
-        write("api/exp", {
+        write("exp", {
           trip_id: trip.trip.id, description, amount,
           category: expDraft.category.trim(), date: expDraft.date,
         }).catch(() => {});
@@ -698,7 +738,7 @@
         disarm();
         if (kind === "pack") setTrip((t) => t && ({ ...t, packing: t.packing.filter((x) => x.id !== id) }));
         else setTrip((t) => t && ({ ...t, expenses: t.expenses.filter((x) => x.id !== id) }));
-        write("api/" + kind + "/" + id + "/delete", {}).catch(() => {});
+        write("" + kind + "/" + id + "/delete", {}).catch(() => {});
       }
 
       // ---- drag: itinerary rows within one day -----------------------------------------
@@ -727,7 +767,7 @@
             .map((x) => pos.has(x.id) ? { ...x, sort_order: pos.get(x.id) } : x)
             .sort((a, b) => a.day_date < b.day_date ? -1 : a.day_date > b.day_date ? 1 : a.sort_order - b.sort_order),
         }));
-        write("api/it/reorder", { trip_id: trip.trip.id, day_date: day, ids }).catch(() => {});
+        write("it/reorder", { trip_id: trip.trip.id, day_date: day, ids }).catch(() => {});
       }
 
       const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
@@ -1128,6 +1168,7 @@
       `;
     }
 
+    await window.seamside.ready;
     render(html`<${App}/>`, document.body);
   </script>
 </body>

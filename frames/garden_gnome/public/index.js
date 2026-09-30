@@ -1,10 +1,20 @@
-import { frame } from "./lib/js/framelib.js";
+import { frame } from "/lib/js/framelib.js";
 
 (function () {
   const $ = (id) => document.getElementById(id);
 
   // Everyone who reaches the frame gets the board; the worker withholds the town from
   // non-members and refuses their saves.
+
+  // ----- Asking the worker ---------------------------------------------------------------
+  // A refusal is thrown in the worker's own words.
+  async function api(method, path, body) {
+    const r = await window.seamside.fetch("/api/" + path, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+    let v = {};
+    try { v = r.json(); } catch { /* the status says it */ }
+    if (!r.ok) throw Object.assign(new Error(v?.error || "failed"), { status: r.status });
+    return v;
+  }
 
   // ----- State ---------------------------------------------------------------------------
   let state = {
@@ -280,24 +290,19 @@ import { frame } from "./lib/js/framelib.js";
   async function saveSettings() {
     if (!draft) return closeSettings();
     draft.location = $("cfg-location").value.trim().slice(0, 120);
-    if (typeof frame.busSend === "function") {
-      frame.busSend({ op: "save", ...draft });
-      closeSettings();
-      return;
-    }
     try {
-      await frame.api("api/save", draft);
+      await api("POST", "save", draft);
       closeSettings();
       await loadState();
     } catch (e) {
-      await frame.alert("Couldn't save: " + (e?.body || e?.message || String(e)));
+      await frame.alert("Couldn't save: " + (e?.message || String(e)));
     }
   }
 
   // ----- Bootstrap + push --------------------------------------------------------------
   async function loadState() {
     try {
-      state = await frame.api("api/state");
+      state = await api("GET", "state");
       render();
     } catch (e) {
       if (e?.status === 403) {
@@ -317,13 +322,14 @@ import { frame } from "./lib/js/framelib.js";
     if (e.target === $("settings-overlay")) closeSettings();
   });
 
+  // The worker says what changed and never what it holds: read it again, as whoever this is.
   window.addEventListener("message", (e) => {
-    if (e.data && e.data.type === "settings_changed") loadState();
+    if (e.data && e.data.garden_gnome) loadState();
   });
 
   // Refresh weather/statuses every 5 minutes — backend cache is 15min so most refreshes
   // are cheap, but this keeps the dial honest as forecasts roll forward.
   setInterval(loadState, 5 * 60 * 1000);
 
-  loadState();
+  window.seamside.ready.then(loadState);
 })();

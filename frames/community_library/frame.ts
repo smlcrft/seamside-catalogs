@@ -3,19 +3,24 @@
 // checked out. Two tables of the space: `library_assets` for items + checkout info, and a
 // `members` list — `members.table.jsonl` or a subtype such as `club.members.table.jsonl` —
 // the roster Member Manager keeps, which this frame only reads. Each session is bound to one
-// list (sessionKv `bound/members`), chosen by an editor. Preferences (org name, borrow
+// list (ctx.kv `bound/members`), chosen by an editor. Preferences (org name, borrow
 // durations, item types, edit policy) govern the space's one library_assets table, so they
-// are one frameSettings row of the space.
+// are one settings row of the space.
+//
+// Anyone not on the space's roster is shown what is in and what is out, and nothing else:
+// the page reads no item itself, and every route decides on ctx.peer.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, pushToInstance, parsePeerInfo, onUiMessage,
-  declareTables, table, frameSettings, sessionKv,
-  jsonReply, parseJsonBody, sanitizeText, toIntOrNull, wireTableChangeListener,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText, toIntOrNull } from "@frame-core";
+
+const ASSETS = "library_assets";
+// Settings are rows of a store every frame in the space shares, so the key carries this
+// frame's name. The value is JSON under `v`.
+const SETTINGS = "__fc_settings";
 
 declareTables([
   {
-    key: "library_assets",
+    key: ASSETS,
     title: "Library Assets",
     description: "Items the community shares, with current checkout status.",
     schema: [
@@ -31,16 +36,41 @@ declareTables([
   },
 ]);
 
+// What a new item starts from: the schema's defaults.
+const NEW_ASSET = { needs_attention: 0 };
+
+type Row = Record<string, unknown> & { id: string };
+
+const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+
+/** Write a row over what it held, stamped when it was made and when it changed. */
+async function keep(
+  ctx: Ctx,
+  name: string,
+  id: string | null,
+  values: Record<string, unknown>,
+  fresh: Record<string, unknown> = {},
+): Promise<Row> {
+  const was = id ? await rows(ctx, name).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx, name).upsert({
+    ...(was ?? { ...fresh, _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
 // ----- Which members list: `members` or a subtype `<name>.members`, bound per session -----
 // Read here for its name and role columns; Member Manager writes it.
 const LIST_NAME = /^([a-z0-9][a-z0-9_-]*\.)*members$/;
 const validList = (n: unknown): n is string => typeof n === "string" && n.length <= 64 && LIST_NAME.test(n);
-async function boundList(): Promise<string | null> {
-  const v = (await sessionKv.get("bound/members"))?.value;
+async function boundList(ctx: Ctx): Promise<string | null> {
+  const v = (await ctx.kv.get("bound/members"))?.value;
   return validList(v) ? v : null;
 }
 
-// ----- Preferences (a frameSettings row of the space) ------------------------------------
+// ----- Preferences (a settings row of the space) -----------------------------------------
 type BorrowOption = { label: string; days: number };
 type Prefs = {
   org_name: string;
@@ -75,8 +105,12 @@ function clonePrefs(p: Prefs): Prefs {
   };
 }
 
-async function getPrefs(sfi_id: string): Promise<Prefs> {
-  const p = await frameSettings(sfi_id).get<Prefs>(PREFS_KEY);
+async function getPrefs(ctx: Ctx): Promise<Prefs> {
+  let p: Prefs | null = null;
+  try {
+    const row = await rows(ctx, SETTINGS).get(PREFS_KEY);
+    p = row?.v == null ? null : JSON.parse(String(row.v)) as Prefs;
+  } catch { /* unreadable: the defaults */ }
   if (!p) return clonePrefs(DEFAULT_PREFS);
   const itemTypes = Array.isArray(p.item_types) && p.item_types.length > 0
     ? p.item_types.map(String) : [...DEFAULT_PREFS.item_types];
@@ -96,19 +130,17 @@ async function getPrefs(sfi_id: string): Promise<Prefs> {
   };
 }
 
-async function setPrefs(sfi_id: string, next: Prefs): Promise<void> {
-  await frameSettings(sfi_id).set(PREFS_KEY, next);
-}
+const setPrefs = (ctx: Ctx, next: Prefs) => keep(ctx, SETTINGS, PREFS_KEY, { v: JSON.stringify(next) });
 
 // ----- Helpers --------------------------------------------------------------------------
 // Writes are editor-only. Never gate on is_sfi_member — a Viewer-role member would slip
 // through and be able to edit the library.
-function canEdit(peer: ReturnType<typeof parsePeerInfo>, prefs: Prefs): boolean {
-  if (prefs.owner_only_edit) return peer.is_owner;
-  return peer.is_sfi_editor;
+const isEditor = (ctx: Ctx) => ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+function canEdit(ctx: Ctx, prefs: Prefs): boolean {
+  if (prefs.owner_only_edit) return ctx.peer.is_owner;
+  return isEditor(ctx);
 }
 
-type AssetRow = Record<string, unknown> & { _row_id: string; _created_at: number };
 type AssetStatus = "available" | "checked_out" | "overdue" | "issue";
 
 function dueAt(checkedOutAt: number | null, borrowDays: number | null): number | null {
@@ -116,7 +148,7 @@ function dueAt(checkedOutAt: number | null, borrowDays: number | null): number |
   return checkedOutAt + borrowDays * 86400000;
 }
 
-function computeStatus(row: AssetRow, now: number): AssetStatus {
+function computeStatus(row: Row, now: number): AssetStatus {
   if (Number(row.needs_attention) === 1) return "issue";
   const checkedOutAt = toIntOrNull(row.checked_out_at);
   const borrowDays = toIntOrNull(row.borrow_days);
@@ -126,43 +158,48 @@ function computeStatus(row: AssetRow, now: number): AssetStatus {
   return "checked_out";
 }
 
-// ----- Shared write logic ---------------------------------------------------------------
-// Every mutation, whether it arrives as an HTTP POST or over the tether
-// (frame.busSend → onUiMessage), runs through here. `op` is the API path minus the
-// leading "api/" ("asset", "asset/checkout", "settings", …). Role gates live here so the
-// two entry points never drift. Item writes broadcast via the wired assets_changed listener;
-// settings and a new binding push settings_changed.
-type WriteResult = { status: number; body: Record<string, unknown> | null };
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx, what: "assets" | "settings") => ctx.push({ community_library: what });
 
-async function handleWrite(
-  sfi_id: string,
-  op: string,
-  v: Record<string, unknown> | null,
-  peer: ReturnType<typeof parsePeerInfo>,
-): Promise<WriteResult> {
-  const prefs = await getPrefs(sfi_id);
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
+const notFound = () => json({ error: "Not found.", code: "NOT_FOUND" }, 404);
+
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// ----- Writes ---------------------------------------------------------------------------
+// `op` is the API path minus the leading "/api/" ("asset", "asset/checkout", "settings", …).
+async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<Response> {
+  const prefs = await getPrefs(ctx);
 
   if (op === "bind") {
-    if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+    if (!isEditor(ctx)) return refuse(403, "editors only");
     const name = v?.list;
-    if (!validList(name)) return { status: 400, body: { error: "a members list is named members or <name>.members" } };
-    await sessionKv.put("bound/members", name);
-    pushToInstance(sfi_id, { type: "settings_changed" });
-    return { status: 200, body: { bound: name } };
+    if (!validList(name)) return refuse(400, "a members list is named members or <name>.members");
+    await ctx.kv.put("bound/members", name);
+    tell(ctx, "settings");
+    return json({ bound: name });
   }
 
   if (op === "settings") {
-    if (!peer.is_owner) return { status: 403, body: { error: "only the frame owner can change settings" } };
-    if (!v) return { status: 400, body: { error: "invalid JSON" } };
+    if (!ctx.peer.is_owner) return refuse(403, "only the frame owner can change settings");
+    if (!v) return refuse(400, "invalid JSON");
     const org_name = sanitizeText(v.org_name, 120) || DEFAULT_PREFS.org_name;
     const itemTypesIn: unknown[] = Array.isArray(v.item_types) ? v.item_types : [];
     const item_types = Array.from(new Set(itemTypesIn.map((t: unknown) => sanitizeText(t, 80)).filter((t: string) => t.length > 0)));
-    if (item_types.length === 0) return { status: 400, body: { error: "at least one item type is required" } };
+    if (item_types.length === 0) return refuse(400, "at least one item type is required");
     const borrowIn: unknown[] = Array.isArray(v.borrow_options) ? v.borrow_options : [];
     const borrow_options = borrowIn
       .map((o: unknown) => ({ label: sanitizeText((o as BorrowOption).label, 40), days: toIntOrNull((o as BorrowOption).days) ?? 0 }))
       .filter((o: { label: string; days: number }) => o.label.length > 0 && o.days > 0);
-    if (borrow_options.length === 0) return { status: 400, body: { error: "at least one borrow option is required" } };
+    if (borrow_options.length === 0) return refuse(400, "at least one borrow option is required");
     const requestedDefault = toIntOrNull(v.default_borrow_days);
     const days = borrow_options.map((o) => o.days);
     const default_borrow_days = requestedDefault && days.includes(requestedDefault) ? requestedDefault : days[0];
@@ -170,208 +207,174 @@ async function handleWrite(
       org_name, item_types, borrow_options, default_borrow_days,
       owner_only_edit: !!v.owner_only_edit,
     };
-    await setPrefs(sfi_id, next);
-    pushToInstance(sfi_id, { type: "settings_changed" });
-    return { status: 200, body: { prefs: next } };
+    await setPrefs(ctx, next);
+    tell(ctx, "settings");
+    return json({ prefs: next });
   }
 
-  if (!canEdit(peer, prefs)) return { status: 403, body: { error: "editing is restricted" } };
-  const assets = table("library_assets", sfi_id);
-  // An id that names no item is refused, never created (upsert would phantom-create it).
+  if (!canEdit(ctx, prefs)) return refuse(403, "editing is restricted");
+  const assets = rows(ctx, ASSETS);
+  // An id that names no item is refused, never created.
   const named = v?.row_id ? String(v.row_id) : "";
-  if (named && !(await assets.get(named))) return { status: 404, body: { error: "item not found" } };
+  if (named && !(await assets.get(named))) return refuse(404, "item not found");
 
   if (op === "asset") {
-    if (!v) return { status: 400, body: { error: "invalid JSON" } };
+    if (!v) return refuse(400, "invalid JSON");
     const name = sanitizeText(v.name, 200);
     const itemType = sanitizeText(v.item_type, 80);
     const notes = sanitizeText(v.notes, 1000);
-    if (!name) return { status: 400, body: { error: "name required" } };
-    if (!itemType) return { status: 400, body: { error: "item_type required" } };
-    if (!prefs.item_types.includes(itemType)) return { status: 400, body: { error: "item_type not in allowed list" } };
-    const rowId = v.row_id ? String(v.row_id) : null;
-    const { row_id } = await assets.upsert(rowId, {
+    if (!name) return refuse(400, "name required");
+    if (!itemType) return refuse(400, "item_type required");
+    if (!prefs.item_types.includes(itemType)) return refuse(400, "item_type not in allowed list");
+    const row = await keep(ctx, ASSETS, named || null, {
       name, item_type: itemType, notes,
-      ...(rowId ? {} : { needs_attention: 0 }),
-    });
-    return { status: 200, body: { row_id } };
+      ...(named ? {} : { needs_attention: 0 }),
+    }, NEW_ASSET);
+    tell(ctx, "assets");
+    return json({ row_id: row.id });
   }
 
   if (op === "asset/delete") {
-    const rowId = String(v?.row_id ?? "");
-    if (!rowId) return { status: 400, body: { error: "row_id required" } };
-    await assets.delete(rowId);
-    return { status: 204, body: null };
+    if (!named) return refuse(400, "row_id required");
+    await assets.delete(named);
+    tell(ctx, "assets");
+    return new Response(null, { status: 204 });
   }
 
   if (op === "asset/checkout") {
-    if (!v) return { status: 400, body: { error: "invalid JSON" } };
-    const rowId = String(v.row_id ?? "");
-    if (!rowId) return { status: 400, body: { error: "row_id required" } };
+    if (!v) return refuse(400, "invalid JSON");
+    if (!named) return refuse(400, "row_id required");
     const memberId = sanitizeText(v.member_id, 100);
     const manualName = sanitizeText(v.manual_name, 200);
-    if (!memberId && !manualName) return { status: 400, body: { error: "member_id or manual_name required" } };
+    if (!memberId && !manualName) return refuse(400, "member_id or manual_name required");
     const borrowDays = toIntOrNull(v.borrow_days) ?? prefs.default_borrow_days;
     const allowedDays = prefs.borrow_options.map((o) => o.days);
-    if (!allowedDays.includes(borrowDays)) {
-      return { status: 400, body: { error: "borrow_days not in allowed list" } };
-    }
+    if (!allowedDays.includes(borrowDays)) return refuse(400, "borrow_days not in allowed list");
     const checkedOutAt = toIntOrNull(v.checked_out_at) ?? Date.now();
-    await assets.upsert(rowId, {
+    await keep(ctx, ASSETS, named, {
       checked_out_member_id: memberId,
       checked_out_manual_name: memberId ? "" : manualName,
       checked_out_at: checkedOutAt,
       borrow_days: borrowDays,
     });
-    return { status: 200, body: { row_id: rowId } };
+    tell(ctx, "assets");
+    return json({ row_id: named });
   }
 
   if (op === "asset/checkin") {
-    const rowId = String(v?.row_id ?? "");
-    if (!rowId) return { status: 400, body: { error: "row_id required" } };
-    await assets.upsert(rowId, {
+    if (!named) return refuse(400, "row_id required");
+    await keep(ctx, ASSETS, named, {
       checked_out_member_id: "",
       checked_out_manual_name: "",
       checked_out_at: null,
       borrow_days: null,
     });
-    return { status: 200, body: { row_id: rowId } };
+    tell(ctx, "assets");
+    return json({ row_id: named });
   }
 
   if (op === "asset/attention") {
-    if (!v) return { status: 400, body: { error: "invalid JSON" } };
-    const rowId = String(v.row_id ?? "");
-    if (!rowId) return { status: 400, body: { error: "row_id required" } };
-    const flag = v.needs_attention ? 1 : 0;
-    const update: Record<string, unknown> = { needs_attention: flag };
+    if (!v) return refuse(400, "invalid JSON");
+    if (!named) return refuse(400, "row_id required");
+    const update: Record<string, unknown> = { needs_attention: v.needs_attention ? 1 : 0 };
     if (typeof v.notes !== "undefined") update.notes = sanitizeText(v.notes, 1000);
-    await assets.upsert(rowId, update);
-    return { status: 200, body: { row_id: rowId } };
+    await keep(ctx, ASSETS, named, update);
+    tell(ctx, "assets");
+    return json({ row_id: named });
   }
 
-  return { status: 404, body: { error: "Not found.", code: "NOT_FOUND" } };
+  return notFound();
 }
 
-// ----- Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame) --------
-// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; role
-// gates live inside handleWrite. Denials are logged, not answered — a legitimate client
-// never sends a write it isn't allowed to make. Resulting state reaches every viewer
-// (sender included) via the assets_changed push / settings_changed.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string" || !d.op) return;
-  wireTableChangeListener("library_assets", sfiId, "assets_changed");
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status >= 400) log(`community library: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+// ----- Reads ----------------------------------------------------------------------------
+async function roster(ctx: Ctx): Promise<Row[]> {
+  const list = await boundList(ctx);
+  return list ? await rows(ctx, list).all() : [];
+}
 
-// ----- HTTP handler ---------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-
-  wireTableChangeListener("library_assets", peer.sfi_id, "assets_changed");
-  const assets = table("library_assets", peer.sfi_id);
-  const list = await boundList();
-  const roster = async () => list ? (await table(list, peer.sfi_id).query({ limit: 1000 })).rows as Record<string, unknown>[] : [];
-  const prefs = await getPrefs(peer.sfi_id);
-  const editable = canEdit(peer, prefs);
+async function listAssets(ctx: Ctx): Promise<Response> {
   const now = Date.now();
+  const all = await rows(ctx, ASSETS).all();
+  all.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
-  if (reqPath === "/api/state" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      prefs,
-      viewer: {
-        user_name: peer.user_name || "anon",
-        is_owner: peer.is_owner,
-        is_anon: peer.is_anon,
-      },
-      can_edit: editable,
-      bound: list,
-      can_bind: peer.is_sfi_editor,
-      now,
-    });
-  }
-
-  if (reqPath === "/api/members" && method === "GET") {
-    if (peer.is_anon) return jsonReply(replyPort, 200, { rows: [] });
-    const rows = await roster();
-    rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    const slim = rows.map((r: Record<string, unknown>) => ({
-      _row_id: r._row_id, name: r.name, role: r.role,
+  if (ctx.peer.is_anon) {
+    // Not on the roster: name, item_type, simple status. No member identities, no notes.
+    const publicRows = all.map((r) => ({
+      _row_id: r.id,
+      name: r.name,
+      item_type: r.item_type,
+      status: computeStatus(r, now),
+      due_at: dueAt(toIntOrNull(r.checked_out_at), toIntOrNull(r.borrow_days)),
     }));
-    return jsonReply(replyPort, 200, { rows: slim });
+    return json({ rows: publicRows, anon_view: true });
   }
 
-  // Open to every viewer who reaches the frame. Anyone not on the space's roster (v1's
-  // `is_anon`) gets a reduced projection below (no member identities, no notes).
-  if (reqPath === "/api/assets" && method === "GET") {
-    const { rows } = await assets.query({ limit: 2000 }) as { rows: AssetRow[] };
-    rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  // A member: full data + computed status + resolved checkout names.
+  const memberById = new Map((await roster(ctx)).map((m) => [m.id, m]));
+  const enriched = all.map((r) => {
+    const checkedOutAt = toIntOrNull(r.checked_out_at);
+    const borrowDays = toIntOrNull(r.borrow_days);
+    const memberId = String(r.checked_out_member_id ?? "");
+    const member = memberId ? memberById.get(memberId) : undefined;
+    return {
+      _row_id: r.id,
+      _created_at: Number(r._created_at ?? 0),
+      name: r.name,
+      item_type: r.item_type,
+      checked_out_member_id: memberId,
+      checked_out_member_name: member ? String(member.name) : "",
+      checked_out_manual_name: String(r.checked_out_manual_name ?? ""),
+      checked_out_at: checkedOutAt,
+      borrow_days: borrowDays,
+      due_at: dueAt(checkedOutAt, borrowDays),
+      needs_attention: Number(r.needs_attention) === 1,
+      notes: String(r.notes ?? ""),
+      status: computeStatus(r, now),
+    };
+  });
+  return json({ rows: enriched });
+}
 
-    if (peer.is_anon) {
-      // Anonymous: name, item_type, simple status. No member identities, no notes.
-      const publicRows = rows.map((r) => {
-        const status = computeStatus(r, now);
-        const checkedOutAt = toIntOrNull(r.checked_out_at);
-        const borrowDays = toIntOrNull(r.borrow_days);
-        const due = dueAt(checkedOutAt, borrowDays);
-        return {
-          _row_id: r._row_id,
-          name: r.name,
-          item_type: r.item_type,
-          status,
-          due_at: due,
-        };
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const route = `${request.method} ${pathname}`;
+
+    if (route === "GET /api/state") {
+      const prefs = await getPrefs(ctx);
+      return json({
+        prefs,
+        viewer: {
+          user_name: ctx.peer.user_name || "anon",
+          is_owner: ctx.peer.is_owner,
+          is_anon: ctx.peer.is_anon,
+        },
+        can_edit: canEdit(ctx, prefs),
+        bound: await boundList(ctx),
+        can_bind: isEditor(ctx),
+        now: Date.now(),
       });
-      return jsonReply(replyPort, 200, { rows: publicRows, anon_view: true });
     }
 
-    // Authenticated: full data + computed status + resolved checkout names.
-    const memberRows = await roster();
-    const memberById = new Map(memberRows.map((m) => [String(m._row_id), m]));
-    const enriched = rows.map((r) => {
-      const status = computeStatus(r, now);
-      const checkedOutAt = toIntOrNull(r.checked_out_at);
-      const borrowDays = toIntOrNull(r.borrow_days);
-      const memberId = String(r.checked_out_member_id ?? "");
-      const member = memberId ? memberById.get(memberId) : undefined;
-      return {
-        _row_id: r._row_id,
-        _created_at: r._created_at,
-        name: r.name,
-        item_type: r.item_type,
-        checked_out_member_id: memberId,
-        checked_out_member_name: member ? String(member.name) : "",
-        checked_out_manual_name: String(r.checked_out_manual_name ?? ""),
-        checked_out_at: checkedOutAt,
-        borrow_days: borrowDays,
-        due_at: dueAt(checkedOutAt, borrowDays),
-        needs_attention: Number(r.needs_attention) === 1,
-        notes: String(r.notes ?? ""),
-        status,
-      };
-    });
-    return jsonReply(replyPort, 200, { rows: enriched });
-  }
+    if (route === "GET /api/members") {
+      if (ctx.peer.is_anon) return json({ rows: [] });
+      const members = await roster(ctx);
+      members.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      return json({ rows: members.map((r) => ({ _row_id: r.id, name: r.name, role: r.role })) });
+    }
 
-  // ----- Mutations: every POST maps to a bus op (path minus "/api/") and runs through the
-  // same handleWrite the bus dispatcher uses — validation and role gates live inside it.
-  if (method === "POST" && reqPath.startsWith("/api/")) {
-    const r = await handleWrite(peer.sfi_id, reqPath.slice("/api/".length), parseJsonBody(body), peer);
-    if (r.status === 204) return replyPort.postMessage({ status: 204, contentType: "text/plain", body: null });
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    // Open to everyone who reaches the frame; listAssets decides what each is shown.
+    if (route === "GET /api/assets") return listAssets(ctx);
 
-  if (method === "GET") {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-  }
+    if (request.method === "POST" && pathname.startsWith("/api/")) {
+      return write(ctx, pathname.slice("/api/".length), await body(request));
+    }
 
-  // Non-POST mutation methods were never routes; keep the old editor gate + 404 for them.
-  if (!editable && reqPath !== "/api/settings") {
-    return jsonReply(replyPort, 403, { error: "editing is restricted" });
-  }
-  replyPort.postMessage({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Not found.", code: "NOT_FOUND" }) });
+    if (request.method === "GET") return ctx.file(pathname);
+
+    if (pathname !== "/api/settings" && !canEdit(ctx, await getPrefs(ctx))) {
+      return refuse(403, "editing is restricted");
+    }
+    return notFound();
+  },
 };
-
-log("Community Library frame is up and running.");

@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------------------
-// Picture Frame — a digital picture frame, one per space (sfi_id).
+// Picture Frame — a digital picture frame, one display per session.
 //
 // Design axes:
 //   privacy:        privacy-public-view  — editors curate the photos; Viewer-role members and
@@ -8,10 +8,13 @@
 //                                          the space's root; each photo and its thumbnail are files
 //                                          of the space under `Picture Frame/<photo_id>/`, named by
 //                                          the row. Display state is this session's own keys.
-//   view_realtime:  view-collaborative   — every mutation calls pushToInstance so all viewers of
-//                                          the space refresh live.
+//   view_realtime:  view-collaborative   — every mutation pushes what changed, and every open page
+//                                          of the frame reads again as whoever it is.
 //   settings_scope: photos per space, display per session — two frames in one space share
 //                                          the photos and each keeps its own wall.
+//
+// The page reads no table and no file: every read and write is a route here, decided on
+// ctx.peer, and pictures are served as bytes by /api/photo and /api/thumb.
 //
 // The shared display
 // ------------------
@@ -35,38 +38,51 @@
 // show writes the computed photo back into current_photo_id — the handoff from a derived
 // position to a stored one.
 // ----------------------------------------------------------------------------------------
-import {
-  log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance,
-  sanitizeText, toIntOrNull, clampInt, serveFileAtPath, spaceFiles, sessionKv,
-  declareTables, ensureTables, table, onUiMessage,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { clampInt, declareTables, sanitizeText, toIntOrNull } from "@frame-core";
 
 // ----- The space's table (named for this frame: its rows point at bytes only it serves) ----
 const PHOTOS = "picture_frame_photos";
+const SCHEMA: Array<{ name: string; col_type: "text" | "integer"; nullable: boolean; default_val: string }> = [
+  { name: "name",       col_type: "text",    nullable: false, default_val: "" },          // original filename
+  { name: "mime",       col_type: "text",    nullable: false, default_val: "image/jpeg" },
+  { name: "size",       col_type: "integer", nullable: false, default_val: "0" },
+  { name: "w",          col_type: "integer", nullable: false, default_val: "0" },         // natural dimensions, so the
+  { name: "h",          col_type: "integer", nullable: false, default_val: "0" },         // grid reserves space up front
+  { name: "sort_order", col_type: "integer", nullable: false, default_val: "0" },
+  { name: "added_ms",   col_type: "integer", nullable: false, default_val: "0" },
+  { name: "added_by",   col_type: "text",    nullable: false, default_val: "" },
+  { name: "path",       col_type: "text",    nullable: false, default_val: "" },          // Picture Frame/<id>/<name>
+  { name: "thumb_path", col_type: "text",    nullable: false, default_val: "" },          // its grid thumbnail, if any
+];
 declareTables([
   {
     key: PHOTOS,
     title: "Picture Frame Photos",
     description: "Photos shown by this picture frame; `path` and `thumb_path` are its files in the space.",
-    schema: [
-      { name: "name",       col_type: "text",    nullable: false, default_val: "" },          // original filename
-      { name: "mime",       col_type: "text",    nullable: false, default_val: "image/jpeg" },
-      { name: "size",       col_type: "integer", nullable: false, default_val: "0" },
-      { name: "w",          col_type: "integer", nullable: false, default_val: "0" },         // natural dimensions, so the
-      { name: "h",          col_type: "integer", nullable: false, default_val: "0" },         // grid reserves space up front
-      { name: "sort_order", col_type: "integer", nullable: false, default_val: "0" },
-      { name: "added_ms",   col_type: "integer", nullable: false, default_val: "0" },
-      { name: "added_by",   col_type: "text",    nullable: false, default_val: "" },
-      { name: "path",       col_type: "text",    nullable: false, default_val: "" },          // Picture Frame/<id>/<name>
-      { name: "thumb_path", col_type: "text",    nullable: false, default_val: "" },          // its grid thumbnail, if any
-    ],
+    schema: SCHEMA,
   },
 ]);
 
-type Tbl = ReturnType<typeof table>;
-type Settings = ReturnType<typeof settingsFor>;
-type Peer = ReturnType<typeof parsePeerInfo>;
-interface Tables { settings: Settings; photos: Tbl }
+// A new row starts from the schema's defaults, as rows written before always did.
+const DEFAULTS: Record<string, unknown> = Object.fromEntries(
+  SCHEMA.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),
+);
+
+type Row = Record<string, unknown> & { id: string };
+const photosOf = (ctx: Ctx) => ctx.table<Record<string, unknown>>(PHOTOS);
+
+/** Lay `values` over the row as it stands (or the defaults, for a new one), stamped. */
+async function keep(ctx: Ctx, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await photosOf(ctx).get(id) : null;
+  const now = Date.now();
+  return await photosOf(ctx).upsert({
+    ...(was ?? { ...DEFAULTS, _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
 
 // ----- Caps -----------------------------------------------------------------------------
 const MAX_PHOTOS = 300;
@@ -103,15 +119,15 @@ function fileOf(id: string, p: unknown): string | null {
 const ID_RE = /^[0-9A-Za-z_-]{8,64}$/;
 
 // ----- Display state: this session's own keys, one per field, a JSON value each -----------
-function settingsFor() {
+function settingsFor(ctx: Ctx) {
   const k = (key: string) => `display/${key}`;
   return {
     async get<T>(key: string): Promise<T | null> {
-      const op = await sessionKv.get(k(key));
+      const op = await ctx.kv.get(k(key));
       if (op?.value == null) return null;
       try { return JSON.parse(op.value) as T; } catch { return null; }
     },
-    set: (key: string, value: unknown) => sessionKv.put(k(key), JSON.stringify(value ?? null)),
+    set: (key: string, value: unknown) => ctx.kv.put(k(key), JSON.stringify(value ?? null)),
   };
 }
 type Mode = "grid" | "single";
@@ -126,15 +142,16 @@ interface Display {
   anchor_ms: number;
 }
 
-async function getDisplay(t: Tables): Promise<Display> {
+async function getDisplay(ctx: Ctx): Promise<Display> {
+  const s = settingsFor(ctx);
   const [mode, current, fit, on, secs, anchorId, anchorMs] = await Promise.all([
-    t.settings.get<string>("mode"),
-    t.settings.get<string>("current_photo_id"),
-    t.settings.get<string>("fit"),
-    t.settings.get<boolean>("slideshow_on"),
-    t.settings.get<number>("slideshow_secs"),
-    t.settings.get<string>("anchor_photo_id"),
-    t.settings.get<number>("anchor_ms"),
+    s.get<string>("mode"),
+    s.get<string>("current_photo_id"),
+    s.get<string>("fit"),
+    s.get<boolean>("slideshow_on"),
+    s.get<number>("slideshow_secs"),
+    s.get<string>("anchor_photo_id"),
+    s.get<number>("anchor_ms"),
   ]);
   return {
     mode: mode === "single" ? "single" : "grid",
@@ -149,10 +166,9 @@ async function getDisplay(t: Tables): Promise<Display> {
 
 // Write only the keys present in `patch` — distinct keys are distinct rows, so concurrent
 // writes to different fields never clobber one another.
-async function setDisplay(t: Tables, patch: Partial<Display>): Promise<void> {
-  await Promise.all(
-    (Object.keys(patch) as Array<keyof Display>).map((k) => t.settings.set(k, patch[k])),
-  );
+async function setDisplay(ctx: Ctx, patch: Partial<Display>): Promise<void> {
+  const s = settingsFor(ctx);
+  await Promise.all((Object.keys(patch) as Array<keyof Display>).map((k) => s.set(k, patch[k])));
 }
 
 // ----- Photos ---------------------------------------------------------------------------
@@ -161,21 +177,25 @@ interface Photo {
   w: number; h: number; added_ms: number; added_by: string;
 }
 
+const num = (v: unknown) => Number(v) || 0;
+
 // ONE ordering for the whole frame — sort_order ascending, i.e. upload order. The grid and the
 // slideshow both walk it, so "next photo" means the same thing everywhere.
-async function listPhotos(t: Tables): Promise<Photo[]> {
-  const { rows } = await t.photos.query({
-    order_by: [{ col: "sort_order", dir: "asc" }],
-    limit: MAX_PHOTOS,
-  });
-  return rows.map((r: any) => ({
-    id: r._row_id,
+async function photoRows(ctx: Ctx): Promise<Row[]> {
+  return (await photosOf(ctx).all()).sort((a, b) =>
+    num(a.sort_order) - num(b.sort_order) || num(a._created_at) - num(b._created_at) || a.id.localeCompare(b.id)
+  );
+}
+
+async function listPhotos(ctx: Ctx): Promise<Photo[]> {
+  return (await photoRows(ctx)).slice(0, MAX_PHOTOS).map((r) => ({
+    id: r.id,
     name: String(r.name ?? ""),
     mime: String(r.mime ?? "image/jpeg"),
-    size: Number(r.size) || 0,
-    w: Number(r.w) || 0,
-    h: Number(r.h) || 0,
-    added_ms: Number(r.added_ms) || 0,
+    size: num(r.size),
+    w: num(r.w),
+    h: num(r.h),
+    added_ms: num(r.added_ms),
     added_by: String(r.added_by ?? ""),
   }));
 }
@@ -209,32 +229,34 @@ function resolveCurrent(photos: Photo[], id: string): Photo | null {
 
 // Re-anchor a running show so a changed photo count doesn't make it jump. `showing` is the photo
 // the client says is on screen; we fall back to the stored current when it isn't usable.
-async function reanchor(t: Tables, photos: Photo[], showing: string, d: Display): Promise<void> {
+async function reanchor(ctx: Ctx, photos: Photo[], showing: string, d: Display): Promise<void> {
   if (!d.slideshow_on) return;
   const at = resolveCurrent(photos, showing || d.current_photo_id);
-  await setDisplay(t, { anchor_photo_id: at ? at.id : "", anchor_ms: Date.now() });
+  await setDisplay(ctx, { anchor_photo_id: at ? at.id : "", anchor_ms: Date.now() });
 }
 
-function serveBytes(replyPort: any, buf: Uint8Array, mime: string) {
-  return replyPort.postMessage({
-    status: 200,
-    body: buf,
-    contentType: mime,
-    // A photo id is never reused and a photo's bytes never change, so this is safe — and it makes both
-    // the grid and a looping slideshow essentially free after first paint.
-    headers: { "Cache-Control": "private, max-age=31536000, immutable" },
-  }, [buf.buffer]);
+function serveBytes(buf: Uint8Array, mime: string): Response {
+  return new Response(buf as Uint8Array<ArrayBuffer>, {
+    headers: {
+      "content-type": mime,
+      // A photo id is never reused and a photo's bytes never change, so this is safe.
+      "cache-control": "private, max-age=31536000, immutable",
+    },
+  });
 }
 
-async function stateFor(t: Tables, peer: Peer) {
-  const [display, photos] = await Promise.all([getDisplay(t), listPhotos(t)]);
+const editor = (ctx: Ctx) => ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+
+async function stateFor(ctx: Ctx) {
+  const peer = ctx.peer;
+  const [display, photos] = await Promise.all([getDisplay(ctx), listPhotos(ctx)]);
   return {
     me: {
       is_anon: peer.is_anon, is_sfi_member: peer.is_sfi_member,
       is_sfi_editor: peer.is_sfi_editor, is_owner: peer.is_owner,
       user_name: peer.user_name, space_color: peer.space_color,
     },
-    can_edit: peer.is_sfi_editor,
+    can_edit: editor(ctx),
     display,
     photos,
     // The clock reference. Clients compute (server_ms - their Date.now()) once and apply it, so a
@@ -243,265 +265,235 @@ async function stateFor(t: Tables, peer: Peer) {
   };
 }
 
-// ----- Shared write logic ---------------------------------------------------------------
-// Both entry points land here: the HTTP POST arms (kept for older viewers whose framelib
-// lacks busSend) and the bus dispatcher (frame.busSend → onUiMessage). `op` is the API
-// path with the leading "api/" stripped. Role gates live here so the two paths can never
-// drift. Binary uploads (/api/upload, /api/upload/<id>/thumb) stay HTTP-only.
-type WriteResult = { status: number; body: unknown };
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx, what: "display" | "photos") => ctx.push({ picture_frame: what });
 
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>, peer: Peer): Promise<WriteResult> {
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  const ready = ensureTables(peer);
-  if (!ready.ready) return { status: 503, body: { error: "table not bound" } };
-  const t: Tables = { settings: settingsFor(), photos: table(PHOTOS, sfiId) };
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
 
-  // Set what the frame is displaying. This is the shared wall state: it persists and pushes
-  // to every viewer. Non-editors never reach here; they browse in local frontend state instead.
-  if (op === "display") {
-    const [d, photos] = await Promise.all([getDisplay(t), listPhotos(t)]);
-
-    const patch: Partial<Display> = {};
-    if (v.mode === "grid" || v.mode === "single") patch.mode = v.mode;
-    if (typeof v.photo_id === "string" && v.photo_id) {
-      const hit = photos.find((p) => p.id === v.photo_id);
-      if (!hit) return { status: 404, body: { error: "photo not found" } };
-      patch.current_photo_id = hit.id;
-      // Stepping by hand while the show runs restarts the dwell on the chosen photo.
-      if (d.slideshow_on) { patch.anchor_photo_id = hit.id; patch.anchor_ms = Date.now(); }
-    }
-    if (Object.keys(patch).length) await setDisplay(t, patch);
-    pushToInstance(sfiId, { type: "display_changed" });
-    return { status: 200, body: await stateFor(t, peer) };
+async function body(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
   }
-
-  // Fit / slideshow settings.
-  if (op === "settings") {
-    const [d, photos] = await Promise.all([getDisplay(t), listPhotos(t)]);
-
-    const patch: Partial<Display> = {};
-    if (v.fit === "contain" || v.fit === "cover") patch.fit = v.fit;
-    if (v.slideshow_secs !== undefined) {
-      patch.slideshow_secs = clampInt(toIntOrNull(v.slideshow_secs) ?? DEFAULT_SECS, MIN_SECS, MAX_SECS);
-    }
-
-    if (v.slideshow_on !== undefined) {
-      const on = v.slideshow_on === true;
-      patch.slideshow_on = on;
-      // The photo the client says is on screen right now — the pivot in both directions.
-      const showing = resolveCurrent(photos, sanitizeText(v.current_photo_id, 64) || d.current_photo_id);
-      if (on) {
-        // Starting: anchor the show to what's already up, from this instant.
-        patch.anchor_photo_id = showing ? showing.id : "";
-        patch.anchor_ms = Date.now();
-      } else if (showing) {
-        // Stopping: the client holds the computed position, so it rides in on this same write.
-        // Persisting it here is the handoff from a derived position back to a stored one.
-        patch.current_photo_id = showing.id;
-      }
-    } else if (patch.slideshow_secs !== undefined && d.slideshow_on) {
-      // Changing the interval mid-show would otherwise teleport the position, because the whole
-      // elapsed span gets re-divided by the new dwell. Re-anchor to what's showing instead.
-      const showing = resolveCurrent(photos, sanitizeText(v.current_photo_id, 64) || d.current_photo_id);
-      patch.anchor_photo_id = showing ? showing.id : "";
-      patch.anchor_ms = Date.now();
-    }
-
-    if (Object.keys(patch).length) await setDisplay(t, patch);
-    pushToInstance(sfiId, { type: "display_changed" });
-    return { status: 200, body: await stateFor(t, peer) };
-  }
-
-  // Delete a photo. Removes the row and both files, then repairs the display state so the
-  // frame is never left pointing at something that no longer exists.
-  if (op.startsWith("delete/")) {
-    const id = op.slice("delete/".length);
-    if (!ID_RE.test(id)) return { status: 400, body: { error: "bad id" } };
-    if (!(await t.photos.get(id))) return { status: 404, body: { error: "not found" } };
-
-    const [before, d] = await Promise.all([listPhotos(t), getDisplay(t)]);
-    const idx = before.findIndex((p) => p.id === id);
-
-    await t.photos.delete(id);
-    await spaceFiles.remove(dirFor(id)).catch(() => { /* already gone */ });
-
-    const after = before.filter((p) => p.id !== id);
-    const patch: Partial<Display> = {};
-    if (!after.length) {
-      // Nothing left to show — the grid (with its empty state) is the only sane resting place.
-      patch.mode = "grid";
-      patch.current_photo_id = "";
-      patch.anchor_photo_id = "";
-    } else if (d.current_photo_id === id) {
-      // Advance to the next photo in order, wrapping past the end.
-      patch.current_photo_id = after[idx % after.length].id;
-    }
-    // A removed photo shifts the modulus; re-anchor so a running show doesn't jump.
-    if (d.slideshow_on) {
-      patch.anchor_photo_id = after.length
-        ? (patch.current_photo_id ?? resolveCurrent(after, d.current_photo_id)?.id ?? after[0].id)
-        : "";
-      patch.anchor_ms = Date.now();
-    }
-    await setDisplay(t, patch);
-
-    pushToInstance(sfiId, { type: "photos_changed" });
-    return { status: 200, body: await stateFor(t, peer) };
-  }
-
-  return { status: 404, body: { error: "not found" } };
 }
 
-// Bus dispatcher — the frontend's JSON write path (frame.busSend → BusUiToFrame → here).
-// Fire-and-forget: denials are logged, not answered — a legitimate client never sends a
-// write it isn't allowed to make, and every mutation confirms itself via pushToInstance.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const { op, ...v } = data as Record<string, unknown>;
-  if (typeof op !== "string") return;
-  const r = await handleWrite(sfiId, op, v, peer);
-  if (r.status !== 200) log(`picture_frame: bus op ${op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+// ----- Writes (editors only) --------------------------------------------------------------
+
+// Set what the frame is displaying. This is the shared wall state: it persists and pushes
+// to every viewer. Non-editors never reach here; they browse in local frontend state instead.
+async function setShown(ctx: Ctx, v: Record<string, unknown>): Promise<Response> {
+  const [d, photos] = await Promise.all([getDisplay(ctx), listPhotos(ctx)]);
+  const patch: Partial<Display> = {};
+  if (v.mode === "grid" || v.mode === "single") patch.mode = v.mode;
+  if (typeof v.photo_id === "string" && v.photo_id) {
+    const hit = photos.find((p) => p.id === v.photo_id);
+    if (!hit) return refuse(404, "photo not found");
+    patch.current_photo_id = hit.id;
+    // Stepping by hand while the show runs restarts the dwell on the chosen photo.
+    if (d.slideshow_on) { patch.anchor_photo_id = hit.id; patch.anchor_ms = Date.now(); }
+  }
+  if (Object.keys(patch).length) await setDisplay(ctx, patch);
+  tell(ctx, "display");
+  return json(await stateFor(ctx));
+}
+
+// Fit / slideshow settings.
+async function setSettings(ctx: Ctx, v: Record<string, unknown>): Promise<Response> {
+  const [d, photos] = await Promise.all([getDisplay(ctx), listPhotos(ctx)]);
+  const patch: Partial<Display> = {};
+  if (v.fit === "contain" || v.fit === "cover") patch.fit = v.fit;
+  if (v.slideshow_secs !== undefined) {
+    patch.slideshow_secs = clampInt(toIntOrNull(v.slideshow_secs) ?? DEFAULT_SECS, MIN_SECS, MAX_SECS);
+  }
+
+  if (v.slideshow_on !== undefined) {
+    const on = v.slideshow_on === true;
+    patch.slideshow_on = on;
+    // The photo the client says is on screen right now — the pivot in both directions.
+    const showing = resolveCurrent(photos, sanitizeText(v.current_photo_id, 64) || d.current_photo_id);
+    if (on) {
+      // Starting: anchor the show to what's already up, from this instant.
+      patch.anchor_photo_id = showing ? showing.id : "";
+      patch.anchor_ms = Date.now();
+    } else if (showing) {
+      // Stopping: the client holds the computed position, so it rides in on this same write.
+      // Persisting it here is the handoff from a derived position back to a stored one.
+      patch.current_photo_id = showing.id;
+    }
+  } else if (patch.slideshow_secs !== undefined && d.slideshow_on) {
+    // Changing the interval mid-show would otherwise teleport the position, because the whole
+    // elapsed span gets re-divided by the new dwell. Re-anchor to what's showing instead.
+    const showing = resolveCurrent(photos, sanitizeText(v.current_photo_id, 64) || d.current_photo_id);
+    patch.anchor_photo_id = showing ? showing.id : "";
+    patch.anchor_ms = Date.now();
+  }
+
+  if (Object.keys(patch).length) await setDisplay(ctx, patch);
+  tell(ctx, "display");
+  return json(await stateFor(ctx));
+}
+
+// Delete a photo. Removes the row and both files, then repairs the display state so the
+// frame is never left pointing at something that no longer exists.
+async function remove(ctx: Ctx, id: string): Promise<Response> {
+  if (!ID_RE.test(id)) return refuse(400, "bad id");
+  if (!(await photosOf(ctx).get(id))) return refuse(404, "not found");
+
+  const [before, d] = await Promise.all([listPhotos(ctx), getDisplay(ctx)]);
+  const idx = before.findIndex((p) => p.id === id);
+
+  await photosOf(ctx).delete(id);
+  await ctx.files.remove(dirFor(id)).catch(() => { /* already gone */ });
+
+  const after = before.filter((p) => p.id !== id);
+  const patch: Partial<Display> = {};
+  if (!after.length) {
+    // Nothing left to show — the grid (with its empty state) is the only sane resting place.
+    patch.mode = "grid";
+    patch.current_photo_id = "";
+    patch.anchor_photo_id = "";
+  } else if (d.current_photo_id === id) {
+    // Advance to the next photo in order, wrapping past the end.
+    patch.current_photo_id = after[idx % after.length].id;
+  }
+  // A removed photo shifts the modulus; re-anchor so a running show doesn't jump.
+  if (d.slideshow_on) {
+    patch.anchor_photo_id = after.length
+      ? (patch.current_photo_id ?? resolveCurrent(after, d.current_photo_id)?.id ?? after[0].id)
+      : "";
+    patch.anchor_ms = Date.now();
+  }
+  await setDisplay(ctx, patch);
+
+  tell(ctx, "photos");
+  return json(await stateFor(ctx));
+}
+
+// Upload a photo. Bytes are the raw body; metadata rides in the query string.
+// The client has already downscaled to <= 2560px and measured the natural dimensions.
+async function upload(ctx: Ctx, query: URLSearchParams, buf: Uint8Array): Promise<Response> {
+  const mime = sanitizeText(query.get("mime"), 120).toLowerCase();
+  if (!MIMES.has(mime)) return refuse(400, "unsupported image type");
+  if (buf.byteLength === 0) return refuse(400, "empty upload");
+  if (buf.byteLength > MAX_BYTES) return refuse(413, `image exceeds ${MAX_BYTES / (1024 * 1024)} MB`);
+  if (!looksLikeImage(buf)) return refuse(415, "file is not an image");
+
+  const rows = await photoRows(ctx);
+  if (rows.length >= MAX_PHOTOS) return refuse(409, `this frame holds at most ${MAX_PHOTOS} photos`);
+  const photos = await listPhotos(ctx);
+
+  // Row first — its id names the photo's folder — then the bytes, undoing the row if the
+  // write fails, so a failed upload can never strand a row pointing at nothing.
+  const sortOrder = rows.reduce((m, r) => Math.max(m, num(r.sort_order)), -1) + 1;
+  const name = safeName(query.get("name"));
+  const row = await keep(ctx, null, {
+    name,
+    mime,
+    size: buf.byteLength,
+    w: clampInt(toIntOrNull(query.get("w")) ?? 0, 0, 100_000),
+    h: clampInt(toIntOrNull(query.get("h")) ?? 0, 0, 100_000),
+    sort_order: sortOrder,
+    added_ms: Date.now(),
+    added_by: sanitizeText(ctx.peer.user_name, 64),
+  });
+  try {
+    const file = `${dirFor(row.id)}/${fileName(name, mime)}`;
+    await ctx.files.write(file, buf);
+    await keep(ctx, row.id, { path: file });
+  } catch (e) {
+    await ctx.files.remove(dirFor(row.id)).catch(() => {});
+    await photosOf(ctx).delete(row.id);
+    return refuse(500, "failed to store photo: " + e);
+  }
+
+  // A new photo shifts the modulus; re-anchor so a running show doesn't jump.
+  const d = await getDisplay(ctx);
+  await reanchor(ctx, [...photos, { id: row.id } as Photo], "", d);
+
+  tell(ctx, "photos");
+  return json({ photo_id: row.id });
+}
+
+// Attach the grid thumbnail to a photo just uploaded.
+async function uploadThumb(ctx: Ctx, id: string, buf: Uint8Array): Promise<Response> {
+  if (!ID_RE.test(id)) return refuse(400, "bad id");
+  if (buf.byteLength === 0 || buf.byteLength > MAX_THUMB_BYTES) return refuse(413, "bad thumbnail size");
+  if (!looksLikeImage(buf)) return refuse(415, "file is not an image");
+  if (!(await photosOf(ctx).get(id))) return refuse(404, "photo not found");
+  try {
+    const file = `${dirFor(id)}/thumbnail.${EXT[sniffMime(buf)]}`;
+    await ctx.files.write(file, buf);
+    await keep(ctx, id, { thumb_path: file });
+  } catch (e) {
+    // A missing thumbnail is survivable — /api/thumb falls back to the full image.
+    ctx.log("picture_frame: thumbnail write failed: " + e);
+  }
+  return json({ ok: true });
+}
+
+// ----- Reads (anyone who reaches the frame) ---------------------------------------------------
+
+// Full image.
+async function photo(ctx: Ctx, id: string): Promise<Response> {
+  if (!ID_RE.test(id)) return refuse(400, "bad id");
+  const row = await photosOf(ctx).get(id);
+  if (!row) return refuse(404, "not found");
+  const file = fileOf(id, row.path);
+  const buf = file ? await ctx.files.read(file).catch(() => null) : null;
+  if (!buf) return refuse(404, "not found");
+  return serveBytes(buf, String(row.mime || "application/octet-stream"));
+}
+
+// Grid thumbnail, falling back to the full image when it's absent (older rows, failed write).
+async function thumb(ctx: Ctx, id: string): Promise<Response> {
+  if (!ID_RE.test(id)) return refuse(400, "bad id");
+  const row = await photosOf(ctx).get(id);
+  if (!row) return refuse(404, "not found");
+  const t = fileOf(id, row.thumb_path);
+  let buf = t ? await ctx.files.read(t).catch(() => null) : null;
+  const mime = buf ? sniffMime(buf) : String(row.mime || "image/jpeg");
+  if (!buf) {
+    const file = fileOf(id, row.path);
+    buf = file ? await ctx.files.read(file).catch(() => null) : null;
+  }
+  if (!buf) return refuse(404, "not found");
+  return serveBytes(buf, mime);
+}
 
 // ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
+const WRITES = [/^\/api\/display$/, /^\/api\/settings$/, /^\/api\/upload$/, /^\/api\/upload\/[^/]*\/thumb$/, /^\/api\/delete\//];
 
-  // Static assets — open to everyone (every tier needs the shell to render).
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const url = new URL(request.url);
+    const { pathname } = url;
+    const method = request.method;
 
-  const ready = ensureTables(peer);
-  if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
-  const t: Tables = { settings: settingsFor(), photos: table(PHOTOS, peer.sfi_id) };
-
-  // Identity + display state + the whole photo list, in one round trip.
-  if (reqPath === "/api/state" && method === "GET") {
-    return jsonReply(replyPort, 200, await stateFor(t, peer));
-  }
-
-  // Set what the frame is displaying — editors only; the logic lives in handleWrite.
-  if (reqPath === "/api/display" && method === "POST") {
-    const r = await handleWrite(peer.sfi_id, "display", parseJsonBody<Record<string, unknown>>(body) || {}, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
-
-  // Fit / slideshow settings — editors only; the logic lives in handleWrite.
-  if (reqPath === "/api/settings" && method === "POST") {
-    const r = await handleWrite(peer.sfi_id, "settings", parseJsonBody<Record<string, unknown>>(body) || {}, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
-
-  // Upload a photo — editors only. Bytes are the raw body; metadata rides in the query string.
-  // The client has already downscaled to <= 2560px and measured the natural dimensions.
-  if (reqPath === "/api/upload" && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-
-    const mime = sanitizeText(query.mime, 120).toLowerCase();
-    if (!MIMES.has(mime)) return jsonReply(replyPort, 400, { error: "unsupported image type" });
-    if (body.byteLength === 0) return jsonReply(replyPort, 400, { error: "empty upload" });
-    if (body.byteLength > MAX_BYTES) {
-      return jsonReply(replyPort, 413, { error: `image exceeds ${MAX_BYTES / (1024 * 1024)} MB` });
-    }
-    const bytes = new Uint8Array(body);
-    if (!looksLikeImage(bytes)) return jsonReply(replyPort, 415, { error: "file is not an image" });
-
-    const photos = await listPhotos(t);
-    if (photos.length >= MAX_PHOTOS) {
-      return jsonReply(replyPort, 409, { error: `this frame holds at most ${MAX_PHOTOS} photos` });
+    // Static assets — open to everyone (every tier needs the shell to render).
+    if (!pathname.startsWith("/api/")) {
+      if (method !== "GET") return refuse(404, "not found");
+      return ctx.file(pathname);
     }
 
-    // Row first — its _row_id names the photo's folder — then the bytes, undoing the row if the
-    // write fails, so a failed upload can never strand a row pointing at nothing.
-    const sortOrder = Number(await t.photos.max("sort_order") ?? -1) + 1;
-    const name = safeName(query.name);
-    const { row_id } = await t.photos.upsert(null, {
-      name,
-      mime,
-      size: body.byteLength,
-      w: clampInt(toIntOrNull(query.w) ?? 0, 0, 100_000),
-      h: clampInt(toIntOrNull(query.h) ?? 0, 0, 100_000),
-      sort_order: sortOrder,
-      added_ms: Date.now(),
-      added_by: sanitizeText(peer.user_name, 64),
-    });
-    try {
-      const file = `${dirFor(row_id)}/${fileName(name, mime)}`;
-      await spaceFiles.write(file, bytes);
-      await t.photos.upsert(row_id, { path: file });
-    } catch (e) {
-      await spaceFiles.remove(dirFor(row_id)).catch(() => {});
-      await t.photos.delete(row_id);
-      return jsonReply(replyPort, 500, { error: "failed to store photo: " + e });
+    if (method === "GET") {
+      // Identity + display state + the whole photo list, in one round trip.
+      if (pathname === "/api/state") return json(await stateFor(ctx));
+      if (pathname.startsWith("/api/photo/")) return photo(ctx, pathname.slice("/api/photo/".length));
+      if (pathname.startsWith("/api/thumb/")) return thumb(ctx, pathname.slice("/api/thumb/".length));
+      return refuse(404, "not found");
     }
 
-    // A new photo shifts the modulus; re-anchor so a running show doesn't jump.
-    const d = await getDisplay(t);
-    await reanchor(t, [...photos, { id: row_id } as Photo], "", d);
+    if (method !== "POST" || !WRITES.some((re) => re.test(pathname))) return refuse(404, "not found");
+    if (!editor(ctx)) return refuse(403, "editors only");
 
-    pushToInstance(peer.sfi_id, { type: "photos_changed" });
-    return jsonReply(replyPort, 200, { photo_id: row_id });
-  }
-
-  // Attach the grid thumbnail to a photo just uploaded — editors only.
-  if (reqPath.startsWith("/api/upload/") && reqPath.endsWith("/thumb") && method === "POST") {
-    if (!peer.is_sfi_editor) return jsonReply(replyPort, 403, { error: "editors only" });
-    const id = reqPath.slice("/api/upload/".length, -"/thumb".length);
-    if (!ID_RE.test(id)) return jsonReply(replyPort, 400, { error: "bad id" });
-    if (body.byteLength === 0 || body.byteLength > MAX_THUMB_BYTES) {
-      return jsonReply(replyPort, 413, { error: "bad thumbnail size" });
-    }
-    const bytes = new Uint8Array(body);
-    if (!looksLikeImage(bytes)) return jsonReply(replyPort, 415, { error: "file is not an image" });
-    if (!(await t.photos.get(id))) return jsonReply(replyPort, 404, { error: "photo not found" });
-    try {
-      const file = `${dirFor(id)}/thumbnail.${EXT[sniffMime(bytes)]}`;
-      await spaceFiles.write(file, bytes);
-      await t.photos.upsert(id, { thumb_path: file });
-    } catch (e) {
-      // A missing thumbnail is survivable — /api/thumb falls back to the full image.
-      log("picture_frame: thumbnail write failed: " + e);
-    }
-    return jsonReply(replyPort, 200, { ok: true });
-  }
-
-  // Full image — readable by anyone who can see the frame.
-  if (reqPath.startsWith("/api/photo/") && method === "GET") {
-    const id = reqPath.slice("/api/photo/".length);
-    if (!ID_RE.test(id)) return jsonReply(replyPort, 400, { error: "bad id" });
-    const row = await t.photos.get(id);
-    if (!row) return jsonReply(replyPort, 404, { error: "not found" });
-    const file = fileOf(id, row.path);
-    const buf = file ? await spaceFiles.read(file).catch(() => null) : null;
-    if (!buf) return jsonReply(replyPort, 404, { error: "not found" });
-    return serveBytes(replyPort, buf, String(row.mime || "application/octet-stream"));
-  }
-
-  // Grid thumbnail, falling back to the full image when it's absent (older rows, failed write).
-  if (reqPath.startsWith("/api/thumb/") && method === "GET") {
-    const id = reqPath.slice("/api/thumb/".length);
-    if (!ID_RE.test(id)) return jsonReply(replyPort, 400, { error: "bad id" });
-    const row = await t.photos.get(id);
-    if (!row) return jsonReply(replyPort, 404, { error: "not found" });
-    const thumb = fileOf(id, row.thumb_path);
-    let buf = thumb ? await spaceFiles.read(thumb).catch(() => null) : null;
-    const mime = buf ? sniffMime(buf) : String(row.mime || "image/jpeg");
-    if (!buf) {
-      const file = fileOf(id, row.path);
-      buf = file ? await spaceFiles.read(file).catch(() => null) : null;
-    }
-    if (!buf) return jsonReply(replyPort, 404, { error: "not found" });
-    return serveBytes(replyPort, buf, mime);
-  }
-
-  // Delete a photo — editors only; the logic lives in handleWrite.
-  if (reqPath.startsWith("/api/delete/") && method === "POST") {
-    const r = await handleWrite(peer.sfi_id, reqPath.slice("/api/".length), {}, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
-
-  return jsonReply(replyPort, 404, { error: "not found" });
+    if (pathname === "/api/display") return setShown(ctx, await body(request));
+    if (pathname === "/api/settings") return setSettings(ctx, await body(request));
+    if (pathname.startsWith("/api/delete/")) return remove(ctx, pathname.slice("/api/delete/".length));
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    if (pathname === "/api/upload") return upload(ctx, url.searchParams, bytes);
+    return uploadThumb(ctx, pathname.slice("/api/upload/".length, -"/thumb".length), bytes);
+  },
 };
-
-log("Picture Frame frame is up and running!");

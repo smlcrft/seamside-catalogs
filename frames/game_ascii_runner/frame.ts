@@ -1,11 +1,9 @@
-import { log, serveFileAtPath } from "@frame-core";
+// ASCII Runner — the page is the whole game; this half only serves its files.
+import type { Ctx } from "@frame-core";
 
-self.onNetworkRequest = async (replyPort, path, method, _headers, _query, _body, _cookies) => {
-  if (method === "GET") {
-    await serveFileAtPath(replyPort, new URL("./public" + path, import.meta.url));
-  } else {
-    replyPort.postMessage({ status: 405, contentType: "application/json", body: JSON.stringify({ error: "Method not allowed.", code: "METHOD_NOT_ALLOWED" }) });
-  }
+export default {
+  fetch(request: Request, ctx: Ctx): Promise<Response> | Response {
+    if (request.method === "GET") return ctx.file(new URL(request.url).pathname);
+    return Response.json({ error: "Method not allowed.", code: "METHOD_NOT_ALLOWED" }, { status: 405 });
+  },
 };
-
-log("ASCII Runner frame loaded! Ready to play!");

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Focus Timer</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }   /* follows the space channel at runtime via applyChannel */
     * { box-sizing: border-box; }
@@ -155,7 +155,16 @@
 <body>
   <div id="app"></div>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+    import { html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "/lib/js/framelib.js";
+
+    // Everything comes from the frame's own server half; it decides who may drive the timer.
+    async function api(path, body) {
+      const r = await window.seamside.fetch(path, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong.");
+      return v;
+    }
 
     const R = 84;                        // ring radius in the 200x200 viewBox
     const C = 2 * Math.PI * R;           // circumference, for stroke-dasharray
@@ -185,30 +194,22 @@
       const dialRef = useRef(null);
 
       async function refresh() {
-        const r = await frame.api("api/state").catch(() => null);
+        const r = await api("/api/state").catch(() => null);
         if (!r || !r.session) return;
         setSkew(r.session.now_ms - Date.now());
         setSess(r.session);
       }
-      // Writes go over the tether (frame.busSend) — fire-and-forget; the dial re-reads from
-      // the timer_changed push, sender included. Feature-detect: an older viewer's framelib
-      // has no busSend, so fall back to the HTTP write it was using before.
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // A write is read again once answered, refused or not; the push brings everyone else.
+      const write = (path, body) => api("/" + path, body || {}).catch(() => {}).then(refresh);
 
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("/api/whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ timer_changed: refresh });
+      useFramePush((d) => { if (d && d.focus_timer === "timer") refresh(); });
 
       // The only thing that ticks is the picture. Four times a second is enough for a
       // seconds readout to land on time without spinning the CPU.
@@ -364,6 +365,7 @@
         </main>`;
     }
 
+    await window.seamside.ready;
     render(html`<${App} />`, document.getElementById("app"));
   </script>
 </body>

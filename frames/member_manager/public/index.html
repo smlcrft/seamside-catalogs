@@ -4,25 +4,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Member Manager</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <link rel="stylesheet" href="./index.css">
 </head>
 <body class="ch1">
 <div id="root"></div>
 <script type="module">
-import { frame, html, render, useState, useEffect, useFramePush } from "./lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useFramePush } from "/lib/js/framelib.js";
 import { ListLine, chooseList, settleList } from "./members_list.js";
 
-// Writes go over the tether (frame.busSend) — HTTP POST bodies are dropped on Android.
-// Fire-and-forget: resulting state arrives via the members_changed / settings_changed
-// pushes. Feature-detect: an older viewer's framelib has no busSend — fall back to HTTP.
-const write = (path, body) => {
-  if (typeof frame.busSend === "function") {
-    frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-    return Promise.resolve({});
-  }
-  return frame.api(path, body);
-};
+// The roster comes from this frame's server half (./api/…), which decides what each
+// visitor is shown and checks every write.
+async function api(method, path, body) {
+  const r = await window.seamside.fetch(`/api${path}`, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+  let v = {};
+  try { v = r.json(); } catch { /* the status says it */ }
+  if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+  return v;
+}
 
 function fmtDate(ms) {
   const n = Number(ms);
@@ -48,19 +47,19 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
 
   async function loadState() {
-    const s = await frame.api("api/state");
+    const s = await api("GET", "/state");
     setState(s);
     return s;
   }
 
   async function loadMembers() {
-    const r = await frame.api("api/members");
+    const r = await api("GET", "/members");
     setMembers(r.rows || []);
   }
 
   async function bind(list) {
     try {
-      await frame.api("api/bind", { list });
+      await api("POST", "/bind", { list });
     } catch (e) {
       await frame.alert(e.message || "failed");
     }
@@ -89,9 +88,10 @@ function App() {
     return () => { clearTimeout(soon); w.close(); };
   }, [bound, watching]);
 
-  useFramePush({
-    members_changed: () => loadMembers(),
-    settings_changed: async () => { await loadState(); await loadMembers(); },
+  // The worker says what changed and never what it holds: read it again, as whoever this is.
+  useFramePush((d) => {
+    if (d.member_manager === "members") loadMembers().catch(() => {});
+    else if (d.member_manager === "settings") loadState().then(loadMembers).catch(() => {});
   });
 
   if (!state) return html`<div id="list" class="empty">Loading…</div>`;
@@ -108,27 +108,29 @@ function App() {
 
   async function addMember(name, email, phone, role) {
     try {
-      await write("api/member", { name, email, phone, role });
+      await api("POST", "/member", { name, email, phone, role });
     } catch (e) {
       await frame.alert(e.message || "failed");
     }
+    await loadMembers();
   }
 
   async function updateMember(row, patch) {
     try {
-      await write("api/member", { row_id: row._row_id, name: row.name, email: row.email, phone: row.phone || "", role: row.role, ...patch });
+      await api("POST", "/member", { row_id: row._row_id, name: row.name, email: row.email, phone: row.phone || "", role: row.role, ...patch });
     } catch (e) {
       await frame.alert(e.message || "failed");
-      loadMembers();
     }
+    await loadMembers();
   }
 
   async function delMember(row) {
     try {
-      await write("api/member/delete", { row_id: row._row_id });
+      await api("POST", "/member/delete", { row_id: row._row_id });
     } catch (e) {
       await frame.alert(e.message || "failed");
     }
+    await loadMembers();
   }
 
   return html`
@@ -403,7 +405,7 @@ function SettingsDialog({ prefs, onClose, onSaved }) {
   async function save() {
     const roles = rolesText.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
     try {
-      await write("api/settings", {
+      await api("POST", "/settings", {
         org_name: orgName.trim(),
         roles,
         owner_only_edit: ownerOnly,
@@ -444,6 +446,7 @@ function SettingsDialog({ prefs, onClose, onSaved }) {
   `;
 }
 
+await window.seamside.ready;
 render(html`<${App}/>`, document.getElementById("root"));
 </script>
 </body>

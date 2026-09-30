@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c2); --ch-fg: var(--os-c2-fg); }
     * { box-sizing: border-box; }
@@ -85,7 +85,21 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useCallback, applyChannel, useFramePush } from "./lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useCallback, applyChannel, useFramePush } from "/lib/js/framelib.js";
+
+    // Everything this page knows comes from its own server half, which decides who is asking.
+    async function api(path, body, method) {
+      const r = await window.seamside.fetch("/" + path, {
+        method: method || (body ? "POST" : "GET"),
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
+    // The worker says that something changed and never what: read again.
+    const onChange = (read) => (d) => { if (d.rss_reader) read(); };
 
     function relTime(ms) {
       if (!ms) return "";
@@ -145,10 +159,10 @@
         if (sel.groupId) p.set("group", sel.groupId);
         if (sel.feedId) p.set("feed", sel.feedId);
         if (sel.query.trim()) p.set("q", sel.query.trim());
-        return frame.api("api/items?" + p.toString()).then(r => setItems(r.items || []));
+        return api("api/items?" + p.toString()).then(r => setItems(r.items || []));
       }, [sel.view, sel.groupId, sel.feedId, sel.query]);
       useEffect(() => { const t = setTimeout(load, sel.query ? 180 : 0); return () => clearTimeout(t); }, [load]);
-      useFramePush({ feeds_changed: load });   // pushed on every shared mutation
+      useFramePush(onChange(load));
 
       const open = (it) => {
         onOpen(it.id); // open the reader immediately — never gate it on a side-effect
@@ -156,7 +170,7 @@
       };
       const refresh = async () => {
         setRefreshing(true);
-        try { await frame.api("api/refresh", {}); } finally { setRefreshing(false); load(); onChanged(); }
+        try { await api("api/refresh", {}); } finally { setRefreshing(false); load(); onChanged(); }
       };
 
       // keyboard: react to App's global key dispatch
@@ -248,9 +262,9 @@
       const [data, setData] = useState(null);
       const [replyTo, setReplyTo] = useState(null);
       const [draft, setDraft] = useState("");
-      const load = useCallback(() => frame.api(`api/items/${itemId}`).then(setData), [itemId]);
+      const load = useCallback(() => api(`api/items/${itemId}`).then(setData), [itemId]);
       useEffect(() => { setData(null); setReplyTo(null); setDraft(""); load(); }, [itemId]);
-      useFramePush({ feeds_changed: load });   // pushed on every shared mutation
+      useFramePush(onChange(load));
       const backBtn = onBack ? html`<button class="backbtn" onClick=${onBack}>← Back to list</button>` : null;
       if (!data) return html`<div class="reader">${backBtn}<div class="empty">Loading…</div></div>`;
       const iBoosted = data.boosts.some(f => f.user_id === boot.userId);
@@ -287,19 +301,10 @@
       </div>`;
     }
 
-    // Writes go over the tether (frame.busSend), not HTTP: Android's webview drops HTTP
-    // request bodies, so a POST silently becomes an empty write there (#750). Fire-and-
-    // forget — the view reloads from the matching push. The two calls whose RESULT the
-    // caller needs (adding a feed, which can fail with "no feed found", and refresh,
-    // which reports what it pulled) deliberately stay on frame.api.
+    // A change is a request with an answer: `op` is the path under api/, "/delete" a DELETE.
     function write(op, payload) {
-      if (typeof frame.busSend === "function") {
-        frame.busSend({ op, ...(payload || {}) });
-        return Promise.resolve({});
-      }
-      const method = op.endsWith("/delete") ? "DELETE" : "POST";
-      const path = "api/" + (method === "DELETE" ? op.slice(0, -"/delete".length) : op);
-      return frame.api(path, payload || {}, method);
+      const gone = op.endsWith("/delete");
+      return api("api/" + (gone ? op.slice(0, -"/delete".length) : op), gone ? null : (payload || {}), gone ? "DELETE" : "POST");
     }
 
     function App() {
@@ -308,11 +313,11 @@
       const [openId, setOpenId] = useState(null);
       const [narrow, setNarrow] = useState(false);
       const [drawerOpen, setDrawerOpen] = useState(false);
-      const reloadBootstrap = useCallback(() => frame.api("api/bootstrap").then(setBoot), []);
+      const reloadBootstrap = useCallback(() => api("api/bootstrap").then(setBoot), []);
       const onChanged = useCallback(() => reloadBootstrap(), [reloadBootstrap]);
 
       useEffect(() => { applyChannel(document.documentElement); reloadBootstrap(); }, []);
-      useFramePush({ feeds_changed: reloadBootstrap });
+      useFramePush(onChange(reloadBootstrap));
 
       useEffect(() => {
         const mq = window.matchMedia("(max-width: 900px)");
@@ -324,7 +329,7 @@
       useEffect(() => {
         if (!boot || !boot.isEditor) return;
         const stale = boot.feeds.some(f => !f.last_fetched || (Date.now() - f.last_fetched) > 15 * 60 * 1000);
-        if (stale) frame.api("api/refresh", {}).then(reloadBootstrap);
+        if (stale) api("api/refresh", {}).then(reloadBootstrap);
       }, [boot && boot.isEditor]);
 
       // global keyboard shortcuts
@@ -334,7 +339,7 @@
           if (tag === "input" || tag === "textarea") { if (e.key === "Escape") e.target.blur(); return; }
           if (e.key === "/") { e.preventDefault(); document.querySelector(".search")?.focus(); return; }
           if (e.key === "Escape") { setOpenId(null); return; }
-          if (e.key === "r" && boot && boot.isEditor) { frame.api("api/refresh", {}).then(reloadBootstrap); return; }
+          if (e.key === "r" && boot && boot.isEditor) { api("api/refresh", {}).then(reloadBootstrap); return; }
           if (["j", "k", "o", "m", "b"].includes(e.key)) window.dispatchEvent(new CustomEvent("rss-key", { detail: e.key }));
         }
         window.addEventListener("keydown", onKey);
@@ -344,7 +349,7 @@
       const onAddFeed = async () => {
         const url = await frame.prompt("Feed or site URL", { title: "Add feed", placeholder: "https://…" });
         if (!url) return;
-        const r = await frame.api("api/feeds", { url });
+        const r = await api("api/feeds", { url });
         if (r.error) await frame.alert(r.error, { title: "Could not add" });
         else if (r.warning) await frame.alert("Added, but the first fetch failed: " + r.warning, { title: "Heads up" });
         reloadBootstrap();
@@ -352,7 +357,7 @@
       const onAddGroup = async () => {
         const name = await frame.prompt("Group name", { title: "Add group" });
         if (!name) return;
-        await frame.api("api/groups", { name }); reloadBootstrap();
+        await api("api/groups", { name }); reloadBootstrap();
       };
 
       if (!boot) return html`<div class="empty">Loading…</div>`;
@@ -379,6 +384,7 @@
           ${reader}
         </div>`;
     }
+    await window.seamside.ready;
     render(html`<${App}/>`, document.body);
   </script>
 </body>

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Recipe Box</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }   /* follows the space channel at runtime */
     * { box-sizing: border-box; }
@@ -289,7 +289,17 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useFramePush, applyChannel, Modal } from "./lib/js/framelib.js";
+    import { html, render, useState, useEffect, useFramePush, applyChannel, Modal } from "/lib/js/framelib.js";
+
+    // Everything this page knows comes from its own server half (./api/…), so a stranger
+    // reads the box there and every write is checked there.
+    async function api(path, body) {
+      const r = await window.seamside.fetch("/" + path, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     // Selection survives remounts (the push-driven refresh re-renders the app).
     const NAV = { recipeId: null };
@@ -333,7 +343,7 @@
 
       const apply = (r) => { if (r && r.recipes) setRecipes(r.recipes); };
       async function refresh() {
-        const r = await frame.api("api/recipes").catch(() => null);
+        const r = await api("api/recipes").catch(() => null);
         if (!r) return;
         if (r.recipes) {
           setRecipes(r.recipes);
@@ -342,24 +352,17 @@
           }
         }
       }
-      // Writes go over the tether (frame.busSend) — fire-and-forget; the UI refreshes
-      // from the recipes_changed push, sender included. Feature-detect: an older viewer's
-      // framelib has no busSend, so fall back to the HTTP write it was using before.
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // A write answers with the box as it now stands; the push brings everyone else.
+      const write = (path, body) => api(path, body || {});
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("api/whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ recipes_changed: refresh });
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((d) => { if (d.recipe_box === "recipes") refresh(); });
 
       if (!me) return html`<div></div>`;
       const isEditor = !!me.is_sfi_editor;
@@ -392,7 +395,7 @@
         setEdArmed(false); setEditing(false);
         setRecipes((rs) => (rs || []).filter((x) => x.id !== r.id));
         back();
-        write("api/recipe/" + r.id + "/delete", {}).catch(() => {});
+        write("api/recipe/" + r.id + "/delete", {}).then(apply).catch(() => {});
       }
 
       const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
@@ -669,6 +672,7 @@
       `;
     }
 
+    await window.seamside.ready;
     render(html`<${App}/>`, document.body);
   </script>
 </body>

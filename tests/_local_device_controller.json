@@ -1,0 +1,36 @@
+{
+  "tier": "members",
+  "publish": "open",
+  "steps": [
+    { "why": "a public-control switch an installed copy left behind", "as": "collaborator", "at": "space", "do": "KV.PUT t/__fc_settings/allow_public_control", "body": { "v": "false", "_created_at": 1, "_modified_at": 1 }, "status": 200 },
+
+    { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["id=\"root\""] },
+    { "why": "a stranger is told no device is connected", "do": "GET {api}/device", "status": 200, "is": { "/connected": false, "/can_connect": false, "/missing/0": "sensor" }, "absent": ["/keys", "/values", "/public_control"] },
+    { "why": "so is someone signed in and on no roster", "as": "signed", "do": "GET {api}/device", "is": { "/connected": false } },
+    { "why": "and a viewer", "as": "viewer", "do": "GET {api}/device", "is": { "/connected": false, "/can_connect": false } },
+    { "why": "and the keeper, since v1 has no device bus", "as": "owner", "do": "GET {api}/device", "is": { "/connected": false, "/can_connect": true, "/missing/0": "sensor" } },
+
+    { "why": "a stranger changes no sharing", "do": "PUT {api}/settings/public_control", "body": { "enabled": true }, "status": 403, "is": { "/error": "only space editors can change sharing" } },
+    { "why": "hides nothing", "do": "PUT {api}/settings/hidden", "body": { "key": "servo", "enabled": true }, "status": 403 },
+    { "why": "lays nothing out", "do": "PUT {api}/settings/view", "body": { "key": "rgb", "mode": "palette" }, "status": 403 },
+    { "why": "and drives nothing while public control is off", "do": "POST {api}/set", "body": { "key": "servo", "value": 90 }, "status": 403, "is": { "/error": "you don't have permission to control this device" } },
+    { "why": "nor runs a command", "do": "POST {api}/run", "body": { "command": "home" }, "status": 403 },
+    { "why": "a viewer changes no sharing", "as": "viewer", "do": "PUT {api}/settings/public_control", "body": { "enabled": true }, "status": 403 },
+    { "why": "nor the layout", "as": "viewer", "do": "PUT {api}/settings/view", "body": { "key": "rgb", "mode": "palette" }, "status": 403, "is": { "/error": "only space editors can change the layout" } },
+    { "why": "nor drives the device", "as": "viewer", "do": "POST {api}/read", "body": { "name": "temp" }, "status": 403 },
+    { "why": "an unknown route is not found", "do": "POST {api}/device", "status": 404 },
+
+    { "why": "a collaborator lays a key out", "as": "collaborator", "do": "PUT {api}/settings/view", "body": { "key": "rgb", "mode": "palette" }, "status": 200 },
+    { "why": "but names both", "as": "collaborator", "do": "PUT {api}/settings/view", "body": { "key": "rgb" }, "status": 400 },
+    { "why": "hides a key", "as": "collaborator", "do": "PUT {api}/settings/hidden", "body": { "key": "servo", "enabled": true }, "status": 200 },
+    { "why": "and another", "as": "collaborator", "do": "PUT {api}/settings/hidden", "body": { "key": "led", "enabled": true }, "status": 200 },
+    { "why": "and shows one again", "as": "collaborator", "do": "PUT {api}/settings/hidden", "body": { "key": "led", "enabled": false }, "status": 200 },
+    { "why": "switches public control on", "as": "collaborator", "do": "PUT {api}/settings/public_control", "body": { "enabled": true }, "status": 200 },
+    { "why": "each setting a row of __fc_settings, its value JSON under v", "table": "__fc_settings", "has": ["view:rgb", "\\\"palette\\\"", "hidden:servo", "allow_public_control", "_created_at", "_modified_at"], "lacks": ["hidden:led"] },
+
+    { "why": "with public control on a stranger may ask, and is told there is no device", "do": "POST {api}/set", "body": { "key": "servo", "value": 90 }, "status": 409, "has": ["no local-device bus"] },
+    { "why": "an ask names what it is for", "do": "POST {api}/run", "body": {}, "status": 400, "is": { "/error": "command required" } },
+    { "why": "a collaborator's read is told the same", "as": "collaborator", "do": "POST {api}/read", "body": { "name": "temp" }, "status": 409, "has": ["no local-device bus"] },
+    { "why": "and still nothing is connected", "do": "GET {api}/device", "is": { "/connected": false }, "absent": ["/hidden", "/views"] }
+  ]
+}

@@ -4,36 +4,32 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Help Desk</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <link rel="stylesheet" href="./index.css">
 </head>
 <body>
   <main id="app" class="hd-root"></main>
   <script type="module">
-import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, applyChannel } from "./lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, applyChannel } from "/lib/js/framelib.js";
 
-const peer = window.__peer || {};
-if (peer.space_color) applyChannel(document.body, peer.space_color);
-const urlSfi = new URLSearchParams(location.search).get("sfi") || "";
-const me = {
-  is_anon: peer.is_anon || !peer.user_id,   // v1: is_anon = not on the space's roster
-  can_edit: !!peer.is_sfi_editor,           // members read the inbox; editors work it
-  sfi_id: peer.sfi_id || urlSfi || "",
-  user_name: peer.user_name || "",
-};
-const api = frame.api;
+// Everything this page knows comes from its own server half (./api/…): a visitor reads no
+// table, and a member's acts are checked there, so this is one page wherever it was opened.
+async function api(method, path, body) {
+  const r = await window.seamside.fetch(`/api${path}`, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+  let v = {};
+  try { v = r.json(); } catch { /* the status says it */ }
+  if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+  return v;
+}
 
-// Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST/PUT bodies are
-// dropped on Android (issue #750). Fire-and-forget — resulting state arrives via the hd_*
-// pushes, which is how this frontend already renders every change (its own included).
-// Feature-detect: an older viewer's framelib has no busSend — fall back to the HTTP write.
-const write = (path, body, method) => {
-  if (typeof frame.busSend === "function") {
-    frame.busSend({ op: path.replace(/^\.\/api\//, ""), ...(body || {}) });
-    return Promise.resolve({});
-  }
-  return api(path, body, method);
-};
+// Who the door says this is, read once from the worker with the form it opens on.
+let opened = { fields: [], title: "", you: {} };
+let me = { is_anon: true, can_edit: false };
+
+// A page has no form submit: a button's click asks each control whether it is filled in.
+const filled = (e) => [...e.target.closest("[data-form]").querySelectorAll("input, select, textarea")]
+  .every((el) => el.reportValidity());
+const onEnter = (act) => (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); act(e); } };
 
 function formatRelative(ts) {
   const diff = Math.max(0, Date.now() - ts);
@@ -51,39 +47,25 @@ function formatRelative(ts) {
 // Anonymous submit form
 // =====================================================================================
 function AnonForm() {
-  const [fields, setFields] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+  const fields = opened.fields || [];
+  const deskTitle = (opened.title || "").trim();
   const [values, setValues] = useState({});
   const [email, setEmail] = useState("");
   const [err, setErr] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sentTo, setSentTo] = useState(null);
-  const [deskTitle, setDeskTitle] = useState("");
-
-  useEffect(() => {
-    api("./api/config").then((r) => {
-      setFields(r.fields || []);
-      setDeskTitle((r.title || "").trim());
-      setLoaded(true);
-    }).catch(() => setLoaded(true));
-  }, []);
 
   const onChange = (fid, v) => setValues((prev) => ({ ...prev, [fid]: v }));
 
   const submit = async (e) => {
-    e.preventDefault();
+    if (submitting || !filled(e)) return;
     setErr("");
     setSubmitting(true);
     try {
-      // HTTP, not the bus: a visitor needs to hear a refused field, not "sent".
-      await api("./api/submit", { email: email.trim(), fields: values });
+      await api("POST", "/submit", { email: email.trim(), fields: values });
       setSentTo(email.trim());
     } catch (e2) {
-      // frame.api's message ends in the worker's JSON body: show its `error`.
-      const body = /: (\{.*\})$/.exec(e2.message || "");
-      let why = e2.message || String(e2);
-      try { why = JSON.parse(body[1]).error || why; } catch { /* not JSON */ }
-      setErr(why);
+      setErr(e2.message || String(e2));
     } finally {
       setSubmitting(false);
     }
@@ -95,8 +77,6 @@ function AnonForm() {
     setValues({});
     setErr("");
   };
-
-  if (!loaded) return html`<div class="hd-loading center">loading…</div>`;
 
   if (sentTo) {
     return html`<section class="hd-anon">
@@ -116,20 +96,20 @@ function AnonForm() {
   return html`<section class="hd-anon">
     <h1 class="hd-public-title">${deskTitle || "Send us a message"}</h1>
     <p class="hd-subtitle muted">We'll get back to you at the email you provide.</p>
-    <form class="stack" onSubmit=${submit}>
+    <div class="stack" data-form>
       ${err && html`<div class="hd-error">${err}</div>`}
       <div class="hd-field">
         <label for="hd-email">Email <span class="req">*</span></label>
         <input id="hd-email" type="email" required autocomplete="email" placeholder="you@example.com"
-          value=${email} onInput=${(e) => setEmail(e.target.value)} />
+          value=${email} onInput=${(e) => setEmail(e.target.value)} onKeyDown=${onEnter(submit)} />
       </div>
       ${fields.map((f) => html`<${CustomFieldInput} key=${f.id} field=${f} value=${values[f.id]} onChange=${(v) => onChange(f.id, v)} />`)}
       <div class="row" style="justify-content: flex-end; gap: var(--os-sp-sm);">
-        <button type="submit" disabled=${submitting}>
+        <button disabled=${submitting} onClick=${submit}>
           <i class="ph-light ph-paper-plane-tilt icon-sm"></i> Send
         </button>
       </div>
-    </form>
+    </div>
   </section>`;
 }
 
@@ -262,20 +242,19 @@ function NotesPanel({ submissionId, notes }) {
 
 function AddNoteForm({ onSubmit }) {
   const [val, setVal] = useState("");
-  const submit = (e) => {
-    e.preventDefault();
+  const submit = () => {
     const body = val.trim();
     if (!body) return;
     onSubmit(body);
     setVal("");
   };
-  return html`<form class="hd-note-form" onSubmit=${submit} style="margin-top: var(--os-sp-sm);">
-    <textarea rows="2" placeholder="Add a private note for your team…" required
+  return html`<div class="hd-note-form" style="margin-top: var(--os-sp-sm);">
+    <textarea rows="2" placeholder="Add a private note for your team…"
       value=${val} onInput=${(e) => setVal(e.target.value)}></textarea>
     <div class="row" style="justify-content: flex-end;">
-      <button type="submit" class="ghost"><i class="ph-light ph-plus icon-sm"></i> Add note</button>
+      <button class="ghost" onClick=${submit}><i class="ph-light ph-plus icon-sm"></i> Add note</button>
     </div>
-  </form>`;
+  </div>`;
 }
 
 function InboxView({ submissions, fields, openId, highlightId, notesBySub, setOpenId, onToggleNotes, ...handlers }) {
@@ -311,7 +290,7 @@ function FieldsView({ fields, onCreate, onSetRequired, onDelete, toast }) {
   const [optsRaw, setOptsRaw] = useState("");
 
   const submit = async (e) => {
-    e.preventDefault();
+    if (!filled(e)) return;
     const opts = type === "dropdown" ? optsRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
     if (type === "dropdown" && opts.length === 0) { toast("dropdown needs at least one option"); return; }
     await onCreate({ label: label.trim(), type, required, options: opts });
@@ -339,10 +318,10 @@ function FieldsView({ fields, onCreate, onSetRequired, onDelete, toast }) {
       </label>
       ${me.can_edit && html`<button class="ghost" title="Remove field" onClick=${() => onDelete(f.id)}><i class="ph-light ph-trash icon-sm"></i></button>`}
     </div>`)}
-    ${me.can_edit && html`<form class="hd-add-form" onSubmit=${submit}>
+    ${me.can_edit && html`<div class="hd-add-form" data-form>
       <div class="row">
         <input class="grow" type="text" placeholder="Field label (e.g. Phone number)" required
-          value=${label} onInput=${(e) => setLabel(e.target.value)} />
+          value=${label} onInput=${(e) => setLabel(e.target.value)} onKeyDown=${onEnter(submit)} />
         <select value=${type} onChange=${(e) => setType(e.target.value)}>
           <option value="text">Text</option>
           <option value="textarea">Textarea</option>
@@ -358,74 +337,64 @@ function FieldsView({ fields, onCreate, onSetRequired, onDelete, toast }) {
           value=${optsRaw} onInput=${(e) => setOptsRaw(e.target.value)} />
       </div>`}
       <div class="row" style="justify-content: flex-end;">
-        <button type="submit"><i class="ph-light ph-plus icon-sm"></i> Add field</button>
+        <button onClick=${submit}><i class="ph-light ph-plus icon-sm"></i> Add field</button>
       </div>
-    </form>`}
+    </div>`}
   </div>`;
 }
 
 function AdminView() {
   const [tab, setTab] = useState("inbox");
   const [submissions, setSubmissions] = useState([]);
-  const [fields, setFields] = useState([]);
+  const [fields, setFields] = useState(opened.fields || []);
   const [openId, setOpenId] = useState(null);
   const [highlightId, setHighlightId] = useState(null);
   const [notesBySub, setNotesBySub] = useState(new Map());
   const [toastMsg, setToastMsg] = useState(null);
-  const [deskTitle, setDeskTitle] = useState("");
+  const [deskTitle, setDeskTitle] = useState(opened.title || "");
 
-  // Mutable refs for the push handler to avoid stale closures.
-  const stateRef = useRef({ openId: null, sfi_id: me.sfi_id });
+  // What the push handler and the loaders read without a stale closure.
+  const stateRef = useRef({ openId: null, known: null, notes: notesBySub });
   stateRef.current.openId = openId;
+  stateRef.current.notes = notesBySub;
 
   const toast = (m) => setToastMsg(m);
+  const failed = (what) => (e) => toast(e.message || what);
 
-  const loadSubmissions = () => api("./api/admin/messages").then((r) => setSubmissions(r.submissions || []));
-  const loadFields = () => api("./api/admin/fields").then((r) => setFields(r.fields || []));
+  // The inbox as it stands. A message this page had not seen is the one that arrived.
+  const loadSubmissions = async () => {
+    const list = (await api("GET", "/admin/messages")).submissions || [];
+    const known = stateRef.current.known;
+    stateRef.current.known = new Set(list.map((s) => s.id));
+    setSubmissions(list);
+    if (stateRef.current.openId && !stateRef.current.known.has(stateRef.current.openId)) setOpenId(null);
+    const fresh = known && list.find((s) => !known.has(s.id));
+    if (fresh) {
+      setHighlightId(fresh.id);
+      setTimeout(() => setHighlightId(null), 1200);
+      toast(`New message from ${fresh.email}`);
+    }
+  };
+  const loadForm = () => api("GET", "/config").then((r) => { setFields(r.fields || []); setDeskTitle(r.title || ""); });
+  const loadNotes = (subId) => api("GET", `/admin/messages/${subId}/notes`).then(({ notes }) => {
+    setNotesBySub((prev) => { const m = new Map(prev); m.set(subId, notes || []); return m; });
+  });
 
-  useEffect(() => {
-    loadSubmissions().catch((e) => toast(e.message || "load failed"));
-    loadFields().catch((e) => toast(e.message || "load failed"));
-    api("./api/config").then((r) => setDeskTitle(r.title || "")).catch(() => {});
-    const hb = setInterval(() => { api("./api/admin/register", {}).catch(() => {}); }, 30_000);
-    return () => clearInterval(hb);
-  }, []);
+  useEffect(() => { loadSubmissions().catch(failed("load failed")); }, []);
 
   // Placement display name — saves on blur/Enter (mirrors roadmap's proj-name).
   const saveTitle = (v) => {
     const t = v.trim();
     if (t === deskTitle) return;
     setDeskTitle(t);
-    write("./api/admin/title", { title: t }, "PUT").catch((e) => toast(e.message || "rename failed"));
+    api("PUT", "/admin/title", { title: t }).catch(failed("rename failed"));
   };
 
+  // The worker says what changed and never what it holds: read it again, as whoever this is.
   useFramePush((d) => {
-    if (typeof d.type !== "string") return;
-    if (d.sfi_id && d.sfi_id !== stateRef.current.sfi_id) return;
-    if (d.type === "hd_new_submission" && d.id) {
-      // The push says only that something arrived; the inbox reads it through its gated route.
-      api("./api/admin/messages").then((r) => {
-        const list = r.submissions || [];
-        setSubmissions(list);
-        const sub = list.find((x) => x.id === d.id);
-        setHighlightId(d.id);
-        setTimeout(() => setHighlightId(null), 1200);
-        if (sub) toast(`New message from ${sub.email}`);
-      }).catch(() => {});
-    } else if (d.type === "hd_submission_updated") {
-      setSubmissions((prev) => prev.map((s) => s.id === d.id ? { ...s, status: d.status } : s));
-    } else if (d.type === "hd_submission_deleted") {
-      setSubmissions((prev) => prev.filter((s) => s.id !== d.id));
-      if (stateRef.current.openId === d.id) setOpenId(null);
-    } else if (d.type === "hd_note_added") {
-      api(`./api/admin/messages/${d.submission_id}/notes`).then(({ notes }) => {
-        setNotesBySub((prev) => { const m = new Map(prev); m.set(d.submission_id, notes || []); return m; });
-      }).catch(() => {});
-    } else if (d.type === "hd_fields_changed") {
-      loadFields().catch(() => {});
-    } else if (d.type === "hd_title_changed") {
-      setDeskTitle(d.title || "");
-    }
+    if (d.help_desk === "messages") loadSubmissions().catch(() => {});
+    else if (d.help_desk === "notes") for (const id of stateRef.current.notes.keys()) loadNotes(id).catch(() => {});
+    else if (d.help_desk === "form") loadForm().catch(() => {});
   });
 
   useEffect(() => {
@@ -434,46 +403,27 @@ function AdminView() {
     return () => clearTimeout(id);
   }, [toastMsg]);
 
-  const setStatus = async (id, status) => {
-    try {
-      await write(`./api/admin/messages/${id}/status`, { status }, "PUT");
-    } catch (e) { toast(e.message || "update failed"); }
-  };
+  const setStatus = (id, status) =>
+    api("PUT", `/admin/messages/${id}/status`, { status }).then(loadSubmissions).catch(failed("update failed"));
   const deleteSubmission = async (id) => {
     if (!(await frame.confirm("Delete this message and all its notes?", { danger: true, okLabel: "Delete" }))) return;
-    try {
-      await api(`./api/admin/messages/${id}`, null, "DELETE");
-    } catch (e) { toast(e.message || "delete failed"); }
+    await api("DELETE", `/admin/messages/${id}`).then(loadSubmissions).catch(failed("delete failed"));
   };
-  // No response over the bus — the hd_note_added push (which reaches the sender too)
-  // has the notes re-read.
-  const addNote = async (id, body) => {
-    try {
-      await write(`./api/admin/messages/${id}/notes`, { body });
-    } catch (e) { toast(e.message || "failed"); }
-  };
+  const addNote = (id, body) =>
+    api("POST", `/admin/messages/${id}/notes`, { body }).then(({ notes }) => {
+      setNotesBySub((prev) => { const m = new Map(prev); m.set(id, notes || []); return m; });
+    }).catch(failed("failed"));
   const fetchNotes = (subId) => {
     if (notesBySub.has(subId)) return;
-    api(`./api/admin/messages/${subId}/notes`).then(({ notes }) => {
-      setNotesBySub((prev) => { const m = new Map(prev); m.set(subId, notes || []); return m; });
-    }).catch(() => {});
+    loadNotes(subId).catch(() => {});
   };
 
-  // No response over the bus — the hd_fields_changed push (which reaches the sender
-  // too) triggers the field reload.
-  const createField = async (payload) => {
-    try {
-      await write("./api/admin/fields", payload);
-    } catch (e) { toast(e.message || "failed"); }
-  };
-  const setFieldRequired = async (fid, required) => {
-    try { await write(`./api/admin/fields/${fid}`, { required }, "PUT"); }
-    catch (e) { toast(e.message || "failed"); await loadFields(); }
-  };
+  const createField = (payload) => api("POST", "/admin/fields", payload).then(loadForm).catch(failed("failed"));
+  const setFieldRequired = (fid, required) =>
+    api("PUT", `/admin/fields/${fid}`, { required }).catch(failed("failed")).then(loadForm);
   const deleteField = async (fid) => {
     if (!(await frame.confirm("Remove this field?", { danger: true, okLabel: "Remove" }))) return;
-    try { await api(`./api/admin/fields/${fid}`, null, "DELETE"); await loadFields(); }
-    catch (e) { toast(e.message || "failed"); }
+    await api("DELETE", `/admin/fields/${fid}`).then(loadForm).catch(failed("failed"));
   };
 
   const newCount = submissions.filter((s) => s.status === "new").length;
@@ -513,7 +463,16 @@ function App() {
   return me.is_anon ? html`<${AnonForm} />` : html`<${AdminView} />`;
 }
 
-render(html`<${App}/>`, document.getElementById("app"));
+const app = document.getElementById("app");
+try {
+  await window.seamside.ready;
+  opened = await api("GET", "/config");
+  me = { is_anon: !opened.you.member, can_edit: !!opened.you.editor };
+  if (opened.color) applyChannel(document.body, opened.color);
+  render(html`<${App}/>`, app);
+} catch (e) {
+  render(html`<div class="hd-error">${e.message || String(e)}</div>`, app);
+}
   </script>
 </body>
 </html>

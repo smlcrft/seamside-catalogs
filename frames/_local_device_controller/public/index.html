@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Local Device</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     body { margin: 0; font-family: var(--os-font-sans, system-ui, sans-serif);
            background: var(--os-bg); color: var(--os-text); }
@@ -145,8 +145,18 @@
 <body>
 <main id="root"></main>
 <script type="module">
-  import { frame, html, render, useState, useEffect, useRef, useFramePush, Modal }
-    from "./lib/js/framelib.js";
+  import { html, render, useState, useEffect, useRef, useFramePush, Modal }
+    from "/lib/js/framelib.js";
+
+  // Everything this page knows comes from its own server half, which decides who
+  // may see and do what; a refusal comes back in the worker's own words.
+  async function api(method, path, body) {
+    const r = await window.seamside.fetch(`/api${path}`, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+    let v = {};
+    try { v = r.json(); } catch { /* the status says it */ }
+    if (!r.ok) throw new Error(v.error || "action failed");
+    return v;
+  }
 
   const HISTORY = 120;
 
@@ -416,7 +426,10 @@
     const [sheet, setSheet] = useState(false);
     const [busy, setBusy] = useState(false);
     const seriesRef = useRef({});
-    // The push handler registers once, so it would close over a stale `pending`.
+    // The value each key held at the last read, to tell an echo from no change.
+    const devRef = useRef(null);
+    useEffect(() => { devRef.current = dev; }, [dev]);
+    // `load` runs from a timer set once, so it would close over a stale `pending`.
     const pendingRef = useRef({});
     const palette = useChannelPalette();
 
@@ -426,9 +439,12 @@
       return next;
     });
 
-    async function load() {
+    // `tick`: the push said the device reported, so the values read now are a
+    // new sample for the plots and may settle what we sent.
+    async function load(tick = false) {
       try {
-        const d = await frame.api("api/device");
+        const d = await api("GET", "/device");
+        if (tick && d?.values) onValues(d.values);
         setDev(d);
         if (d?.views) setViews(d.views);
         // Non-members never receive this — their hidden keys are simply absent
@@ -436,61 +452,63 @@
         setHidden(Array.isArray(d?.hidden) ? d.hidden : []);
       } catch (e) { console.error(e); }
     }
-    useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+    useEffect(() => { load(); const t = setInterval(() => load(), 5000); return () => clearInterval(t); }, []);
 
+    const failed = (e) => { setErr(e.message || "action failed"); setPending({}); };
     // §6.1: a value we sent is PENDING until the device echoes it. Never write
     // back a value we received — that is a feedback loop, not a change.
     const onSet = (key, value, echoes = true) => {
       setErr("");
       if (echoes) setPending(p => ({ ...p, [key]: String(value) }));
       else setDrafts(d => { const o = { ...d }; delete o[key]; return o; });
-      frame.busSend({ type: "set", key, value });
+      api("POST", "/set", { key, value }).catch(failed);
     };
-    const onRead = (name) => { setErr(""); frame.busSend({ type: "read", name }); };
+    const onRead = (name) => { setErr(""); api("POST", "/read", { name }).catch(failed); };
     const onRun = (command) => {
       setErr("");
-      frame.busSend({ type: "run", command, args: cmdArgs[command] ?? {} });
+      api("POST", "/run", { command, args: cmdArgs[command] ?? {} }).catch(failed);
     };
     const setDraft = (key, v) => setDrafts(d => ({ ...d, [key]: v }));
     const setArg = (cmd, arg, v) => setCmdArgs(a => ({ ...a, [cmd]: { ...(a[cmd] ?? {}), [arg]: v } }));
+    // A settings change is re-read from the answer; the push brings everyone else.
+    const settle = (p) => p.catch(failed).finally(() => { setBusy(false); load(); });
     const onView = (key, mode) => {
       setViews(v => ({ ...v, [key]: mode }));   // optimistic: it is a display choice
-      frame.busSend({ type: "set_view", key, mode });
+      settle(api("PUT", "/settings/view", { key, mode }));
     };
-    const onPublic = (enabled) => { setBusy(true); setErr(""); frame.busSend({ type: "set_public_control", enabled }); };
-    // Optimistic: the reply triggers a reload, which is what settles it.
+    const onPublic = (enabled) => { setBusy(true); setErr(""); settle(api("PUT", "/settings/public_control", { enabled })); };
     const onHide = (key, enabled) => {
       setHidden(h => enabled ? [...new Set([...h, key])] : h.filter(x => x !== key));
-      frame.busSend({ type: "set_hidden", key, enabled });
+      settle(api("PUT", "/settings/hidden", { key, enabled }));
     };
 
-    useFramePush({
-      device_tick: (msg) => {
-        const vals = msg?.values ?? {};
-        const next = { ...seriesRef.current };
-        for (const [k, raw] of Object.entries(vals)) {
-          const n = parseFloat(raw);
-          if (Number.isFinite(n)) next[k] = [...(next[k] ?? []), n].slice(-HISTORY);
-        }
-        seriesRef.current = next;
-        setSeries(next);
-        setDev(d => d ? { ...d, values: { ...d.values, ...vals } } : d);
-        // A draft clears ONLY when it was a write we sent and the echo came
-        // back. Clearing on any tick would reset a field being typed into — at
-        // 10 Hz that eats focus and the caret.
-        const settled = Object.keys(vals).filter(k => k in pendingRef.current);
-        if (settled.length) {
-          setPending(p => { const o = { ...p }; for (const k of settled) delete o[k]; return o; });
-          setDrafts(d => { const o = { ...d }; for (const k of settled) delete o[k]; return o; });
-        }
-      },
-      act_result: (msg) => {
-        setBusy(false);
-        if (msg?.ok) return;
-        setErr(msg?.error || "action failed");
-        setPending({});
-      },
-      settings_changed: () => { setBusy(false); load(); },
+    // A new sample, as read after the device reported.
+    function onValues(vals) {
+      const was = devRef.current?.values ?? {};
+      const next = { ...seriesRef.current };
+      for (const [k, raw] of Object.entries(vals)) {
+        const n = parseFloat(raw);
+        if (Number.isFinite(n)) next[k] = [...(next[k] ?? []), n].slice(-HISTORY);
+      }
+      seriesRef.current = next;
+      setSeries(next);
+      // A draft clears ONLY when it was a write we sent and the echo came
+      // back — a key whose value moved, or now reads what we sent. Clearing on
+      // any tick would reset a field being typed into — at 10 Hz that eats
+      // focus and the caret.
+      const settled = Object.keys(pendingRef.current)
+        .filter(k => k in vals && (vals[k] !== was[k] || vals[k] === pendingRef.current[k]));
+      if (settled.length) {
+        setPending(p => { const o = { ...p }; for (const k of settled) delete o[k]; return o; });
+        setDrafts(d => { const o = { ...d }; for (const k of settled) delete o[k]; return o; });
+      }
+    }
+
+    // A push names what to read again and carries nothing else.
+    useFramePush((d) => {
+      const what = d?.local_device_controller;
+      if (what === "values") load(true);
+      else if (what === "settings") load();
     });
 
     if (!dev) return html`<main><p class="note">loading…</p></main>`;
@@ -565,6 +583,7 @@
     </main>`;
   }
 
+  await window.seamside.ready;
   render(html`<${App} />`, document.getElementById("root"));
 </script>
 </body>

@@ -7,10 +7,11 @@
 //   data_storage:   (none) + settings-per-sfi — the live still is deliberately EPHEMERAL:
 //                                          it lives in a module-level Map on the host and is
 //                                          never written to disk. Only the rung and the
-//                                          title persist, as `camjam.*` keys of
-//                                          `frameSettings(sfi_id)` (a table every frame in
-//                                          the space shares, hence the prefix).
-//   view_realtime:  view-collaborative   — every new still pushes a tick to all viewers.
+//                                          title persist, as `camjam.*` rows of the
+//                                          `__fc_settings` table (one every frame in the
+//                                          space shares, hence the prefix).
+//   view_realtime:  view-collaborative   — every new still pushes a tick to all viewers;
+//                                          the tick says to read again and carries nothing.
 //   settings_scope: settings-per-sfi     — each space is its own independent feed.
 //
 // WHO CAN WATCH — the space's own sharing, not a setting in here
@@ -27,12 +28,8 @@
 //   `getUserMedia()` only when a member explicitly presses "share" — a viewer who never
 //   shares never has their camera opened.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parsePeerInfo, pushToInstance, onUiMessage,
-  sanitizeText, toIntOrNull, frameSettings,
-} from "@frame-core";
-
-type Peer = ReturnType<typeof parsePeerInfo>;
+import type { Ctx } from "@frame-core";
+import { sanitizeText, toIntOrNull } from "@frame-core";
 
 // ----- The cadence ladder ----------------------------------------------------------------
 // Interval and still width move TOGETHER, as one rung. They're the same trade seen from
@@ -99,147 +96,184 @@ type Live = {
   stale_ms: number; // silence after which this holder loses the slot (rung-derived)
   max_b64: number;  // biggest still this holder may send (rung-derived)
 };
-const live = new Map<string, Live>();   // sfi_id → the space's current broadcast
+const live = new Map<string, Live>();   // ctx.frame → that session's current broadcast
 
-/** The space's live broadcast, or null if there is none / the sharer went quiet. */
-function current(sfiId: string): Live | null {
-  const l = live.get(sfiId);
+/** The session's live broadcast, or null if there is none / the sharer went quiet. */
+function current(ctx: Ctx): Live | null {
+  const l = live.get(ctx.frame);
   if (!l) return null;
-  if (Date.now() - l.sent_ms > l.stale_ms) { live.delete(sfiId); return null; }
+  if (Date.now() - l.sent_ms > l.stale_ms) { live.delete(ctx.frame); return null; }
   return l;
 }
 
-function tick(sfiId: string, seq: number): void {
-  pushToInstance(sfiId, { type: "cam_tick", seq });
-}
+// Says to read /api/state again, and nothing of what it holds.
+const tick = (ctx: Ctx) => ctx.push({ camjam: "feed" });
 
 // ----- Persisted prefs (per space) -------------------------------------------------------
 // The rung and the title are the ONLY things this frame persists. Who may watch is
 // deliberately not among them: that is the space's sharing (see WHO CAN WATCH above).
 const DEFAULT_TITLE = "My CamJam Feed";
+const SETTINGS = "__fc_settings";   // one row per key, the value as JSON under `v`
 const KEY_INTERVAL = "camjam.interval_ms";
 const KEY_TITLE = "camjam.title";
 const MAX_TITLE = 80;
 
-async function readPrefs(sfiId: string): Promise<{ step: Step; title: string }> {
-  const s = frameSettings(sfiId);
-  const [ms, title] = await Promise.all([
-    s.get<number>(KEY_INTERVAL),
-    s.get<string>(KEY_TITLE),
-  ]);
+const settings = (ctx: Ctx) => ctx.table<Record<string, unknown>>(SETTINGS);
+
+async function setting(ctx: Ctx, key: string): Promise<unknown> {
+  const row = await settings(ctx).get(key);
+  if (row?.v == null) return null;
+  try { return JSON.parse(String(row.v)); } catch { return null; }
+}
+
+/** Write a setting over its row, stamped when it was made and when it changed. */
+async function setSetting(ctx: Ctx, key: string, value: unknown): Promise<void> {
+  const was = await settings(ctx).get(key);
+  const now = Date.now();
+  await settings(ctx).upsert({ ...(was ?? { _created_at: now }), id: key, v: JSON.stringify(value), _modified_at: now });
+}
+
+async function readPrefs(ctx: Ctx): Promise<{ step: Step; title: string }> {
+  const [ms, title] = await Promise.all([setting(ctx, KEY_INTERVAL), setting(ctx, KEY_TITLE)]);
   return { step: stepFor(ms), title: sanitizeText(title, MAX_TITLE) || DEFAULT_TITLE };
 }
 
-// ----- UI writes (BusUiToFrame — the still-frame path) -----------------------------------
-// Reads stay on HTTP GETs; every write, the per-second still included, arrives here.
-onUiMessage(async (sfiId, data, peer: Peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  const holder = current(sfiId);
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
+
+async function body(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+// ----- Writes ----------------------------------------------------------------------------
+// Every write, the per-interval still included, is a route that decides on ctx.peer.
+async function write(op: string, request: Request, ctx: Ctx): Promise<Response> {
+  const peer = ctx.peer;
+  const member = peer.is_sfi_member || peer.is_owner;
+  const holder = current(ctx);
 
   // Claim (or TAKE OVER) the single share slot. Members only — Viewer-role members
   // included, since "any member may share their camera" is the point of the frame.
-  if (d.op === "claim") {
-    if (!peer.is_sfi_member) return;
+  if (op === "claim") {
+    if (!member) return refuse(403, "only members can share");
     const seq = (holder?.seq ?? 0) + 1;
-    const { step } = await readPrefs(sfiId);
-    live.set(sfiId, {
+    const { step } = await readPrefs(ctx);
+    live.set(ctx.frame, {
       user_id: peer.user_id || "",
       user_name: sanitizeText(peer.user_name, 80) || "someone",
       jpeg: "", sent_ms: Date.now(), seq,
       stale_ms: staleWindow(step.ms), max_b64: maxB64(step.w),
     });
-    return tick(sfiId, seq);
+    tick(ctx);
+    return json({ ok: true });
   }
 
-  // A still from the current holder. A sender who has been taken over is silently
-  // dropped here; their own next /api/state read tells their UI to shut the camera off.
-  if (d.op === "f") {
-    if (!peer.is_sfi_member || !holder || holder.user_id !== (peer.user_id || "")) return;
+  // A still from the current holder. A sender who has been taken over is refused; their
+  // own next /api/state read tells their UI to shut the camera off.
+  if (op === "still") {
+    if (!member) return refuse(403, "only members can share");
+    if (!holder || holder.user_id !== (peer.user_id || "")) return refuse(409, "not sharing");
+    const d = await body(request);
     const jpeg = typeof d.jpeg === "string" ? d.jpeg : "";
-    if (!jpeg || jpeg.length > holder.max_b64) return;
-    const seq = holder.seq + 1;
-    live.set(sfiId, { ...holder, jpeg, sent_ms: Date.now(), seq });
-    return tick(sfiId, seq);
+    if (!jpeg) return refuse(400, "jpeg required");
+    if (jpeg.length > holder.max_b64) return refuse(413, "still too large");
+    live.set(ctx.frame, { ...holder, jpeg, sent_ms: Date.now(), seq: holder.seq + 1 });
+    tick(ctx);
+    return json({ ok: true });
   }
 
   // Stop the feed — the holder ending their own share, or the owner cutting it.
-  if (d.op === "stop") {
-    if (!holder) return;
-    if (holder.user_id !== (peer.user_id || "") && !peer.is_owner) return;
-    live.delete(sfiId);
-    return tick(sfiId, holder.seq + 1);
+  if (op === "stop") {
+    if (!holder) return json({ ok: true });
+    if (holder.user_id !== (peer.user_id || "") && !peer.is_owner) return refuse(403, "not yours to stop");
+    live.delete(ctx.frame);
+    tick(ctx);
+    return json({ ok: true });
   }
 
   // Rename the feed. MEMBER-gated, not owner-gated: the title is a label on shared
   // furniture, in the same class as claiming the camera, and it edits in place in the
   // header rather than hiding in the owner's settings sheet. Blank resets to the default
   // at read time rather than being rejected, so clearing the field is a real gesture.
-  if (d.op === "title") {
-    if (!peer.is_sfi_member) return;
-    await frameSettings(sfiId).set(KEY_TITLE, sanitizeText(d.title, MAX_TITLE));
-    return tick(sfiId, current(sfiId)?.seq ?? 0);
+  if (op === "title") {
+    if (!member) return refuse(403, "only members can rename the feed");
+    await setSetting(ctx, KEY_TITLE, sanitizeText((await body(request)).title, MAX_TITLE));
+    tick(ctx);
+    return json({ ok: true });
   }
 
   // Owner-only settings.
-  if (d.op === "settings") {
-    if (!peer.is_owner) return;
+  if (op === "settings") {
+    if (!peer.is_owner) return refuse(403, "only the owner changes settings");
+    const d = await body(request);
+    if (d.interval_ms === undefined) return refuse(400, "interval_ms required");
     // Snapped to a rung on the way in, so the stored value is always on the ladder.
-    if (d.interval_ms === undefined) return;
-    await frameSettings(sfiId).set(KEY_INTERVAL, stepFor(d.interval_ms).ms);
+    const step = stepFor(d.interval_ms);
+    await setSetting(ctx, KEY_INTERVAL, step.ms);
     // A live sharer's limits were sized from the OLD rung. Re-derive both, or moving to a
     // slower rung would evict them before their next still lands, and moving to a wider
     // one would bounce every still for being over the previous rung's cap.
-    const h = current(sfiId);
+    const h = current(ctx);
     if (h) {
-      const { step } = await readPrefs(sfiId);
       h.stale_ms = staleWindow(step.ms);
       h.max_b64 = maxB64(step.w);
     }
-    return tick(sfiId, h?.seq ?? 0);
+    tick(ctx);
+    return json({ ok: true });
   }
-});
+
+  return refuse(404, "not found");
+}
 
 // ----- HTTP ------------------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, _body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const peer = ctx.peer;
 
-  // Static assets — open to everyone; the members-only gate is on the feed, not the shell.
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    // Static assets — open to everyone; the members-only gate is on the feed, not the shell.
+    if (!pathname.startsWith("/api/")) {
+      if (request.method !== "GET") return refuse(404, "not found");
+      return ctx.file(pathname);
+    }
 
-  // The one read endpoint: identity + the rung + the current still. Re-fetched on every
-  // cam_tick, so it is deliberately small and self-contained. Reaching this at all means
-  // the platform already admitted the caller (member, or a stranger to a published frame),
-  // so the still is not gated again here — only SHARING is.
-  if (reqPath === "/api/state" && method === "GET") {
-    const { step, title } = await readPrefs(peer.sfi_id);
-    const l = current(peer.sfi_id);
-    return jsonReply(replyPort, 200, {
-      is_sfi_member: peer.is_sfi_member,
-      is_owner: peer.is_owner,
-      user_id: peer.user_id,
-      user_name: peer.user_name,
-      space_color: peer.space_color,
-      can_share: peer.is_sfi_member,
-      title,
-      // The rung, resolved host-side: the frontend never derives a width from an
-      // interval, so the two can't drift apart across app versions.
-      interval_ms: step.ms,
-      still_w: step.w,
-      // Only the owner's picker needs the whole ladder; every other viewer would carry
-      // it on every tick for nothing. Undefined keys drop out of the JSON.
-      steps: peer.is_owner ? STEPS : undefined,
-      // `age_ms` rather than a wall-clock stamp: the viewer anchors it against its own
-      // clock on arrival, so the "live-ness" caption can't be thrown off by clock skew.
-      live: l
-        ? { user_name: l.user_name, is_me: l.user_id === (peer.user_id || ""), jpeg: l.jpeg, age_ms: Date.now() - l.sent_ms, seq: l.seq }
-        : null,
-    });
-  }
+    // The one read endpoint: identity + the rung + the current still. Re-fetched on every
+    // tick, so it is deliberately small and self-contained. Reaching this at all means
+    // the platform already admitted the caller (member, or a stranger to a published frame),
+    // so the still is not gated again here — only SHARING is.
+    if (pathname === "/api/state" && request.method === "GET") {
+      const { step, title } = await readPrefs(ctx);
+      const l = current(ctx);
+      const member = peer.is_sfi_member || peer.is_owner;
+      return json({
+        is_sfi_member: member,
+        is_owner: peer.is_owner,
+        user_id: peer.user_id,
+        user_name: peer.user_name,
+        space_color: peer.space_color,
+        can_share: member,
+        title,
+        // The rung, resolved host-side: the frontend never derives a width from an
+        // interval, so the two can't drift apart across app versions.
+        interval_ms: step.ms,
+        still_w: step.w,
+        // Only the owner's picker needs the whole ladder; every other viewer would carry
+        // it on every tick for nothing. Undefined keys drop out of the JSON.
+        steps: peer.is_owner ? STEPS : undefined,
+        // `age_ms` rather than a wall-clock stamp: the viewer anchors it against its own
+        // clock on arrival, so the "live-ness" caption can't be thrown off by clock skew.
+        live: l
+          ? { user_name: l.user_name, is_me: l.user_id === (peer.user_id || ""), jpeg: l.jpeg, age_ms: Date.now() - l.sent_ms, seq: l.seq }
+          : null,
+      });
+    }
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    if (request.method === "POST") return write(pathname.slice(5), request, ctx);
+    return refuse(404, "not found");
+  },
 };
-
-log("CamJam frame is up and running!");

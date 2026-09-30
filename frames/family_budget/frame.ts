@@ -2,28 +2,33 @@
 // Family Budget — an envelope-lite family budget: money in, money out, one month at a time.
 //
 // Design axes:
-//   privacy:        privacy-public-view  — non-members get a live read-only view;
-//                                           space editors record income and expenses.
+//   privacy:        privacy-public-view  — anyone who reaches the frame gets a live
+//                                           read-only view of the month; space editors
+//                                           record income and expenses. The page reads no
+//                                           table: the month comes from GET /api/month,
+//                                           and every write is a route here.
 //   data_storage:   the space's tables   — `budget_categories` and `budget_transactions`
 //                                           (`<name>.table.jsonl` at the space's root),
 //                                           synced with the space.
-//   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so every viewer refreshes live.
-//   settings_scope: the space            — the currency symbol is a frameSettings row
-//                                           (`budget_currency`) of the space.
+//   view_realtime:  view-collaborative    — every write pushes `{ family_budget: "month" }`,
+//                                           which says what to read again and never what
+//                                           it holds, so every open page refreshes live.
+//   settings_scope: the space            — the currency symbol is the `budget_currency`
+//                                           row of `__fc_settings`, its value JSON under `v`.
 //
 // Categories carry a channel (c1–c12) as their identity color, an income flag, and a
 // monthly budget (the envelope; 0 = no envelope set, income categories never have one).
 // Transactions carry a category row id, an always-positive amount, an optional note,
 // and a plain ISO date (yyyy-mm-dd) — month filtering is a string-prefix compare.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, frameSettings,
-  declareTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText } from "@frame-core";
 
 // ----- Schemas ----------------------------------------------------------------------------
+const CATEGORIES = "budget_categories";
+const TRANSACTIONS = "budget_transactions";
+const SETTINGS = "__fc_settings";
+
 const CATEGORIES_SCHEMA = [
   { name: "name",           col_type: "text" as const,    nullable: false, default_val: "" },
   { name: "channel",        col_type: "text" as const,    nullable: false, default_val: "c1" },
@@ -39,15 +44,43 @@ const TRANSACTIONS_SCHEMA = [
 
 // ----- The space's tables, named for this frame so no other frame's rows land in them ---
 declareTables([
-  { key: "budget_categories",   title: "Budget Categories",   description: "Income and expense categories of this space's budget.", schema: CATEGORIES_SCHEMA },
-  { key: "budget_transactions", title: "Budget Transactions", description: "Transactions of this space's budget.",                  schema: TRANSACTIONS_SCHEMA },
+  { key: CATEGORIES,   title: "Budget Categories",   description: "Income and expense categories of this space's budget.", schema: CATEGORIES_SCHEMA },
+  { key: TRANSACTIONS, title: "Budget Transactions", description: "Transactions of this space's budget.",                  schema: TRANSACTIONS_SCHEMA },
 ]);
 
-type Tbl = ReturnType<typeof table>;
-type Peer = ReturnType<typeof parsePeerInfo>;
+type Row = Record<string, unknown> & { id: string };
+type Schema = typeof CATEGORIES_SCHEMA | typeof TRANSACTIONS_SCHEMA;
 
-function dataTables(sfiId: string): { categories: Tbl; transactions: Tbl } {
-  return { categories: table("budget_categories", sfiId), transactions: table("budget_transactions", sfiId) };
+const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+
+const defaultsOf = (schema: Schema): Record<string, unknown> => Object.fromEntries(
+  schema.map((c) => [c.name, c.col_type === "text" ? c.default_val : Number(c.default_val)]),
+);
+const DEFAULTS: Record<string, Record<string, unknown>> = {
+  [CATEGORIES]: defaultsOf(CATEGORIES_SCHEMA),
+  [TRANSACTIONS]: defaultsOf(TRANSACTIONS_SCHEMA),
+  [SETTINGS]: {},
+};
+
+/** Write a row over what it held (a new one from the schema's defaults), stamped. */
+async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await rows(ctx, name).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx, name).upsert({
+    ...(was ?? { ...DEFAULTS[name], _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+async function currency(ctx: Ctx): Promise<string> {
+  const row = await rows(ctx, SETTINGS).get("budget_currency");
+  try {
+    return (row?.v == null ? "" : String(JSON.parse(String(row.v)))) || "$";
+  } catch {
+    return "$";
+  }
 }
 
 const CHANNEL_RE = /^c([1-9]|1[0-2])$/;
@@ -65,22 +98,23 @@ function today(): string {
 }
 
 // ----- Queries --------------------------------------------------------------------------
-// All joins and aggregation happen here in TS over plain table queries; the month filter
-// is a string-prefix compare on the ISO date column.
-async function monthData(categories: Tbl, transactions: Tbl, month: string) {
-  const { rows: cats } = await categories.query({ order_by: [{ col: "_created_at" }] });
-  const { rows: allTx } = await transactions.query({});
+// All joins and aggregation happen here over the tables' rows; the month filter is a
+// string-prefix compare on the ISO date column.
+async function monthData(ctx: Ctx, month: string) {
+  const cats = (await rows(ctx, CATEGORIES).all())
+    .sort((a, b) => Number(a._created_at ?? 0) - Number(b._created_at ?? 0));
+  const allTx = await rows(ctx, TRANSACTIONS).all();
   const prefix = month + "-";
   const txMonth = allTx.filter((t) => String(t.date).startsWith(prefix));
   txMonth.sort((a, b) =>
-    String(b.date).localeCompare(String(a.date)) || (b._created_at - a._created_at));
+    String(b.date).localeCompare(String(a.date)) || (Number(b._created_at ?? 0) - Number(a._created_at ?? 0)));
 
   const spent = new Map<string, number>();
   for (const t of txMonth) {
     const k = String(t.category_id);
     spent.set(k, (spent.get(k) ?? 0) + Number(t.amount));
   }
-  const catById = new Map<string, (typeof cats)[number]>(cats.map((c) => [c._row_id, c]));
+  const catById = new Map<string, Row>(cats.map((c) => [c.id, c]));
   let income = 0, expenses = 0;
   for (const t of txMonth) {
     const c = catById.get(String(t.category_id));
@@ -89,14 +123,14 @@ async function monthData(categories: Tbl, transactions: Tbl, month: string) {
   }
   return {
     categories: cats.map((c) => ({
-      id: c._row_id, name: c.name, channel: c.channel,
+      id: c.id, name: c.name, channel: c.channel,
       is_income: Number(c.is_income), monthly_budget: Number(c.monthly_budget),
-      spent: spent.get(c._row_id) ?? 0,
+      spent: spent.get(c.id) ?? 0,
     })),
     transactions: txMonth.map((t) => {
       const c = catById.get(String(t.category_id));
       return {
-        id: t._row_id, category_id: t.category_id,
+        id: t.id, category_id: t.category_id,
         category_name: c ? c.name : "", channel: c ? c.channel : "c1",
         is_income: c ? Number(c.is_income) : 0,
         amount: Number(t.amount), note: t.note, date: t.date,
@@ -106,88 +140,90 @@ async function monthData(categories: Tbl, transactions: Tbl, month: string) {
   };
 }
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "budget_changed" });
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx) => ctx.push({ family_budget: "month" });
+
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+
+// deno-lint-ignore no-explicit-any
+async function body(request: Request): Promise<Record<string, any> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 // ----- Writes ---------------------------------------------------------------------------
-// One shared mutation path for BOTH transports: the bus dispatcher below (frame.busSend →
-// onUiMessage, the primary write path) and the HTTP POST arm in onNetworkRequest (kept for
-// older viewers whose framelib has no busSend). `op` is the API path with "api/" stripped
-// (e.g. "tx/<id>/delete"); `v` is the parsed payload. Role gates live here so the two
-// entry points can never drift. Writes answer { ok: true } — viewers, the sender
-// included, render from the budget_changed push.
-type WriteResult = { status: number; body: unknown };
+// `op` is the API path with "/api/" stripped (e.g. "tx/<id>/delete"); `v` is the parsed
+// payload. Writes answer { ok: true }; every page, the writer's included, reads again.
+// deno-lint-ignore no-explicit-any
+async function write(ctx: Ctx, op: string, v: Record<string, any> | null): Promise<Response> {
+  // Every op below mutates state and is editor-only: strangers AND viewer-role members
+  // are refused by the same gate.
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return json({ error: "editors only" }, 403);
 
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const { categories, transactions } = dataTables(sfiId);
-
-  // Every op below mutates state and is editor-only. Non-members AND Viewer-role
-  // members are rejected with the same gate (never gate writes on is_sfi_member —
-  // Viewer-role members would slip through).
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-
-  const ok = (): WriteResult => {
-    notify(sfiId);
-    return { status: 200, body: { ok: true } };
+  const ok = () => {
+    tell(ctx);
+    return json({ ok: true });
   };
 
   // --- The space's settings ------------------------------------------------------------
   if (op === "settings") {
-    await frameSettings(sfiId).set("budget_currency", sanitizeText(v?.currency, 4) || "$");
+    await keep(ctx, SETTINGS, "budget_currency", { v: JSON.stringify(sanitizeText(v?.currency, 4) || "$") });
     return ok();
   }
 
   // --- Categories -------------------------------------------------------------------------
   if (op === "category") {
     const name = sanitizeText(v?.name, 60);
-    if (!name) return { status: 400, body: { error: "name required" } };
+    if (!name) return json({ error: "name required" }, 400);
     const channelRaw = typeof v?.channel === "string" ? v.channel : "";
-    const existing = (await categories.query({})).rows.length;
+    const existing = (await rows(ctx, CATEGORIES).all()).length;
     const channel = CHANNEL_RE.test(channelRaw) ? channelRaw : `c${(existing % 12) + 1}`;
-    await categories.upsert(null, {
-      name, channel, is_income: v?.is_income ? 1 : 0, monthly_budget: 0,
-    });
+    await keep(ctx, CATEGORIES, null, { name, channel, is_income: v?.is_income ? 1 : 0, monthly_budget: 0 });
     return ok();
   }
 
   if (op.startsWith("category/")) {
     const [id, action] = op.slice("category/".length).split("/");
-    const row = id ? await categories.get(id) : null;
-    if (!id || !row) return { status: 400, body: { error: "bad id" } };
+    const row = id ? await rows(ctx, CATEGORIES).get(id) : null;
+    if (!id || !row) return json({ error: "bad id" }, 400);
     if (action === "delete") {
-      await transactions.deleteWhere({ category_id: id });
-      await categories.delete(id);
+      for (const t of await rows(ctx, TRANSACTIONS).all()) {
+        if (t.category_id === id) await rows(ctx, TRANSACTIONS).delete(t.id);
+      }
+      await rows(ctx, CATEGORIES).delete(id);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
+    const next: Record<string, unknown> = {};
     if (v?.name !== undefined) {
       const name = sanitizeText(v.name, 60);
-      if (name) await categories.upsert(id, { name });
+      if (name) next.name = name;
     }
-    if (typeof v?.channel === "string" && CHANNEL_RE.test(v.channel)) {
-      await categories.upsert(id, { channel: v.channel });
-    }
+    if (typeof v?.channel === "string" && CHANNEL_RE.test(v.channel)) next.channel = v.channel;
     if (v?.monthly_budget !== undefined) {
       // The envelope: a non-negative number; income categories never carry one.
-      if (Number(row.is_income) === 1) {
-        await categories.upsert(id, { monthly_budget: 0 });
-      } else {
+      if (Number(row.is_income) === 1) next.monthly_budget = 0;
+      else {
         const n = Number(v.monthly_budget);
-        if (Number.isFinite(n) && n >= 0) await categories.upsert(id, { monthly_budget: n });
+        if (Number.isFinite(n) && n >= 0) next.monthly_budget = n;
       }
     }
+    if (Object.keys(next).length) await keep(ctx, CATEGORIES, id, next);
     return ok();
   }
 
   // --- Transactions -----------------------------------------------------------------------
   if (op === "tx") {
     const categoryId = typeof v?.category_id === "string" ? v.category_id : "";
-    if (!categoryId || !(await categories.get(categoryId))) return { status: 400, body: { error: "bad category" } };
+    if (!categoryId || !(await rows(ctx, CATEGORIES).get(categoryId))) return json({ error: "bad category" }, 400);
     const amount = Math.abs(Number(v?.amount));
-    if (!Number.isFinite(amount) || amount <= 0) return { status: 400, body: { error: "amount required" } };
+    if (!Number.isFinite(amount) || amount <= 0) return json({ error: "amount required" }, 400);
     const dateRaw = typeof v?.date === "string" ? v.date : "";
-    await transactions.upsert(null, {
+    await keep(ctx, TRANSACTIONS, null, {
       category_id: categoryId, amount,
       note: sanitizeText(v?.note, 200),
       date: DATE_RE.test(dateRaw) ? dateRaw : today(),
@@ -197,94 +233,71 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
 
   if (op.startsWith("tx/")) {
     const [id, action] = op.slice("tx/".length).split("/");
-    if (!id || !(await transactions.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!id || !(await rows(ctx, TRANSACTIONS).get(id))) return json({ error: "bad id" }, 400);
     if (action === "delete") {
-      await transactions.delete(id);
+      await rows(ctx, TRANSACTIONS).delete(id);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
-    if (typeof v?.category_id === "string" && v.category_id && (await categories.get(v.category_id))) {
-      await transactions.upsert(id, { category_id: v.category_id });
+    if (action) return json({ error: "not found" }, 404);
+    const next: Record<string, unknown> = {};
+    if (typeof v?.category_id === "string" && v.category_id && (await rows(ctx, CATEGORIES).get(v.category_id))) {
+      next.category_id = v.category_id;
     }
     if (v?.amount !== undefined) {
       const amount = Math.abs(Number(v.amount));
-      if (Number.isFinite(amount) && amount > 0) await transactions.upsert(id, { amount });
+      if (Number.isFinite(amount) && amount > 0) next.amount = amount;
     }
-    if (v?.note !== undefined) {
-      await transactions.upsert(id, { note: sanitizeText(v.note, 200) });
-    }
-    if (typeof v?.date === "string" && DATE_RE.test(v.date)) {
-      await transactions.upsert(id, { date: v.date });
-    }
+    if (v?.note !== undefined) next.note = sanitizeText(v.note, 200);
+    if (typeof v?.date === "string" && DATE_RE.test(v.date)) next.date = v.date;
+    if (Object.keys(next).length) await keep(ctx, TRANSACTIONS, id, next);
     return ok();
   }
 
-  return { status: 404, body: { error: "not found" } };
+  return json({ error: "not found" }, 404);
 }
 
-// ----- Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame) --------
-// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; the
-// role gates live inside handleWrite. Denials are logged, not answered — a legitimate
-// client never sends a write it isn't allowed to make.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`budget: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
-
 // ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname, searchParams } = new URL(request.url);
+    const editor = ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+    const member = editor || ctx.peer.is_sfi_member;
 
-  // Static assets — open to everyone, including anon read-only viewers.
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    // Static assets — open to everyone, including read-only visitors.
+    if (request.method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  // Identity probe — drives which render mode the frontend shows.
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
-
-  // Writes — the HTTP arm of the shared write path (see handleWrite above).
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
-
-  const { categories, transactions } = dataTables(sfiId);
-
-  // Read — open to everyone (non-members get a read-only view of the month).
-  if (reqPath === "/api/month" && method === "GET") {
-    const monthRaw = typeof query?.month === "string" ? query.month : "";
-    const month = MONTH_RE.test(monthRaw) ? monthRaw : new Date().toISOString().slice(0, 7);
-    // First-open seeding: an editor's first look at an empty budget lands the starter
-    // categories (no transactions, no envelopes preset). Never seeded for read-only
-    // viewers — a GET from a viewer must not mutate.
-    if (peer.is_sfi_editor && (await categories.query({ limit: 1 })).rows.length === 0) {
-      for (const [name, channel, isIncome] of SEED_CATEGORIES) {
-        await categories.upsert(null, { name, channel, is_income: isIncome, monthly_budget: 0 });
-      }
+    // Who the door says is asking — drives which render mode the page shows.
+    if (pathname === "/api/whoami" && request.method === "GET") {
+      return json({
+        is_anon:       ctx.peer.is_anon,
+        is_sfi_member: member,
+        is_sfi_editor: editor,
+        is_owner:      ctx.peer.is_owner,
+        user_id:       ctx.peer.user_id,
+        user_name:     ctx.peer.user_name,
+        space_color:   ctx.peer.space_color,
+      });
     }
-    return jsonReply(replyPort, 200, {
-      month,
-      settings: { currency: await frameSettings(sfiId).get<string>("budget_currency", "$") || "$" },
-      ...(await monthData(categories, transactions, month)),
-    });
-  }
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    if (pathname.startsWith("/api/") && (request.method === "POST" || request.method === "PUT")) {
+      return write(ctx, pathname.slice("/api/".length), await body(request));
+    }
+
+    // Read — open to everyone (a read-only view of the month).
+    if (pathname === "/api/month" && request.method === "GET") {
+      const monthRaw = searchParams.get("month") ?? "";
+      const month = MONTH_RE.test(monthRaw) ? monthRaw : new Date().toISOString().slice(0, 7);
+      // First-open seeding: an editor's first look at an empty budget lands the starter
+      // categories (no transactions, no envelopes preset). Never for read-only visitors —
+      // a GET from them must not write.
+      if (editor && (await rows(ctx, CATEGORIES).all()).length === 0) {
+        for (const [name, channel, isIncome] of SEED_CATEGORIES) {
+          await keep(ctx, CATEGORIES, null, { name, channel, is_income: isIncome, monthly_budget: 0 });
+        }
+      }
+      return json({ month, settings: { currency: await currency(ctx) }, ...(await monthData(ctx, month)) });
+    }
+
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Family Budget frame is up and running!");

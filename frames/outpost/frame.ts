@@ -1,41 +1,29 @@
 // ----------------------------------------------------------------------------------------
-// Outpost — a lightweight public posting board, one per space (sfi_id).
+// Outpost — a lightweight public posting board, one per session of the frame.
 //
 // Members (editors) publish short posts to share with the world; anyone with the frame's
 // share link can read them. A post carries the author's name, the moment it was shared,
 // free text (with auto-clickable URLs handled frontend-side), an optional light "kind"
 // (thought / question / status / announcement), optional attached media (image / audio /
-// video / file), and an optional brief poll that any reader may vote in.
+// video / file), and an optional brief poll that any signed-in reader may vote in.
 //
 // The feed is served in reverse-chronological pages (newest first) via a keyset cursor on
 // created_ms, so a long-running community's board stays cheap to load and scroll.
 //
-// Design axes:
-//   privacy:        privacy-public-view  — three tiers. Non-members and Viewer-role members
-//                                           get a read-only feed; editors (Contributor+ / owner)
-//                                           get the composer. Writes are gated on
-//                                           `peer.is_sfi_editor`, NEVER on `is_sfi_member`.
-//                                           (Poll voting is a softer gate — any real Seamside
-//                                           user may vote, member or not, but NOT anonymous
-//                                           web viewers, who see results read-only.)
-//   data_storage:   the space's tables    — outpost_posts / outpost_media / outpost_votes,
-//                                           table files at the space's root, synced with it.
-//                                           Attached media are files of the space under
-//                                           Outpost/<post_id>/, served by this worker to
-//                                           everyone who reads the board.
-//   view_realtime:  view-collaborative    — every mutation calls pushToInstance so all viewers
-//                                           refresh live.
-//   settings_scope: settings-per-sfi      — peer.sfi_id (in v1, the space being served).
+// Who may do what, decided here on ctx.peer (the page reads no table and writes no row):
+//   - anyone: reads the feed, its media and live poll results.
+//   - anyone signed in (any role, or a visitor not on the roster): votes in polls.
+//   - editors (collaborator and up; the owner alone when the owner says so): post.
+//   - the owner, or the editor who wrote it: deletes a post.
+//   - the owner: sets the heading, tagline and who may post.
+//
+// Posts, media rows and votes are the space's tables (outpost_posts / outpost_media /
+// outpost_votes). Attached media are files of the space under Outpost/<post_id>/, served
+// by this worker to everyone who reads the board. Settings are rows of __fc_settings.
+// Every write pushes what to read again; each open page reads again as whoever it is.
 // ----------------------------------------------------------------------------------------
-import {
-  log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance, onUiMessage,
-  spaceFiles, serveFileAtPath, sanitizeText, clampInt, toIntOrNull,
-  declareTables, ensureTables, table, frameSettings,
-} from "@frame-core";
-
-type Peer = ReturnType<typeof parsePeerInfo>;
-type Tbl = ReturnType<typeof table>;
-type Settings = ReturnType<typeof frameSettings>;
+import type { Ctx, FrameTableDecl, PeerInfo } from "@frame-core";
+import { clampInt, declareTables, sanitizeText, toIntOrNull } from "@frame-core";
 
 // ----- Shapes ---------------------------------------------------------------------------
 type Kind = "thought" | "question" | "status" | "announcement";
@@ -48,6 +36,7 @@ type Prefs = {
 };
 const DEFAULT_PREFS: Prefs = { title: "Outpost", tagline: "", who_can_post: "editors" };
 
+type Row = Record<string, unknown> & { id: string };
 // A post as read back from the table (poll_options is a JSON string or null).
 type PostRow = {
   id: string; author: string; author_user_id: string; created_ms: number;
@@ -74,9 +63,15 @@ function postDir(postId: string): string {
 }
 
 // ----- The space's tables (named for this frame, so no other frame's rows land in them) --
-declareTables([
+const POSTS = "outpost_posts";
+const MEDIA = "outpost_media";
+const VOTES = "outpost_votes";
+// Every frame in the space shares this store, so the keys carry this frame's name.
+const SETTINGS = "__fc_settings";
+
+const TABLES: FrameTableDecl[] = [
   {
-    key: "outpost_posts",
+    key: POSTS,
     title: "Outpost Posts",
     description: "Published posts for this outpost, newest first.",
     schema: [
@@ -89,7 +84,7 @@ declareTables([
     ],
   },
   {
-    key: "outpost_media",
+    key: MEDIA,
     title: "Outpost Media",
     description: "Attached media; `path` is the file in the space (Outpost/<post_id>/<name>).",
     schema: [
@@ -102,7 +97,7 @@ declareTables([
     ],
   },
   {
-    key: "outpost_votes",
+    key: VOTES,
     title: "Outpost Votes",
     description: "One poll vote per (post, voter); re-voting replaces the choice.",
     schema: [
@@ -111,17 +106,61 @@ declareTables([
       { name: "choice",  col_type: "integer", nullable: false, default_val: "0" },
     ],
   },
-]);
+];
+declareTables(TABLES);
 
-interface Tables { settings: Settings; posts: Tbl; media: Tbl; votes: Tbl; }
+// ----- Rows -----------------------------------------------------------------------------
+const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
 
-// Prefs live in the space's frameSettings store, which every frame in the space shares —
-// so the keys are prefixed with this frame's name.
-async function getPrefs(t: Tables): Promise<Prefs> {
+/** The defaults a new row of `name` starts from, as the schema declares them. */
+function defaultsOf(name: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const c of TABLES.find((t) => t.key === name)?.schema ?? []) {
+    if (c.default_val === undefined) continue;
+    out[c.name] = c.col_type === "integer" || c.col_type === "real" ? Number(c.default_val) : c.default_val;
+  }
+  return out;
+}
+
+/** Write a row over what it held (a new one over the schema's defaults), stamped when it
+ *  was made and when it changed. */
+async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await rows(ctx, name).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx, name).upsert({
+    ...(was ?? { ...defaultsOf(name), _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+/** Order by these columns, each ascending; `-name` descends. */
+function by(...cols: string[]) {
+  return (a: Row, b: Row) => {
+    for (const c of cols) {
+      const [name, dir] = c.startsWith("-") ? [c.slice(1), -1] : [c, 1];
+      const x = a[name], y = b[name];
+      const d = typeof x === "number" && typeof y === "number" ? x - y : String(x ?? "").localeCompare(String(y ?? ""));
+      if (d) return dir * d;
+    }
+    return 0;
+  };
+}
+
+// ----- Settings -------------------------------------------------------------------------
+async function setting<T>(ctx: Ctx, key: string): Promise<T | null> {
+  const row = await rows(ctx, SETTINGS).get(key);
+  if (row?.v == null) return null;
+  try { return JSON.parse(String(row.v)) as T; } catch { return null; }
+}
+const setSetting = (ctx: Ctx, key: string, value: unknown) => keep(ctx, SETTINGS, key, { v: JSON.stringify(value) });
+
+async function getPrefs(ctx: Ctx): Promise<Prefs> {
   const [title, tagline, who] = await Promise.all([
-    t.settings.get<string>("outpost_title"),
-    t.settings.get<string>("outpost_tagline"),
-    t.settings.get<string>("outpost_who_can_post"),
+    setting<string>(ctx, "outpost_title"),
+    setting<string>(ctx, "outpost_tagline"),
+    setting<string>(ctx, "outpost_who_can_post"),
   ]);
   return {
     title: title || DEFAULT_PREFS.title,
@@ -130,18 +169,18 @@ async function getPrefs(t: Tables): Promise<Prefs> {
   };
 }
 
-async function setPrefs(t: Tables, next: Prefs): Promise<void> {
+async function setPrefs(ctx: Ctx, next: Prefs): Promise<void> {
   await Promise.all([
-    t.settings.set("outpost_title", next.title),
-    t.settings.set("outpost_tagline", next.tagline),
-    t.settings.set("outpost_who_can_post", next.who_can_post),
+    setSetting(ctx, "outpost_title", next.title),
+    setSetting(ctx, "outpost_tagline", next.tagline),
+    setSetting(ctx, "outpost_who_can_post", next.who_can_post),
   ]);
 }
 
-function rowToPost(r: any): PostRow {
+function rowToPost(r: Row): PostRow {
   return {
-    id: r._row_id, author: r.author, author_user_id: r.author_user_id,
-    created_ms: r.created_ms, kind: r.kind, text: r.text,
+    id: r.id, author: String(r.author ?? ""), author_user_id: String(r.author_user_id ?? ""),
+    created_ms: Number(r.created_ms) || 0, kind: String(r.kind ?? ""), text: String(r.text ?? ""),
     poll_options: (r.poll_options as string | null) ?? null,
   };
 }
@@ -159,19 +198,19 @@ function safeName(raw: unknown): string {
 }
 
 // ----- Permission predicates ------------------------------------------------------------
-function canPost(peer: Peer, prefs: Prefs): boolean {
+function canPost(peer: PeerInfo, prefs: Prefs): boolean {
   return prefs.who_can_post === "owner" ? peer.is_owner : peer.is_sfi_editor;
 }
-function canDeletePost(peer: Peer, authorUserId: string): boolean {
+function canDeletePost(peer: PeerInfo, authorUserId: string): boolean {
   return peer.is_owner || (peer.is_sfi_editor && !!peer.user_id && authorUserId === peer.user_id);
 }
 // Poll voting is for anyone who signed in — any role, or a visitor not on the roster
 // (`is_anon` means "not on the roster"; `user_id` is set once someone signs in).
 // Nobody-named readers see live results only. A voter is identified by their user_id.
-function voterId(peer: Peer): string {
+function voterId(peer: PeerInfo): string {
   return peer.user_id ? "u:" + peer.user_id : "";
 }
-function canVote(peer: Peer): boolean {
+function canVote(peer: PeerInfo): boolean {
   return voterId(peer) !== "";
 }
 
@@ -181,34 +220,32 @@ function publicMedia(m: MediaRow) {
   return { id: m.id, name: m.name, mime: m.mime, size: m.size, is_image: k.image, is_video: k.video, is_audio: k.audio };
 }
 
-// Project a set of post rows into the public shape, scoping media + vote lookups to just
-// these ids (one grouped query each) so a page stays cheap regardless of total feed size.
-async function projectPosts(t: Tables, rows: PostRow[], peer: Peer, vkey: string) {
-  if (!rows.length) return [];
-  const ids = rows.map((r) => r.id);
+async function mediaOf(ctx: Ctx, ids: Set<string>): Promise<Row[]> {
+  return (await rows(ctx, MEDIA).all()).filter((r) => ids.has(String(r.post_id))).sort(by("post_id", "ord"));
+}
+
+// Project a set of post rows into the public shape, with media and votes for just these ids.
+async function projectPosts(ctx: Ctx, list: PostRow[], vkey: string) {
+  if (!list.length) return [];
+  const ids = new Set(list.map((r) => r.id));
 
   const mediaByPost = new Map<string, MediaRow[]>();
-  const { rows: mediaRows } = await t.media.query({
-    where: { post_id: { in: ids } },
-    order_by: [{ col: "post_id" }, { col: "ord" }],
-  });
-  for (const r of mediaRows) {
-    const m: MediaRow = { id: r._row_id, post_id: r.post_id as string, name: r.name as string, mime: r.mime as string, size: r.size as number, path: r.path as string };
+  for (const r of await mediaOf(ctx, ids)) {
+    const m: MediaRow = { id: r.id, post_id: String(r.post_id), name: String(r.name ?? ""), mime: String(r.mime ?? ""), size: Number(r.size) || 0, path: String(r.path ?? "") };
     (mediaByPost.get(m.post_id) ?? mediaByPost.set(m.post_id, []).get(m.post_id)!).push(m);
   }
-  // Poll tallies: COUNT(*) per (post, choice), done by the table layer.
+  // Poll tallies per (post, choice), and this voter's own choice.
   const countsByPost = new Map<string, Map<number, number>>();
-  for (const g of await t.votes.countBy(["post_id", "choice"], { where: { post_id: { in: ids } } })) {
-    const pid = g.post_id as string;
-    (countsByPost.get(pid) ?? countsByPost.set(pid, new Map()).get(pid)!).set(Number(g.choice), Number(g._count));
-  }
   const myByPost = new Map<string, number>();
-  if (vkey) {
-    const { rows: mine } = await t.votes.query({ where: { voter: vkey, post_id: { in: ids } } });
-    for (const r of mine) myByPost.set(r.post_id as string, Number(r.choice));
+  for (const v of await rows(ctx, VOTES).all()) {
+    const pid = String(v.post_id);
+    if (!ids.has(pid)) continue;
+    const cm = countsByPost.get(pid) ?? countsByPost.set(pid, new Map()).get(pid)!;
+    cm.set(Number(v.choice), (cm.get(Number(v.choice)) || 0) + 1);
+    if (vkey && v.voter === vkey) myByPost.set(pid, Number(v.choice));
   }
 
-  return rows.map((p) => {
+  return list.map((p) => {
     let poll = null;
     if (p.poll_options) {
       let options: string[] = [];
@@ -228,259 +265,217 @@ async function projectPosts(t: Tables, rows: PostRow[], peer: Peer, vkey: string
       text: p.text,
       media: (mediaByPost.get(p.id) || []).map(publicMedia),
       poll,
-      can_delete: canDeletePost(peer, p.author_user_id),
+      can_delete: canDeletePost(ctx.peer, p.author_user_id),
     };
   });
 }
 
 // One reverse-chronological page. `before` (a created_ms cursor) is null for the first page.
-async function pagePayload(t: Tables, peer: Peer, vkey: string, before: number | null, limit: number) {
-  const { rows } = await t.posts.query({
-    where: before == null ? undefined : { created_ms: { lt: before } },
-    order_by: [{ col: "created_ms", dir: "desc" }, { col: "_created_at", dir: "desc" }],
-    limit: limit + 1,
-  });
-  const posts = rows.map(rowToPost);
-  const has_more = posts.length > limit;
-  const page = has_more ? posts.slice(0, limit) : posts;
+async function pagePayload(ctx: Ctx, before: number | null, limit: number) {
+  const all = (await rows(ctx, POSTS).all())
+    .filter((r) => before == null || (Number(r.created_ms) || 0) < before)
+    .sort(by("-created_ms", "-_created_at"))
+    .map(rowToPost);
+  const has_more = all.length > limit;
+  const page = all.slice(0, limit);
   return {
-    posts: await projectPosts(t, page, peer, vkey),
+    posts: await projectPosts(ctx, page, voterId(ctx.peer)),
     has_more,
     next_before: page.length ? page[page.length - 1].created_ms : null,
   };
 }
 
-async function projectOne(t: Tables, id: string, peer: Peer, vkey: string) {
-  const row = await t.posts.get(id);
-  return row ? (await projectPosts(t, [rowToPost(row)], peer, vkey))[0] : null;
+async function projectOne(ctx: Ctx, id: string, vkey: string) {
+  const row = await rows(ctx, POSTS).get(id);
+  return row ? (await projectPosts(ctx, [rowToPost(row)], vkey))[0] : null;
 }
 
-function tablesFor(sfiId: string): Tables {
-  return {
-    settings: frameSettings(sfiId),
-    posts: table("outpost_posts", sfiId),
-    media: table("outpost_media", sfiId),
-    votes: table("outpost_votes", sfiId),
-  };
+// ----- Routes ---------------------------------------------------------------------------
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx, what: "posts" | "prefs") => ctx.push({ outpost: what });
+
+async function body(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
 }
 
-// ----- Writes ---------------------------------------------------------------------------
-// One shared implementation per JSON write, used by both the HTTP arms and the bus
-// dispatcher below so validation and role gates can never drift. `op` is the API path
-// with the leading "api/" stripped. Returns the HTTP-shaped { status, body } — the bus
-// path discards it (fire-and-forget; state reaches every viewer, sender included, via
-// the outpost_changed pushes). Media upload is binary and stays HTTP-only.
-type MutResult = { status: number; body: unknown };
+// Create a post (metadata only; media is uploaded afterward). Editors only.
+async function post(ctx: Ctx, v: Record<string, unknown>): Promise<Response> {
+  if (!canPost(ctx.peer, await getPrefs(ctx))) return refuse(403, "editors only");
+  const text = sanitizeText(v.text, MAX_TEXT);
+  const kind: Kind = KINDS.includes(v.kind as Kind) ? (v.kind as Kind) : "thought";
 
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>, peer: Peer): Promise<MutResult> {
-  const ready = ensureTables(peer);
-  if (!ready.ready) return { status: 503, body: { error: "table not bound" } };
-  const t = tablesFor(sfiId);
-
-  // Create a post (metadata only; media is uploaded afterward over HTTP). Editors only.
-  if (op === "post") {
-    const prefs = await getPrefs(t);
-    if (!canPost(peer, prefs)) return { status: 403, body: { error: "editors only" } };
-    const text = sanitizeText(v.text, MAX_TEXT);
-    const kind: Kind = KINDS.includes(v.kind as Kind) ? (v.kind as Kind) : "thought";
-
-    let pollJson: string | null = null;
-    if (Array.isArray(v.poll_options)) {
-      const options = v.poll_options
-        .map((o: unknown) => sanitizeText(o, MAX_OPTION_LEN))
-        .filter((o: string) => o.length > 0)
-        .slice(0, MAX_POLL_OPTIONS);
-      if (options.length >= MIN_POLL_OPTIONS) pollJson = JSON.stringify(options);
-    }
-    const mediaToFollow = clampInt(toIntOrNull(v.media_count) ?? 0, 0, MAX_MEDIA_PER_POST) > 0;
-    if (!text && !pollJson && !mediaToFollow) return { status: 400, body: { error: "a post needs text, a poll, or media" } };
-
-    const { row_id } = await t.posts.upsert(null, {
-      author: peer.user_name || "Someone", author_user_id: peer.user_id || "",
-      created_ms: Date.now(), kind, text, poll_options: pollJson,
-    });
-    pushToInstance(sfiId, { type: "outpost_changed" });
-    return { status: 200, body: { post_id: row_id, post: await projectOne(t, row_id, peer, voterId(peer)) } };
+  let pollJson: string | null = null;
+  if (Array.isArray(v.poll_options)) {
+    const options = v.poll_options
+      .map((o: unknown) => sanitizeText(o, MAX_OPTION_LEN))
+      .filter((o: string) => o.length > 0)
+      .slice(0, MAX_POLL_OPTIONS);
+    if (options.length >= MIN_POLL_OPTIONS) pollJson = JSON.stringify(options);
   }
+  const mediaToFollow = clampInt(toIntOrNull(v.media_count) ?? 0, 0, MAX_MEDIA_PER_POST) > 0;
+  if (!text && !pollJson && !mediaToFollow) return refuse(400, "a post needs text, a poll, or media");
 
-  // Vote in a poll (see canVote); everyone else is rejected here and doesn't see the control. One vote per user_id; re-voting replaces the
-  // previous choice. Returns just the updated post so the reader's scroll position is untouched.
-  if (op === "vote") {
-    if (!canVote(peer)) return { status: 403, body: { error: "sign in to Seamside to vote" } };
-    const vkey = voterId(peer);
-    const post = typeof v.post_id === "string" && v.post_id ? await t.posts.get(v.post_id) : null;
-    if (!post || !post.poll_options) return { status: 404, body: { error: "poll not found" } };
-    let options: string[] = [];
-    try { options = JSON.parse(post.poll_options as string); } catch { /* corrupt */ }
-    const opt = clampInt(Number(v.option), 0, options.length - 1);
-    if (Number(v.option) !== opt) return { status: 400, body: { error: "bad option" } };
-    // One vote per (post, voter): a stable id makes re-voting an in-place replace
-    // (and blocks the concurrent-vote race that a query-then-upsert(null) would fork).
-    await t.votes.upsert(`${post._row_id}:${vkey}`, {
-      post_id: post._row_id, voter: vkey, choice: opt,
-    });
-    pushToInstance(sfiId, { type: "outpost_changed" });
-    return { status: 200, body: { post: await projectOne(t, post._row_id, peer, vkey) } };
-  }
-
-  // Delete a post (owner, or the editor who wrote it). Removes its media rows + files too.
-  if (op.startsWith("delete/")) {
-    const postId = op.slice("delete/".length);
-    if (!ID_RE.test(postId)) return { status: 400, body: { error: "bad id" } };
-    const post = await t.posts.get(postId);
-    if (!post) return { status: 404, body: { error: "not found" } };
-    if (!canDeletePost(peer, post.author_user_id as string)) return { status: 403, body: { error: "not allowed" } };
-    await t.votes.deleteWhere({ post_id: postId });
-    await t.media.deleteWhere({ post_id: postId });
-    await t.posts.delete(postId);
-    await spaceFiles.remove(postDir(postId)).catch(() => { /* no media */ });
-    pushToInstance(sfiId, { type: "outpost_changed" });
-    return { status: 200, body: { ok: true } };
-  }
-
-  // Owner-only: update this outpost's heading, tagline, and who-can-post setting.
-  if (op === "prefs") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    await setPrefs(t, {
-      title: sanitizeText(v.title, MAX_TITLE) || DEFAULT_PREFS.title,
-      tagline: sanitizeText(v.tagline, MAX_TAGLINE),
-      who_can_post: v.who_can_post === "owner" ? "owner" : "editors",
-    });
-    pushToInstance(sfiId, { type: "outpost_changed" });
-    return { status: 200, body: { prefs: await getPrefs(t) } };
-  }
-
-  return { status: 404, body: { error: "not found" } };
+  const row = await keep(ctx, POSTS, null, {
+    author: ctx.peer.user_name || "Someone", author_user_id: ctx.peer.user_id || "",
+    created_ms: Date.now(), kind, text, poll_options: pollJson,
+  });
+  tell(ctx, "posts");
+  return json({ post_id: row.id, post: await projectOne(ctx, row.id, voterId(ctx.peer)) });
 }
 
-// BUS DISPATCHER — the frontend's write path (frame.busSend → BusUiToFrame → here).
-// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; the
-// role gates live inside handleWrite. Denials are logged, not answered — a legitimate
-// client never sends a write it isn't allowed to make.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`outpost: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+// Vote in a poll (see canVote). One vote per user_id; re-voting replaces the previous
+// choice. Returns just the updated post so the reader's scroll position is untouched.
+async function vote(ctx: Ctx, v: Record<string, unknown>): Promise<Response> {
+  if (!canVote(ctx.peer)) return refuse(403, "sign in to Seamside to vote");
+  const vkey = voterId(ctx.peer);
+  const found = typeof v.post_id === "string" && v.post_id ? await rows(ctx, POSTS).get(v.post_id) : null;
+  if (!found || !found.poll_options) return refuse(404, "poll not found");
+  let options: string[] = [];
+  try { options = JSON.parse(found.poll_options as string); } catch { /* corrupt */ }
+  const opt = clampInt(Number(v.option), 0, options.length - 1);
+  if (Number(v.option) !== opt) return refuse(400, "bad option");
+  // One vote per (post, voter): a stable id makes re-voting an in-place replace.
+  await keep(ctx, VOTES, `${found.id}:${vkey}`, { post_id: found.id, voter: vkey, choice: opt });
+  tell(ctx, "posts");
+  return json({ post: await projectOne(ctx, found.id, vkey) });
+}
 
-// ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
+// Delete a post (owner, or the editor who wrote it), with its votes, media rows and files.
+async function remove(ctx: Ctx, postId: string): Promise<Response> {
+  if (!ID_RE.test(postId)) return refuse(400, "bad id");
+  const found = await rows(ctx, POSTS).get(postId);
+  if (!found) return refuse(404, "not found");
+  if (!canDeletePost(ctx.peer, String(found.author_user_id ?? ""))) return refuse(403, "not allowed");
+  for (const r of await rows(ctx, VOTES).all()) if (r.post_id === postId) await rows(ctx, VOTES).delete(r.id);
+  for (const r of await rows(ctx, MEDIA).all()) if (r.post_id === postId) await rows(ctx, MEDIA).delete(r.id);
+  await rows(ctx, POSTS).delete(postId);
+  await ctx.files.remove(postDir(postId)).catch(() => { /* no media */ });
+  tell(ctx, "posts");
+  return json({ ok: true });
+}
 
-  // Static assets — open to everyone (all tiers need the shell to render).
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
+// Attach media to a post you just created. Bytes ride in the raw body, name in ?name=.
+async function attach(ctx: Ctx, postId: string, request: Request, query: URLSearchParams): Promise<Response> {
+  if (!ID_RE.test(postId)) return refuse(400, "bad post id");
+  if (!canPost(ctx.peer, await getPrefs(ctx))) return refuse(403, "editors only");
+  const found = await rows(ctx, POSTS).get(postId);
+  if (!found) return refuse(404, "post not found");
+  if (!canDeletePost(ctx.peer, String(found.author_user_id ?? ""))) return refuse(403, "not your post");
+  const ord = (await mediaOf(ctx, new Set([postId]))).length;
+  if (ord >= MAX_MEDIA_PER_POST) return refuse(409, `max ${MAX_MEDIA_PER_POST} attachments`);
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.byteLength > MAX_MEDIA_MB * 1024 * 1024) return refuse(413, `file exceeds ${MAX_MEDIA_MB} MB`);
+
+  const name = safeName(query.get("name"));
+  const mime = sanitizeText(query.get("mime"), 120) || "application/octet-stream";
+  // Two attachments of one name get "name (2).ext".
+  const taken = new Set((await ctx.files.list(postDir(postId)).catch(() => [])).map((e) => e.name));
+  let file = name;
+  for (let n = 2; taken.has(file); n++) file = name.replace(/(\.[^.]*)?$/, (ext) => ` (${n})${ext}`);
+  const filePath = `${postDir(postId)}/${file}`;
+  const media = await keep(ctx, MEDIA, null, { post_id: postId, name, mime, size: bytes.byteLength, ord, path: filePath });
+  try {
+    await ctx.files.write(filePath, bytes);
+  } catch (e) {
+    await rows(ctx, MEDIA).delete(media.id);
+    return refuse(500, "failed to store media: " + e);
   }
+  tell(ctx, "posts");
+  return json({ ok: true });
+}
 
-  const ready = ensureTables(peer);
-  if (!ready.ready) return jsonReply(replyPort, 503, { error: "table not bound" });
-  const t = tablesFor(peer.sfi_id);
+// Serve a media file inline (anyone with the link may view it).
+async function serveMedia(ctx: Ctx, rest: string): Promise<Response> {
+  const parts = rest.split("/");
+  if (parts.length !== 2 || !ID_RE.test(parts[0]) || !ID_RE.test(parts[1])) return refuse(400, "bad path");
+  const [postId, mediaId] = parts;
+  const media = await rows(ctx, MEDIA).get(mediaId);
+  if (!media || media.post_id !== postId) return refuse(404, "not found");
+  // Only a file of this post's folder is served, whatever a row says.
+  const filePath = String(media.path ?? "");
+  if (!filePath.startsWith(postDir(postId) + "/")) return refuse(404, "not found");
+  const buf = await ctx.files.read(filePath).catch(() => null);
+  if (!buf) return refuse(404, "not found");
+  const mediaName = String(media.name ?? "file");
+  const asciiName = mediaName.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+  return new Response(buf as Uint8Array<ArrayBuffer>, {
+    headers: {
+      "content-type": String(media.mime || "application/octet-stream"),
+      "content-disposition": `inline; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(mediaName)}`,
+    },
+  });
+}
 
-  // Identity + prefs + the FIRST page of the feed, in one round trip. ?limit= lets a
-  // live-refresh re-request the range already on screen.
-  if (reqPath === "/api/state" && method === "GET") {
-    const prefs = await getPrefs(t);
-    const limit = clampInt(toIntOrNull(query.limit) ?? DEFAULT_PAGE, 1, MAX_PAGE);
-    return jsonReply(replyPort, 200, {
-      me: {
-        is_anon: peer.is_anon, signed_in: !!peer.user_id, is_sfi_member: peer.is_sfi_member,
-        is_sfi_editor: peer.is_sfi_editor, is_owner: peer.is_owner,
-        user_name: peer.user_name, space_color: peer.space_color,
-      },
-      prefs,
-      can_post: canPost(peer, prefs),
-      can_vote: canVote(peer),
-      ...(await pagePayload(t, peer, voterId(peer), null, limit)),
-    });
-  }
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const url = new URL(request.url);
+    const { pathname } = url;
+    const method = request.method;
+    const peer = ctx.peer;
 
-  // Older pages: ?before=<created_ms cursor>&limit=  (public — read-only feed).
-  if (reqPath === "/api/posts" && method === "GET") {
-    const before = toIntOrNull(query.before);
-    const limit = clampInt(toIntOrNull(query.limit) ?? DEFAULT_PAGE, 1, MAX_PAGE);
-    return jsonReply(replyPort, 200, await pagePayload(t, peer, voterId(peer), before, limit));
-  }
-
-  // HTTP arms kept for API compatibility (older viewers, the with-media composer flow);
-  // the frame's own UI writes over the bus (see the dispatcher above). Same handleWrite,
-  // same gates, either way.
-  if (reqPath === "/api/post" && method === "POST") {
-    const r = await handleWrite(peer.sfi_id, "post", parseJsonBody<Record<string, unknown>>(body) || {}, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
-
-  // Attach media to a post you just created. Bytes ride in the raw body, name in ?name=.
-  if (reqPath.startsWith("/api/post/") && reqPath.endsWith("/media") && method === "POST") {
-    const postId = reqPath.slice("/api/post/".length, -"/media".length);
-    if (!ID_RE.test(postId)) return jsonReply(replyPort, 400, { error: "bad post id" });
-    if (!canPost(peer, await getPrefs(t))) return jsonReply(replyPort, 403, { error: "editors only" });
-    const post = await t.posts.get(postId);
-    if (!post) return jsonReply(replyPort, 404, { error: "post not found" });
-    if (!canDeletePost(peer, post.author_user_id as string)) return jsonReply(replyPort, 403, { error: "not your post" });
-    const ord = (await t.media.query({ where: { post_id: postId }, limit: 1 })).total;
-    if (ord >= MAX_MEDIA_PER_POST) return jsonReply(replyPort, 409, { error: `max ${MAX_MEDIA_PER_POST} attachments` });
-    if (body.byteLength > MAX_MEDIA_MB * 1024 * 1024) return jsonReply(replyPort, 413, { error: `file exceeds ${MAX_MEDIA_MB} MB` });
-
-    const name = safeName(query.name);
-    const mime = sanitizeText(query.mime, 120) || "application/octet-stream";
-    // Two attachments of one name get "name (2).ext".
-    const taken = new Set((await spaceFiles.list(postDir(postId)).catch(() => [])).map((e) => e.name));
-    let file = name;
-    for (let n = 2; taken.has(file); n++) file = name.replace(/(\.[^.]*)?$/, (ext) => ` (${n})${ext}`);
-    const filePath = `${postDir(postId)}/${file}`;
-    const { row_id: mediaId } = await t.media.upsert(null, {
-      post_id: postId, name, mime, size: body.byteLength, ord, path: filePath,
-    });
-    try {
-      await spaceFiles.write(filePath, new Uint8Array(body));
-    } catch (e) {
-      await t.media.delete(mediaId);
-      return jsonReply(replyPort, 500, { error: "failed to store media: " + e });
+    // The page and its assets — open to everyone (every tier needs the shell to render).
+    if (!pathname.startsWith("/api/")) {
+      if (method !== "GET") return refuse(404, "not found");
+      return ctx.file(pathname);
     }
-    pushToInstance(peer.sfi_id, { type: "outpost_changed" });
-    return jsonReply(replyPort, 200, { ok: true });
-  }
 
-  // Serve a media file inline (public — anyone with the link may view it).
-  if (reqPath.startsWith("/api/media/") && method === "GET") {
-    const parts = reqPath.slice("/api/media/".length).split("/");
-    if (parts.length !== 2 || !ID_RE.test(parts[0]) || !ID_RE.test(parts[1])) {
-      return jsonReply(replyPort, 400, { error: "bad path" });
+    // Identity + prefs + the FIRST page of the feed, in one round trip. ?limit= lets a
+    // live-refresh re-request the range already on screen.
+    if (pathname === "/api/state" && method === "GET") {
+      const prefs = await getPrefs(ctx);
+      const limit = clampInt(toIntOrNull(url.searchParams.get("limit")) ?? DEFAULT_PAGE, 1, MAX_PAGE);
+      return json({
+        me: {
+          is_anon: peer.is_anon, signed_in: !!peer.user_id, is_sfi_member: peer.is_sfi_member,
+          is_sfi_editor: peer.is_sfi_editor, is_owner: peer.is_owner,
+          user_name: peer.user_name, space_color: peer.space_color,
+        },
+        prefs,
+        can_post: canPost(peer, prefs),
+        can_vote: canVote(peer),
+        ...(await pagePayload(ctx, null, limit)),
+      });
     }
-    const [postId, mediaId] = parts;
-    const media = await t.media.get(mediaId);
-    if (!media || media.post_id !== postId) return jsonReply(replyPort, 404, { error: "not found" });
-    // Only a file of this post's folder is served, whatever a row says.
-    const filePath = String(media.path ?? "");
-    if (!filePath.startsWith(postDir(postId) + "/")) return jsonReply(replyPort, 404, { error: "not found" });
-    const buf = await spaceFiles.read(filePath).catch(() => null);
-    if (!buf) return jsonReply(replyPort, 404, { error: "not found" });
-    const mediaName = String(media.name ?? "file");
-    const asciiName = mediaName.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
-    return replyPort.postMessage({
-      status: 200, body: buf, contentType: String(media.mime || "application/octet-stream"),
-      headers: { "Content-Disposition": `inline; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(mediaName)}` },
-    }, [buf.buffer as ArrayBuffer]);
-  }
 
-  if (reqPath === "/api/vote" && method === "POST") {
-    const r = await handleWrite(peer.sfi_id, "vote", parseJsonBody<Record<string, unknown>>(body) || {}, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    // Older pages: ?before=<created_ms cursor>&limit=  (public — read-only feed).
+    if (pathname === "/api/posts" && method === "GET") {
+      const before = toIntOrNull(url.searchParams.get("before"));
+      const limit = clampInt(toIntOrNull(url.searchParams.get("limit")) ?? DEFAULT_PAGE, 1, MAX_PAGE);
+      return json(await pagePayload(ctx, before, limit));
+    }
 
-  if (reqPath.startsWith("/api/delete/") && method === "POST") {
-    const r = await handleWrite(peer.sfi_id, "delete/" + reqPath.slice("/api/delete/".length), {}, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (pathname.startsWith("/api/media/") && method === "GET") return serveMedia(ctx, pathname.slice("/api/media/".length));
 
-  if (reqPath === "/api/prefs" && method === "POST") {
-    const r = await handleWrite(peer.sfi_id, "prefs", parseJsonBody<Record<string, unknown>>(body) || {}, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (pathname === "/api/post" && method === "POST") return post(ctx, await body(request));
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    if (pathname.startsWith("/api/post/") && pathname.endsWith("/media") && method === "POST") {
+      return attach(ctx, pathname.slice("/api/post/".length, -"/media".length), request, url.searchParams);
+    }
+
+    if (pathname === "/api/vote" && method === "POST") return vote(ctx, await body(request));
+
+    if (pathname.startsWith("/api/delete/") && method === "POST") return remove(ctx, pathname.slice("/api/delete/".length));
+
+    // Owner-only: this outpost's heading, tagline, and who-can-post setting.
+    if (pathname === "/api/prefs" && method === "POST") {
+      if (!peer.is_owner) return refuse(403, "owner only");
+      const v = await body(request);
+      await setPrefs(ctx, {
+        title: sanitizeText(v.title, MAX_TITLE) || DEFAULT_PREFS.title,
+        tagline: sanitizeText(v.tagline, MAX_TAGLINE),
+        who_can_post: v.who_can_post === "owner" ? "owner" : "editors",
+      });
+      tell(ctx, "prefs");
+      return json({ prefs: await getPrefs(ctx) });
+    }
+
+    return refuse(404, "not found");
+  },
 };
-
-log("Outpost frame is up and running!");

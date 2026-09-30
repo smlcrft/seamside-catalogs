@@ -7,44 +7,79 @@
 //     with a "preview" toggle that renders the same public view.
 //
 // The page's blocks are the space's table community_home_blocks and its title/tagline are
-// frameSettings rows, so each space has one page, synced with it. Realtime edits are fanned
-// out to every live viewer via pushToInstance(sfi_id, …).
+// settings rows, so each space has one page, synced with it. A visitor reads no table: the
+// page asks GET /api/page, and every write route decides on ctx.peer.
+//
+// Realtime: a push says that the page changed and never what it holds. Every open page of
+// the frame hears it and reads again as whoever it is.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, serveHtmlShell, pushToInstance, parsePeerInfo, onUiMessage,
-  parseJsonBody, declareTables, ensureTables, table, frameSettings,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
 // THE SPACE'S TABLE — named for this frame, so no other frame's rows land in it.
 // ----------------------------------------------------------------------------------------
+const BLOCKS = "community_home_blocks";
+const SETTINGS = "__fc_settings";
+
+// Unified page-content table. Lets admins mix sections, links, and pub_frame embeds
+// in any order. The per-kind columns stay empty for kinds that don't use them.
+const BLOCK_SCHEMA = [
+  { name: "kind",       col_type: "text",    nullable: false, default_val: "section" },
+  { name: "heading",    col_type: "text",    nullable: false, default_val: "" },
+  { name: "body",       col_type: "text",    nullable: false, default_val: "" },
+  { name: "format",     col_type: "text",    nullable: false, default_val: "text" },
+  { name: "label",      col_type: "text",    nullable: false, default_val: "" },
+  { name: "url",        col_type: "text",    nullable: false, default_val: "" },
+  { name: "width",      col_type: "integer", nullable: false, default_val: "320" },
+  { name: "height",     col_type: "integer", nullable: false, default_val: "320" },
+  { name: "sort_order", col_type: "integer", nullable: false, default_val: "0" },
+] as const;
+
 declareTables([
   {
-    // Unified page-content table. Lets admins mix sections, links, and pub_frame embeds
-    // in any order. The per-kind columns stay empty for kinds that don't use them.
-    key: "community_home_blocks",
+    key: BLOCKS,
     title: "Community Home Blocks",
     description: "Sections, links, and public-frame links, in display order.",
-    schema: [
-      { name: "kind",       col_type: "text",    nullable: false, default_val: "section" },
-      { name: "heading",    col_type: "text",    nullable: false, default_val: "" },
-      { name: "body",       col_type: "text",    nullable: false, default_val: "" },
-      { name: "format",     col_type: "text",    nullable: false, default_val: "text" },
-      { name: "label",      col_type: "text",    nullable: false, default_val: "" },
-      { name: "url",        col_type: "text",    nullable: false, default_val: "" },
-      { name: "width",      col_type: "integer", nullable: false, default_val: "320" },
-      { name: "height",     col_type: "integer", nullable: false, default_val: "320" },
-      { name: "sort_order", col_type: "integer", nullable: false, default_val: "0" },
-    ],
+    schema: BLOCK_SCHEMA.map((c) => ({ ...c })),
   },
 ]);
 
-type Tbl = ReturnType<typeof table>;
-type Settings = ReturnType<typeof frameSettings>;
+// What a new block holds before its own values are laid over it.
+const BLOCK_DEFAULTS: Record<string, unknown> = Object.fromEntries(
+  BLOCK_SCHEMA.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),
+);
 
 // ----------------------------------------------------------------------------------------
 // HELPERS
 // ----------------------------------------------------------------------------------------
+type Row = Record<string, unknown> & { id: string };
+
+const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+
+/** Write a row over what it held, stamped when it was made and when it changed.
+ *  A row that was not there starts from `fresh`. */
+async function keep(
+  ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>, fresh: Record<string, unknown> = {},
+): Promise<Row> {
+  const was = id ? await rows(ctx, name).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx, name).upsert({
+    ...(was ?? { ...fresh, _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+const keepBlock = (ctx: Ctx, id: string | null, values: Record<string, unknown>) =>
+  keep(ctx, BLOCKS, id, values, BLOCK_DEFAULTS);
+
+function cmp(a: unknown, b: unknown): number {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a ?? "").localeCompare(String(b ?? ""));
+}
+
 const VALID_FORMATS = new Set(["text", "html"]);
 const VALID_KINDS = new Set(["section", "link", "pub_frame"]);
 
@@ -72,10 +107,10 @@ function clampStr(v: unknown, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-// Page-level settings (title / tagline / updated_at) are frameSettings rows of the space —
-// a store every frame in the space shares, so each key carries this frame's name. The
-// default page is seeded once, by the first editor to open it (v1 writes a worker's rows
-// as the person it answers, so a reader could not); until then readers see it unseeded.
+// Page-level settings (title / tagline / updated_at) are rows of a store every frame in
+// the space shares, so each key carries this frame's name. Each value is JSON under `v`.
+// The default page is seeded once, by the first editor to open it; until then a reader is
+// shown the same default, unwritten.
 const SEED_BLOCK_ROW = "seed_about"; // fixed id so a concurrent first-load can't duplicate it
 const K = (k: string) => `community_home_${k}`;
 const SEED = {
@@ -88,257 +123,213 @@ const SEED = {
   },
 };
 
-async function ensurePage(settings: Settings, blocks: Tbl): Promise<void> {
-  if (await settings.get(K("seeded"))) return;
-  await settings.set(K("seeded"), true);
-  await settings.set(K("title"), SEED.title);
-  await settings.set(K("tagline"), SEED.tagline);
-  await settings.set(K("updated_at"), Date.now());
-  await blocks.upsert(SEED_BLOCK_ROW, SEED.block);
+async function setting<T>(ctx: Ctx, key: string): Promise<T | null> {
+  const row = await rows(ctx, SETTINGS).get(K(key));
+  if (row?.v == null) return null;
+  try {
+    return JSON.parse(String(row.v)) as T;
+  } catch {
+    return null;
+  }
 }
 
-async function getPage(settings: Settings, blocks: Tbl) {
-  const [title, tagline, updatedAt] = await Promise.all([
-    settings.get<string>(K("title")),
-    settings.get<string>(K("tagline")),
-    settings.get<number>(K("updated_at")),
+const setSetting = (ctx: Ctx, key: string, value: unknown) => keep(ctx, SETTINGS, K(key), { v: JSON.stringify(value) });
+
+async function ensurePage(ctx: Ctx): Promise<void> {
+  if (await setting(ctx, "seeded")) return;
+  await setSetting(ctx, "seeded", true);
+  await setSetting(ctx, "title", SEED.title);
+  await setSetting(ctx, "tagline", SEED.tagline);
+  await setSetting(ctx, "updated_at", Date.now());
+  await keepBlock(ctx, SEED_BLOCK_ROW, SEED.block);
+}
+
+async function getPage(ctx: Ctx) {
+  const [title, tagline, updatedAt, all] = await Promise.all([
+    setting<string>(ctx, "title"),
+    setting<string>(ctx, "tagline"),
+    setting<number>(ctx, "updated_at"),
+    rows(ctx, BLOCKS).all(),
   ]);
-  const { rows } = await blocks.query({
-    order_by: [{ col: "sort_order" }, { col: "_created_at" }],
-  });
+  all.sort((a, b) => cmp(a.sort_order, b.sort_order) || cmp(Number(a._created_at ?? 0), Number(b._created_at ?? 0)));
   return {
     title: title ?? "",
     tagline: tagline ?? "",
     updated_at: updatedAt ?? 0,
-    blocks: rows.map((r) => ({
-      id: r._row_id, kind: r.kind, heading: r.heading, body: r.body, format: r.format,
+    blocks: all.map((r) => ({
+      id: r.id, kind: r.kind, heading: r.heading, body: r.body, format: r.format,
       label: r.label, url: r.url, width: r.width, height: r.height, sort_order: r.sort_order,
     })),
   };
 }
 
-async function touchPage(settings: Settings): Promise<void> {
-  await settings.set(K("updated_at"), Date.now());
+const touchPage = (ctx: Ctx) => setSetting(ctx, "updated_at", Date.now());
+
+// That the page changed, never what it holds: each open page reads again as whoever it is.
+const tell = (ctx: Ctx) => ctx.push({ community_home: "page" });
+
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
+
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
-async function broadcast(sfiId: string, settings: Settings, blocks: Tbl): Promise<void> {
-  pushToInstance(sfiId, { type: "ch_page_updated", sfi_id: sfiId, page: await getPage(settings, blocks) });
-}
+// Block ids are opaque row-id strings; a path segment must not contain '/'.
+const RE_BLOCK = /^(PUT|DELETE) \/admin\/blocks\/([^/]+)$/;
 
 // ----------------------------------------------------------------------------------------
-// SHARED WRITE LOGIC — every admin mutation, whether it arrives over HTTP or the tether
-// (frame.busSend → onUiMessage), runs through here. `op` is the API path minus the leading
-// "api/" ("admin/page", "admin/blocks", "admin/blocks/<id>", "admin/blocks/<id>/delete",
-// "admin/blocks/reorder"). The editor gate lives here so the two entry points never drift.
+// AN EDITOR'S WRITES
 // ----------------------------------------------------------------------------------------
-type WriteResult = { status: number; body: Record<string, unknown> };
-
-async function handleWrite(
-  sfiId: string,
-  op: string,
-  data: Record<string, unknown> | null,
-  peer: ReturnType<typeof parsePeerInfo>,
-): Promise<WriteResult> {
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "forbidden" } };
-  const settings = frameSettings(sfiId);
-  const blocks = table("community_home_blocks", sfiId);
-  await ensurePage(settings, blocks);
-
+async function write(ctx: Ctx, route: string, request: Request): Promise<Response> {
   // Update top-level page settings (title / tagline).
-  if (op === "admin/page") {
-    if (!data) return { status: 400, body: { error: "invalid body" } };
-    if (typeof data.title === "string") {
-      await settings.set(K("title"), clampStr(data.title, MAX_TITLE));
-    }
-    if (typeof data.tagline === "string") {
-      await settings.set(K("tagline"), clampStr(data.tagline, MAX_TAGLINE));
-    }
-    await settings.set(K("updated_at"), Date.now());
-    await broadcast(sfiId, settings, blocks);
-    return { status: 200, body: { ok: true } };
+  if (route === "PUT /admin/page") {
+    const data = await body(request);
+    if (!data) return refuse(400, "invalid body");
+    if (typeof data.title === "string") await setSetting(ctx, "title", clampStr(data.title, MAX_TITLE));
+    if (typeof data.tagline === "string") await setSetting(ctx, "tagline", clampStr(data.tagline, MAX_TAGLINE));
+    await touchPage(ctx);
+    tell(ctx);
+    return json({ ok: true });
   }
 
   // Create a new block. Payload: { kind: "section" | "link" | "pub_frame", ...fields }.
   // Always appended to the end — UI positions the add buttons below the last block.
-  if (op === "admin/blocks") {
+  if (route === "POST /admin/blocks") {
+    const data = await body(request);
     const kind = data && typeof data.kind === "string" ? data.kind : "";
-    if (!data || !VALID_KINDS.has(kind)) return { status: 400, body: { error: "invalid kind" } };
+    if (!data || !VALID_KINDS.has(kind)) return refuse(400, "invalid kind");
 
-    const order = Number(await blocks.max("sort_order") ?? -1) + 1;
+    const last = (await rows(ctx, BLOCKS).all())
+      .reduce<unknown>((m, r) => (r.sort_order == null || (m != null && cmp(r.sort_order, m) <= 0) ? m : r.sort_order), null);
+    const order = Number(last ?? -1) + 1;
 
     if (kind === "section") {
       const heading = clampStr(data.heading, MAX_HEADING);
       const bodyText = clampStr(data.body, MAX_BODY);
       const format = typeof data.format === "string" && VALID_FORMATS.has(data.format) ? data.format : "text";
-      await blocks.upsert(null, { kind: "section", heading, body: bodyText, format, sort_order: order });
+      await keepBlock(ctx, null, { kind: "section", heading, body: bodyText, format, sort_order: order });
     } else if (kind === "link") {
       const label = clampStr(data.label, MAX_LABEL);
       const url = clampStr(data.url, MAX_URL).trim();
-      if (!label) return { status: 400, body: { error: "label required" } };
-      if (!url || !isSafeUrl(url)) return { status: 400, body: { error: "valid http(s) url required" } };
-      await blocks.upsert(null, { kind: "link", label, url, sort_order: order });
+      if (!label) return refuse(400, "label required");
+      if (!url || !isSafeUrl(url)) return refuse(400, "valid http(s) url required");
+      await keepBlock(ctx, null, { kind: "link", label, url, sort_order: order });
     } else if (kind === "pub_frame") {
       const url = clampStr(data.url, MAX_URL).trim();
-      if (!url || !isSafeUrl(url)) return { status: 400, body: { error: "valid http(s) url required" } };
-      // heading is reused as an optional title displayed above the iframe.
+      if (!url || !isSafeUrl(url)) return refuse(400, "valid http(s) url required");
+      // heading is reused as an optional title displayed above the link.
       const heading = clampStr(data.heading, MAX_HEADING);
       const width = clampDim(data.width, 320);
       const height = clampDim(data.height, 320);
-      await blocks.upsert(null, { kind: "pub_frame", heading, url, width, height, sort_order: order });
+      await keepBlock(ctx, null, { kind: "pub_frame", heading, url, width, height, sort_order: order });
     }
 
-    await touchPage(settings);
-    await broadcast(sfiId, settings, blocks);
-    return { status: 200, body: { ok: true } };
+    await touchPage(ctx);
+    tell(ctx);
+    return json({ ok: true });
   }
 
   // Reorder blocks: payload = { order: [id, id, id] }
-  if (op === "admin/blocks/reorder") {
-    const order = data?.order;
-    if (!Array.isArray(order)) return { status: 400, body: { error: "order[] required" } };
+  if (route === "PUT /admin/blocks/reorder") {
+    const order = (await body(request))?.order;
+    if (!Array.isArray(order)) return refuse(400, "order[] required");
     const ids = order.filter((x: unknown): x is string => typeof x === "string" && !!x);
-    // Only touch ids that actually exist (never phantom-create via upsert).
-    const { rows } = await blocks.query({});
-    const known = new Set(rows.map((r) => r._row_id));
+    // Only touch ids that actually exist: a write to an unknown id would make the row.
+    const known = new Set((await rows(ctx, BLOCKS).all()).map((r) => r.id));
     for (let i = 0; i < ids.length; i++) {
-      if (known.has(ids[i])) await blocks.upsert(ids[i], { sort_order: i });
+      if (known.has(ids[i])) await keepBlock(ctx, ids[i], { sort_order: i });
     }
-    await broadcast(sfiId, settings, blocks);
-    return { status: 200, body: { ok: true } };
+    tell(ctx);
+    return json({ ok: true });
   }
 
   // Update / delete a single block. Only fields present in the patch are touched; kind is
-  // immutable. Block ids are opaque row-id strings; a path segment must not contain '/'.
-  const blockMatch = op.match(/^admin\/blocks\/([^/]+)(\/delete)?$/);
-  if (blockMatch && blockMatch[1] !== "reorder") {
-    const id = blockMatch[1];
-    if (!(await blocks.get(id))) return { status: 404, body: { error: "not found" } };
+  // immutable.
+  const block = route.match(RE_BLOCK);
+  if (block) {
+    const id = block[2];
+    if (!(await rows(ctx, BLOCKS).get(id))) return refuse(404, "not found");
 
-    if (blockMatch[2]) {
-      await blocks.delete(id);
-      await touchPage(settings);
-      await broadcast(sfiId, settings, blocks);
-      return { status: 200, body: { ok: true } };
+    if (block[1] === "DELETE") {
+      await rows(ctx, BLOCKS).delete(id);
+      await touchPage(ctx);
+      tell(ctx);
+      return json({ ok: true });
     }
 
-    if (!data) return { status: 400, body: { error: "invalid body" } };
-    if (typeof data.heading === "string") {
-      await blocks.upsert(id, { heading: clampStr(data.heading, MAX_HEADING) });
-    }
-    if (typeof data.body === "string") {
-      await blocks.upsert(id, { body: clampStr(data.body, MAX_BODY) });
-    }
-    if (typeof data.format === "string") {
-      if (!VALID_FORMATS.has(data.format)) return { status: 400, body: { error: "invalid format" } };
-      await blocks.upsert(id, { format: data.format });
-    }
-    if (typeof data.label === "string") {
-      await blocks.upsert(id, { label: clampStr(data.label, MAX_LABEL) });
-    }
-    if (typeof data.url === "string") {
-      const url = clampStr(data.url, MAX_URL).trim();
-      if (url && !isSafeUrl(url)) return { status: 400, body: { error: "invalid url" } };
-      await blocks.upsert(id, { url });
-    }
-    // pub_frame dimensions — only meaningful for that kind, but harmless to store otherwise.
-    if (data.width !== undefined) {
-      await blocks.upsert(id, { width: clampDim(data.width, 320) });
-    }
-    if (data.height !== undefined) {
-      await blocks.upsert(id, { height: clampDim(data.height, 320) });
-    }
-    await touchPage(settings);
-    await broadcast(sfiId, settings, blocks);
-    return { status: 200, body: { ok: true } };
+    const data = await body(request);
+    if (!data) return refuse(400, "invalid body");
+    // Fields are taken in this order, and what came before a refused one is kept.
+    const next: Record<string, unknown> = {};
+    const refused = ((): string | null => {
+      if (typeof data.heading === "string") next.heading = clampStr(data.heading, MAX_HEADING);
+      if (typeof data.body === "string") next.body = clampStr(data.body, MAX_BODY);
+      if (typeof data.format === "string") {
+        if (!VALID_FORMATS.has(data.format)) return "invalid format";
+        next.format = data.format;
+      }
+      if (typeof data.label === "string") next.label = clampStr(data.label, MAX_LABEL);
+      if (typeof data.url === "string") {
+        const url = clampStr(data.url, MAX_URL).trim();
+        if (url && !isSafeUrl(url)) return "invalid url";
+        next.url = url;
+      }
+      // pub_frame dimensions — only meaningful for that kind, but harmless to store otherwise.
+      if (data.width !== undefined) next.width = clampDim(data.width, 320);
+      if (data.height !== undefined) next.height = clampDim(data.height, 320);
+      return null;
+    })();
+    if (Object.keys(next).length) await keepBlock(ctx, id, next);
+    if (refused) return refuse(400, refused);
+    await touchPage(ctx);
+    tell(ctx);
+    return json({ ok: true });
   }
 
-  return { status: 404, body: { error: "unknown admin route" } };
+  return refuse(404, "unknown admin route");
 }
-
-// ----------------------------------------------------------------------------------------
-// BUS DISPATCHER — the frontend's write path (frame.busSend → BusUiToFrame). `peer` is the
-// sender's platform-resolved identity, same shape as parsePeerInfo; the editor gate lives
-// inside handleWrite. Denials are logged, not answered — a legitimate client never sends a
-// write it isn't allowed to make.
-// ----------------------------------------------------------------------------------------
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string" || !d.op) return;
-  if (!ensureTables(peer).ready) return log(`community home: bus op ${d.op} dropped (table not bound)`);
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`community home: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
 
 // ----------------------------------------------------------------------------------------
 // NETWORKING
 // ----------------------------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, body, cookies) {
-  const send = (data: unknown, status = 200) => replyPort.postMessage({
-    status, contentType: "application/json", body: JSON.stringify(data),
-  });
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
-
-  // ----- index.html: serve a single bundled response (html + inlined css + per-viewer
-  // window.__peer stamp) so the UI can render without an extra /api/whoami round-trip.
-  // The script is inline in index.html as <script type="module"> so it can import
-  // /lib/js/framelib.js — inlineJs would flatten that to a non-module <script>, which
-  // can't use ES module imports, so it's intentionally omitted here.
-  if (reqPath === "/index.html" && method === "GET") {
-    return serveHtmlShell(replyPort, new URL("./public/index.html", import.meta.url), {
-      peer,
-      inlineCss: ["index.css"],
-    });
-  }
-
-  if (reqPath.startsWith("/api/")) {
-    if (!sfiId) {
-      if (reqPath === "/api/page" && method === "GET") {
-        return send({ title: "", tagline: "", blocks: [] });
-      }
-      return send({ error: "sfi_id missing" }, 400);
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    if (!pathname.startsWith("/api/")) {
+      if (request.method !== "GET") return refuse(404, "Not found.");
+      return ctx.file(pathname);
     }
-    const ready = ensureTables(peer);
-    if (!ready.ready) return send({ error: "table not bound" }, 503);
-    const settings = frameSettings(sfiId);
-    const blocks = table("community_home_blocks", sfiId);
+    const route = `${request.method} ${pathname.slice(4)}`;
+    const editor = ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+    const member = editor || ctx.peer.is_sfi_member;
 
-    // ----- public: fetch current page content (both anon and admin share this).
-    if (reqPath === "/api/page" && method === "GET") {
-      if (peer.is_sfi_editor) await ensurePage(settings, blocks);
-      else if (!(await settings.get(K("seeded")))) {
-        return send({ title: SEED.title, tagline: SEED.tagline, updated_at: 0, blocks: [{ id: SEED_BLOCK_ROW, ...SEED.block }] });
+    // ----- anyone: the page as it stands, and who the door says is asking.
+    if (route === "GET /page") {
+      const you = { member, editor };
+      const color = ctx.peer.space_color;
+      if (editor) await ensurePage(ctx);
+      else if (!(await setting(ctx, "seeded"))) {
+        return json({
+          title: SEED.title, tagline: SEED.tagline, updated_at: 0,
+          blocks: [{ id: SEED_BLOCK_ROW, ...SEED.block }], color, you,
+        });
       }
-      return send(await getPage(settings, blocks));
+      return json({ ...(await getPage(ctx)), color, you });
     }
 
     // ----- admin routes — space editors only (Viewer-role members read like anyone else).
-    // Each route maps to a bus op (path minus "/api/", DELETE → op + "/delete") and runs
-    // through the same handleWrite the bus dispatcher uses.
-    if (reqPath.startsWith("/api/admin/")) {
-      if (!peer.is_sfi_editor) return send({ error: "forbidden" }, 403);
-      const rest = reqPath.slice("/api/".length);
-      const blockMatch = rest.match(/^admin\/blocks\/([^/]+)$/);
-      const op =
-        rest === "admin/page" && method === "PUT" ? rest
-        : rest === "admin/blocks" && method === "POST" ? rest
-        : rest === "admin/blocks/reorder" && method === "PUT" ? rest
-        : blockMatch && blockMatch[1] !== "reorder" && method === "PUT" ? rest
-        : blockMatch && blockMatch[1] !== "reorder" && method === "DELETE" ? rest + "/delete"
-        : null;
-      if (!op) return send({ error: "unknown admin route" }, 404);
-      const r = await handleWrite(sfiId, op, parseJsonBody(body), peer);
-      return send(r.body, r.status);
+    if (route.includes(" /admin/")) {
+      if (!editor) return refuse(403, "forbidden");
+      await ensurePage(ctx);
+      return write(ctx, route, request);
     }
-  }
 
-  // ----- static file fallback.
-  if (method === "GET") {
-    serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-  } else {
-    replyPort.postMessage({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Not found.", code: "NOT_FOUND" }) });
-  }
+    return refuse(404, "Not found.");
+  },
 };
-
-log("Community Home frame is up and running!");

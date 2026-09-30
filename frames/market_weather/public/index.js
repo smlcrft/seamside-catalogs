@@ -1,22 +1,23 @@
-import { frame } from "./lib/js/framelib.js";
+import { frame } from "/lib/js/framelib.js";
 
 (function () {
-  const peer = window.__peer || {};
-  const isAnon = !!peer.is_anon || !peer.user_id;
-  const isEditor = !!peer.is_sfi_editor;
-
   const $ = (id) => document.getElementById(id);
 
-  // ----- Anonymous gate ----------------------------------------------------------------
-  if (isAnon) {
-    document.body.innerHTML =
-      '<div class="note"><i class="ph-light ph-lock-simple icon-sm"></i> ' +
-      'Market Weather is a private frame. Sign in to view this market.</div>';
-    return;
+  // ----- Asking the worker -------------------------------------------------------------
+  // Everything the page shows comes from its own server half, which decides who may read
+  // and who may change the market. A refusal is thrown in the worker's own words.
+  async function api(method, path, body) {
+    const r = await window.seamside.fetch("/api/" + path, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+    let v = {};
+    try { v = r.json(); } catch { /* the status says it */ }
+    if (!r.ok) throw Object.assign(new Error(v?.error || "failed"), { status: r.status });
+    return v;
   }
 
   // ----- State -------------------------------------------------------------------------
-  let state = { prefs: { location: "" }, weather: null, readings: [], weights: {}, is_owner: false };
+  let state = { prefs: { location: "" }, weather: null, readings: [], weights: {}, is_owner: false, you: {} };
+  // Whoever the worker refused is shown nothing from then on.
+  let shut = false;
   let draft = null;
   // Index into currentPeaks() that is currently being hovered in the card row. Drives
   // a chart redraw that glows the corresponding on-chart purple segment so the
@@ -89,7 +90,7 @@ import { frame } from "./lib/js/framelib.js";
     const txt  = $("setup-text");
     if (!state.prefs.location) {
       note.classList.remove("hidden");
-      txt.textContent = isEditor
+      txt.textContent = state.you.editor
         ? "Set your market's location in settings to see the turnout forecast."
         : "No market location yet — an editor of this space sets it.";
     } else if (!state.weather) {
@@ -905,17 +906,12 @@ import { frame } from "./lib/js/framelib.js";
     // Pull the latest editor values into the draft just before saving so the user
     // doesn't have to defocus a field to commit it.
     captureEventsFromEditor();
-    if (typeof frame.busSend === "function") {
-      frame.busSend({ op: "save", location: draft.location, events: draft.events });
-      closeSettings();
-      return;
-    }
     try {
-      await frame.api("api/save", { location: draft.location, events: draft.events });
+      await api("POST", "save", { location: draft.location, events: draft.events });
       closeSettings();
       await loadState();
     } catch (e) {
-      await frame.alert("Couldn't save: " + (e?.body || e?.message || String(e)));
+      await frame.alert("Couldn't save: " + (e?.message || String(e)));
     }
   }
 
@@ -1018,21 +1014,24 @@ import { frame } from "./lib/js/framelib.js";
 
   // ----- Bootstrap + push --------------------------------------------------------------
   async function loadState() {
+    if (shut) return;
     try {
-      state = await frame.api("api/state");
+      state = await api("GET", "state");
+      // Viewers read the forecast; only editors change the market (the worker refuses them anyway).
+      $("settings-btn").classList.toggle("hidden", !state.you.editor);
       render();
     } catch (e) {
       if (e?.status === 403) {
+        shut = true;
         document.body.innerHTML =
-          '<div class="note"><i class="ph-light ph-lock-simple icon-sm"></i> Forbidden.</div>';
+          '<div class="note"><i class="ph-light ph-lock-simple icon-sm"></i> ' +
+          'Market Weather is a private frame. Sign in to view this market.</div>';
         return;
       }
       console.error(e);
     }
   }
 
-  // Viewers read the forecast; only editors change the market (the worker refuses them anyway).
-  if (!isEditor) $("settings-btn").classList.add("hidden");
   $("settings-btn").addEventListener("click", openSettings);
   $("settings-close").addEventListener("click", closeSettings);
   $("settings-cancel").addEventListener("click", closeSettings);
@@ -1044,8 +1043,9 @@ import { frame } from "./lib/js/framelib.js";
   $("view-events-btn").addEventListener("click", () => setView("events"));
   $("view-detail-btn").addEventListener("click", () => setView("detail"));
 
+  // The worker says what changed and never what it holds: read it again, as whoever this is.
   window.addEventListener("message", (e) => {
-    if (e.data && e.data.type === "settings_changed") loadState();
+    if (e.data && e.data.market_weather) loadState();
   });
 
   window.addEventListener("resize", () => {
@@ -1058,5 +1058,5 @@ import { frame } from "./lib/js/framelib.js";
   // this keeps the "now" marker honest as the day rolls forward.
   setInterval(loadState, 5 * 60 * 1000);
 
-  loadState();
+  window.seamside.ready.then(loadState);
 })();

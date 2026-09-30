@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Checklist</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); --state-progress: var(--os-c1); }   /* --ch follows the space channel at runtime; in-progress stays teal */
     * { box-sizing: border-box; }
@@ -113,22 +113,19 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+    import { html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "/lib/js/framelib.js";
 
     const ICONS = ["ph-circle", "ph-circle-half", "ph-check-circle"];
     const NEXT  = { 0: 1, 1: 2, 2: 0 };
 
-    // Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are
-    // dropped on Android (issue #750). Fire-and-forget — the resulting list arrives via
-    // the checklist_changed push, sender included. Feature-detect: an older viewer's
-    // framelib has no busSend — fall back to the HTTP write it was using before.
-    const write = (path, body) => {
-      if (typeof frame.busSend === "function") {
-        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-        return Promise.resolve({});
-      }
-      return frame.api(path, body);
-    };
+    // Everything comes from this frame's own server half, which decides who may do what.
+    async function api(path, body) {
+      const r = await window.seamside.fetch(`/api/${path}`, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     // Find the item the cursor is hovering above, for drop positioning.
     function dragAfter(list, y) {
@@ -150,17 +147,20 @@
       const armTimer = useRef(null);
 
       async function refresh() {
-        const r = await frame.api("api/list").catch(() => ({ items: [] }));
+        const r = await api("list").catch(() => ({ items: [] }));
         setItems(r.items || []);
       }
+      // A write answers with the list as it now stands; a refused one reads it again.
+      const write = (path, body) => api(path, body).then((r) => setItems(r.items || [])).catch(refresh);
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ checklist_changed: refresh });
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((d) => { if (d.checklist === "items") refresh(); });
 
       if (!me) return html`<div></div>`;
       const isEditor = !!me.is_sfi_editor;
@@ -169,21 +169,21 @@
         const text = draft.trim();
         if (!text) return;
         setDraft("");
-        write("api/add", { text }).catch(() => {});
+        write("add", { text });
       }
       function cycle(it) {
         if (!isEditor) return;
         const next = NEXT[it.state];
-        // optimistic — credit (or clear) the byline immediately; the push confirms.
+        // optimistic — credit (or clear) the byline immediately; the answer confirms.
         setItems(items.map((x) => x.id === it.id
           ? { ...x, state: next, actor_name: next === 0 ? "" : (me.user_name || "you") }
           : x));
-        write("api/item/" + it.id, { state: next }).catch(() => {});
+        write("item/" + it.id, { state: next });
       }
       function saveText(it, text) {
         const v = text.trim();
         if (!v || v === it.text) return;
-        write("api/item/" + it.id, { text: v }).catch(() => {});
+        write("item/" + it.id, { text: v });
       }
       function disarm() { setArmed(null); if (armTimer.current) clearTimeout(armTimer.current); }
       function trash(it) {
@@ -195,7 +195,7 @@
         }
         disarm();
         setItems(items.filter((x) => x.id !== it.id));
-        write("api/delete/" + it.id, {}).catch(() => {});
+        write("delete/" + it.id, {});
       }
 
       // --- drag reorder -----------------------------------------------------------------
@@ -221,7 +221,7 @@
         const byId = new Map(items.map((x) => [x.id, x]));
         const reordered = ids.map((x) => byId.get(x));
         setItems(reordered);
-        write("api/reorder", { ids }).catch(() => {});
+        write("reorder", { ids });
       }
 
       const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
@@ -306,6 +306,7 @@
       `;
     }
 
+    await window.seamside.ready;
     render(html`<${App}/>`, document.body);
   </script>
 </body>

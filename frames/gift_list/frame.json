@@ -1,17 +1,14 @@
 {
     "name": "Gift List",
-    "description": "A wish list that can keep a secret. Editors add what they would like, or wishes for someone else, and quietly claim an item so two people don't buy the same thing; only the person holding a claim can let it go. The person a gift is for never sees the claims: they are stripped on the keeper's device before the list reaches them, with an honest note that claims are hidden. Viewers and anyone the frame is published to see the list read-only. Each session uses one wish list of the space, which an editor picks: wishes.table.jsonl or a named one such as christmas.wishes.table.jsonl, so one space can keep several lists. Who claimed is kept off the space, in the frame's own data on the keeper's device; the list itself carries only a claimed mark, so a claim survives even if that data is lost (then it shows as claimed by someone, and any editor may release it). Anyone who opens the table file can see that a wish is claimed, though never by whom.",
+    "description": "A wish list that can keep a secret. Editors add what they would like, or wishes for someone else, and quietly claim an item so two people don't buy the same thing; only the person holding a claim can let it go. The person a gift is for never sees the claims: they are stripped on the keeper's device before the list reaches them, with an honest note that claims are hidden. Viewers and anyone the frame is published to see the list read-only; anyone who is not a member of the space is shown no claims at all. Each session uses one wish list of the space, which an editor picks: wishes.table.jsonl or a named one such as christmas.wishes.table.jsonl, so one space can keep several lists. Who claimed is kept off the space, in the frame's own data on the keeper's device; the list itself carries only a claimed mark, so a claim survives even if that data is lost (then it shows as claimed by someone, and any editor may release it). Anyone who opens the table file can see that a wish is claimed, though never by whom.",
     "frame_type": "Tandem",
     "tags": ["household", "family", "gifts"],
     "opens": ["wishes.table.jsonl"],
-    "permissions": {
-        "net": []
-    },
     "default_width_px": 560,
     "default_height_px": 560,
     "created_at": "2026-08-07T20:45:00Z",
-    "modified_at": "2026-09-23T14:10:00Z",
-    "app_version_min": "1.0.0",
+    "modified_at": "2026-09-30T02:00:00Z",
+    "app_version_min": "1.0.11",
     "licensed_under_cc0": true,
     "attribution_log": [],
     "icon": "ph:gift",

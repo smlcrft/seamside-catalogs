@@ -4,20 +4,20 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members get a live read-only view;
 //                                           space editors get the interactive board.
+//                                           The page reads no table: the board comes
+//                                           from this worker, and every write is a
+//                                           route here that decides on ctx.peer.
 //   data_storage:   the space's tables   — `kanban_columns` and `kanban_cards`
 //                                           (`<name>.table.jsonl` at the space's root),
 //                                           synced with the space; one board per space.
-//   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so every viewer refreshes live.
+//   view_realtime:  view-collaborative    — every mutation pushes { kanban: "board" },
+//                                           and every open page reads the board again.
 //
 // Columns carry a channel (c1–c12) as their identity color; cards carry a title,
 // an optional description, and an optional short label.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText,
-  declareTables, table,
-} from "@frame-core";
+import type { Ctx, PeerInfo } from "@frame-core";
+import { declareTables, parseJsonBody, sanitizeText } from "@frame-core";
 
 // ----- Schemas ----------------------------------------------------------------------------
 const COLUMNS_SCHEMA = [
@@ -35,17 +35,51 @@ const CARDS_SCHEMA = [
 ];
 
 // ----- The space's tables, named for this frame (`cards` alone is also Flashcards') ------
+const COLUMNS = "kanban_columns";
+const CARDS = "kanban_cards";
 declareTables([
-  { key: "kanban_columns", title: "Kanban Columns", description: "Columns of this space's kanban board.", schema: COLUMNS_SCHEMA },
-  { key: "kanban_cards",   title: "Kanban Cards",   description: "Cards of this space's kanban board.",   schema: CARDS_SCHEMA },
+  { key: COLUMNS, title: "Kanban Columns", description: "Columns of this space's kanban board.", schema: COLUMNS_SCHEMA },
+  { key: CARDS,   title: "Kanban Cards",   description: "Cards of this space's kanban board.",   schema: CARDS_SCHEMA },
 ]);
+const SCHEMAS: Record<string, Array<{ name: string; col_type: string; default_val: string }>> = {
+  [COLUMNS]: COLUMNS_SCHEMA, [CARDS]: CARDS_SCHEMA,
+};
 
-type Tbl = ReturnType<typeof table>;
-type Peer = ReturnType<typeof parsePeerInfo>;
+type Row = Record<string, unknown> & { id: string };
 
-function dataTables(sfiId: string): { columns: Tbl; cards: Tbl } {
-  return { columns: table("kanban_columns", sfiId), cards: table("kanban_cards", sfiId) };
+const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+
+/** A new row: the schema's defaults, stamped when it was made. */
+function fresh(name: string, now: number): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const c of SCHEMAS[name] ?? []) {
+    out[c.name] = c.col_type === "integer" ? Number(c.default_val) : c.default_val;
+  }
+  out._created_at = now;
+  return out;
 }
+
+/** Write a row over what it held, stamped when it changed. */
+async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await rows(ctx, name).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx, name).upsert({
+    ...(was ?? fresh(name, now)),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+function cmp(a: unknown, b: unknown): number {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a ?? "").localeCompare(String(b ?? ""));
+}
+/** Order by these columns, each ascending. */
+const by = (...cols: string[]) => (a: Row, b: Row) => {
+  for (const c of cols) { const d = cmp(a[c], b[c]); if (d) return d; }
+  return 0;
+};
 
 const CHANNEL_RE = /^c([1-9]|1[0-2])$/;
 const SEED_COLUMNS: Array<[string, string]> = [
@@ -53,92 +87,78 @@ const SEED_COLUMNS: Array<[string, string]> = [
 ];
 
 // ----- Queries --------------------------------------------------------------------------
-async function boardData(columns: Tbl, cards: Tbl) {
-  const { rows: cols } = await columns.query({
-    order_by: [{ col: "sort_order" }, { col: "_created_at" }],
-  });
-  const { rows: allCards } = await cards.query({
-    order_by: [{ col: "sort_order" }, { col: "created_ms" }],
-  });
+async function boardData(ctx: Ctx) {
+  const cols = (await rows(ctx, COLUMNS).all()).sort(by("sort_order", "_created_at"));
+  const allCards = (await rows(ctx, CARDS).all()).sort(by("sort_order", "created_ms"));
   const byCol = new Map<string, Array<Record<string, unknown>>>();
   for (const c of allCards) {
     let bucket = byCol.get(c.column_id as string);
     if (!bucket) { bucket = []; byCol.set(c.column_id as string, bucket); }
     bucket.push({
-      id: c._row_id, title: c.title, description: c.description,
+      id: c.id, title: c.title, description: c.description,
       label: c.label, sort_order: c.sort_order,
     });
   }
   return cols.map((col) => ({
-    id: col._row_id, title: col.title, channel: col.channel,
-    sort_order: col.sort_order, cards: byCol.get(col._row_id) ?? [],
+    id: col.id, title: col.title, channel: col.channel,
+    sort_order: col.sort_order, cards: byCol.get(col.id) ?? [],
   }));
 }
 
-async function nextSortOrder(t: Tbl): Promise<number> {
-  return Number(await t.max("sort_order") ?? -1) + 1;
-}
-
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "kanban_changed" });
+async function nextSortOrder(ctx: Ctx, name: string): Promise<number> {
+  return (await rows(ctx, name).all()).reduce((m, r) => Math.max(m, Number(r.sort_order)), -1) + 1;
 }
 
 // ----- Writes ---------------------------------------------------------------------------
-// One shared mutation path for BOTH transports: the bus dispatcher below (frame.busSend →
-// onUiMessage, the primary write path) and the HTTP POST arm in onNetworkRequest (kept for
-// older viewers whose framelib has no busSend). `op` is the API path with "api/" stripped
-// (e.g. "card/<id>/move"); `v` is the parsed payload. Role gates live here so the two
-// entry points can never drift.
+// `op` is the API path with "/api/" stripped (e.g. "card/<id>/move"); `v` the parsed body.
 type WriteResult = { status: number; body: unknown };
 
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const { columns, cards } = dataTables(sfiId);
-
-  // Every op below mutates state and is editor-only. Non-members AND Viewer-role
-  // members are rejected with the same gate (never gate writes on is_sfi_member —
-  // Viewer-role members would slip through).
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+async function handleWrite(ctx: Ctx, op: string, v: Record<string, unknown> | null, editor: boolean): Promise<WriteResult> {
+  // Every op below mutates state and is editor-only: strangers and Viewer-role members
+  // are refused alike.
+  if (!editor) return { status: 403, body: { error: "editors only" } };
 
   const ok = async (): Promise<WriteResult> => {
-    notify(sfiId);
-    return { status: 200, body: { columns: await boardData(columns, cards) } };
+    ctx.push({ kanban: "board" });
+    return { status: 200, body: { columns: await boardData(ctx) } };
   };
 
   // --- Columns --------------------------------------------------------------------------
   if (op === "column") {
     const title = sanitizeText(v?.title, 80) || "Untitled";
     const channelRaw = typeof v?.channel === "string" ? v.channel : "";
-    const existing = (await columns.query({})).rows.length;
+    const existing = (await rows(ctx, COLUMNS).all()).length;
     const channel = CHANNEL_RE.test(channelRaw) ? channelRaw : `c${(existing % 12) + 1}`;
-    await columns.upsert(null, { title, channel, sort_order: await nextSortOrder(columns) });
+    await keep(ctx, COLUMNS, null, { title, channel, sort_order: await nextSortOrder(ctx, COLUMNS) });
     return ok();
   }
 
   if (op === "columns/reorder") {
     const ids = Array.isArray(v?.ids) ? v.ids.filter((x): x is string => typeof x === "string" && !!x) : [];
-    const { rows } = await columns.query({});
-    const known = new Set(rows.map((r) => r._row_id));
+    const known = new Set((await rows(ctx, COLUMNS).all()).map((r) => r.id));
     for (let i = 0; i < ids.length; i++) {
-      if (known.has(ids[i])) await columns.upsert(ids[i], { sort_order: i });
+      if (known.has(ids[i])) await keep(ctx, COLUMNS, ids[i], { sort_order: i });
     }
     return ok();
   }
 
   if (op.startsWith("column/")) {
     const [id, action] = op.slice("column/".length).split("/");
-    if (!id || !(await columns.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!id || !(await rows(ctx, COLUMNS).get(id))) return { status: 400, body: { error: "bad id" } };
     if (action === "delete") {
-      await cards.deleteWhere({ column_id: id });
-      await columns.delete(id);
+      for (const c of await rows(ctx, CARDS).all()) {
+        if (c.column_id === id) await rows(ctx, CARDS).delete(c.id);
+      }
+      await rows(ctx, COLUMNS).delete(id);
       return ok();
     }
     if (action) return { status: 404, body: { error: "not found" } };
     if (v?.title !== undefined) {
       const title = sanitizeText(v.title, 80);
-      if (title) await columns.upsert(id, { title });
+      if (title) await keep(ctx, COLUMNS, id, { title });
     }
     if (typeof v?.channel === "string" && CHANNEL_RE.test(v.channel)) {
-      await columns.upsert(id, { channel: v.channel });
+      await keep(ctx, COLUMNS, id, { channel: v.channel });
     }
     return ok();
   }
@@ -148,14 +168,14 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     const columnId = typeof v?.column_id === "string" ? v.column_id : "";
     const title = sanitizeText(v?.title, 200);
     if (!title) return { status: 400, body: { error: "title required" } };
-    if (!columnId || !(await columns.get(columnId))) return { status: 400, body: { error: "bad column" } };
+    if (!columnId || !(await rows(ctx, COLUMNS).get(columnId))) return { status: 400, body: { error: "bad column" } };
     // "top" (the header +) slots the card first; "bottom" (the end-of-list zone)
     // appends. Orders are relative, so min-1 / max+1 need no renumbering.
-    const { rows } = await cards.query({ where: { column_id: columnId } });
+    const inCol = (await rows(ctx, CARDS).all()).filter((r) => r.column_id === columnId);
     const sortOrder = v?.position === "top"
-      ? rows.reduce((m, r) => Math.min(m, Number(r.sort_order)), 1) - 1
-      : rows.reduce((m, r) => Math.max(m, Number(r.sort_order)), -1) + 1;
-    await cards.upsert(null, {
+      ? inCol.reduce((m, r) => Math.min(m, Number(r.sort_order)), 1) - 1
+      : inCol.reduce((m, r) => Math.max(m, Number(r.sort_order)), -1) + 1;
+    await keep(ctx, CARDS, null, {
       column_id: columnId, title, description: "", label: "",
       sort_order: sortOrder, created_ms: Date.now(),
     });
@@ -164,10 +184,10 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
 
   if (op.startsWith("card/")) {
     const [id, action] = op.slice("card/".length).split("/");
-    if (!id || !(await cards.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!id || !(await rows(ctx, CARDS).get(id))) return { status: 400, body: { error: "bad id" } };
 
     if (action === "delete") {
-      await cards.delete(id);
+      await rows(ctx, CARDS).delete(id);
       return ok();
     }
 
@@ -175,13 +195,12 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     // (including the moved card) after the drop.
     if (action === "move") {
       const columnId = typeof v?.column_id === "string" ? v.column_id : "";
-      if (!columnId || !(await columns.get(columnId))) return { status: 400, body: { error: "bad column" } };
+      if (!columnId || !(await rows(ctx, COLUMNS).get(columnId))) return { status: 400, body: { error: "bad column" } };
       const ids = Array.isArray(v?.ids) ? v.ids.filter((x): x is string => typeof x === "string" && !!x) : [];
-      await cards.upsert(id, { column_id: columnId });
-      const { rows } = await cards.query({});
-      const known = new Set(rows.map((r) => r._row_id));
+      await keep(ctx, CARDS, id, { column_id: columnId });
+      const known = new Set((await rows(ctx, CARDS).all()).map((r) => r.id));
       for (let i = 0; i < ids.length; i++) {
-        if (known.has(ids[i])) await cards.upsert(ids[i], { sort_order: i });
+        if (known.has(ids[i])) await keep(ctx, CARDS, ids[i], { sort_order: i });
       }
       return ok();
     }
@@ -189,13 +208,13 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     if (action) return { status: 404, body: { error: "not found" } };
     if (v?.title !== undefined) {
       const title = sanitizeText(v.title, 200);
-      if (title) await cards.upsert(id, { title });
+      if (title) await keep(ctx, CARDS, id, { title });
     }
     if (v?.description !== undefined) {
-      await cards.upsert(id, { description: sanitizeText(v.description, 4000) });
+      await keep(ctx, CARDS, id, { description: sanitizeText(v.description, 4000) });
     }
     if (v?.label !== undefined) {
-      await cards.upsert(id, { label: sanitizeText(v.label, 24) });
+      await keep(ctx, CARDS, id, { label: sanitizeText(v.label, 24) });
     }
     return ok();
   }
@@ -203,67 +222,55 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   return { status: 404, body: { error: "not found" } };
 }
 
-// ----- Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame) --------
-// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; the
-// role gates live inside handleWrite. Denials are logged, not answered — a legitimate
-// client never sends a write it isn't allowed to make.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`kanban: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+
+function whoami(peer: PeerInfo, editor: boolean, member: boolean) {
+  return {
+    is_anon:       peer.is_anon,
+    is_sfi_member: member,
+    is_sfi_editor: editor,
+    is_owner:      peer.is_owner,
+    user_id:       peer.user_id,
+    user_name:     peer.user_name,
+    space_color:   peer.space_color,
+  };
+}
 
 // ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
+    const editor = ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+    const member = editor || ctx.peer.is_sfi_member;
 
-  // Static assets — open to everyone, including anon read-only viewers.
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    // Static assets — open to everyone, including anon read-only viewers.
+    if (method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  // Identity probe — drives which render mode the frontend shows.
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+    // Identity probe — drives which render mode the frontend shows.
+    if (pathname === "/api/whoami" && method === "GET") return json(whoami(ctx.peer, editor, member));
 
-  // Writes — the HTTP arm of the shared write path (see handleWrite above).
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
-
-  const { columns, cards } = dataTables(sfiId);
-
-  // Read — open to everyone (non-members get a read-only view of the board).
-  if (reqPath === "/api/board" && method === "GET") {
-    // First-open seeding: an editor's first look at an empty board lands the three
-    // classic columns (no sample cards). Never seeded for read-only viewers — a GET
-    // from a viewer must not mutate.
-    if (peer.is_sfi_editor && (await columns.query({ limit: 1 })).rows.length === 0) {
-      for (let i = 0; i < SEED_COLUMNS.length; i++) {
-        await columns.upsert(null, {
-          title: SEED_COLUMNS[i][0], channel: SEED_COLUMNS[i][1], sort_order: i,
-        });
-      }
+    if (pathname.startsWith("/api/") && (method === "POST" || method === "PUT")) {
+      const v = parseJsonBody<Record<string, unknown>>(await request.arrayBuffer());
+      const r = await handleWrite(ctx, pathname.slice("/api/".length), v, editor);
+      return json(r.body, r.status);
     }
-    return jsonReply(replyPort, 200, {
-      columns: await boardData(columns, cards),
-    });
-  }
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    // Read — open to everyone (non-members get a read-only view of the board).
+    if (pathname === "/api/board" && method === "GET") {
+      // First-open seeding: an editor's first look at an empty board lands the three
+      // classic columns (no sample cards). Never seeded for read-only viewers — a GET
+      // from a viewer must not mutate.
+      if (editor && (await rows(ctx, COLUMNS).all()).length === 0) {
+        for (let i = 0; i < SEED_COLUMNS.length; i++) {
+          await keep(ctx, COLUMNS, null, {
+            title: SEED_COLUMNS[i][0], channel: SEED_COLUMNS[i][1], sort_order: i,
+          });
+        }
+      }
+      return json({ columns: await boardData(ctx) });
+    }
+
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Kanban Board frame is up and running!");

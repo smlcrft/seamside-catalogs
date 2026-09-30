@@ -3,27 +3,26 @@
 //
 // Design axes:
 //   privacy:        privacy-public-view  — non-members get a live read-only board;
-//                                           space editors get the interactive one.
+//                                           space editors get the interactive one. The page
+//                                           reads no table: the board comes from
+//                                           GET /api/list, and every write is a route here.
 //   data_storage:   the space's table    — `chores.table.jsonl` at the space's root,
 //                                           synced with the space; any frame in the space
 //                                           that speaks `chores` works on the same rows.
-//   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so all viewers refresh live. Ticking a chore
-//                                           off on the kitchen tablet lands on every
-//                                           other device instantly.
+//   view_realtime:  view-collaborative    — every write pushes `{ chore_chart: "chores" }`,
+//                                           which says what to read again and never what
+//                                           it holds. Ticking a chore off on the kitchen
+//                                           tablet lands on every other device instantly.
 //
 // This frame OWNS the `chores` v1 contract (docs/schema-contracts.md). The chart is
 // deliberately about the CURRENT turn of each chore rather than a growing history: a row
 // carries when it was last done and how long a streak it is on, and the "done" state is
 // DERIVED by comparing that timestamp's period to now. That is what lets a weekly chore
-// come back by itself on Monday without anything having to run on a schedule — there is
-// no cron in a frame, and a chart that needed one would silently rot on a sleeping device.
+// come back by itself on Monday without anything having to run on a schedule — a chart
+// that needed one would silently rot on a sleeping device.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText,
-  declareTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText } from "@frame-core";
 
 // ----- Schema (the `chores` v1 contract — declared verbatim, one source of truth) -------
 const CHORES_SCHEMA = [
@@ -39,12 +38,31 @@ const CHORES_SCHEMA = [
 ];
 
 // ----- The space's `chores` table (the contract name) ---------------------------------
+const CHORES = "chores";
 declareTables([
-  { key: "chores", title: "Chore Chart", description: "The chores of this space.", schema: CHORES_SCHEMA },
+  { key: CHORES, title: "Chore Chart", description: "The chores of this space.", schema: CHORES_SCHEMA },
 ]);
 
-type Tbl = ReturnType<typeof table>;
-type Peer = ReturnType<typeof parsePeerInfo>;
+type Row = Record<string, unknown> & { id: string };
+
+const chores = (ctx: Ctx) => ctx.table<Record<string, unknown>>(CHORES);
+
+/** What a new row holds before anything is said of it: the schema's own defaults. */
+const DEFAULTS: Record<string, unknown> = Object.fromEntries(
+  CHORES_SCHEMA.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),
+);
+
+/** Write a row over what it held (a new one from the schema's defaults), stamped. */
+async function keep(ctx: Ctx, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await chores(ctx).get(id) : null;
+  const now = Date.now();
+  return await chores(ctx).upsert({
+    ...(was ?? { ...DEFAULTS, _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
 
 // ----- Cadence: the whole clock of this frame -------------------------------------------
 // A chore's turn is a PERIOD, and "done" means "done in the period we are in now". Two
@@ -83,13 +101,17 @@ function isDoneNow(row: { last_done_ms: number; cadence: Cadence }, now: number)
 }
 
 // ----- Queries --------------------------------------------------------------------------
-async function listRows(t: Tbl) {
-  const { rows } = await t.query({ order_by: [{ col: "sort_order" }] });
+const cmp = (a: unknown, b: unknown) =>
+  typeof a === "number" && typeof b === "number" ? a - b : String(a ?? "").localeCompare(String(b ?? ""));
+
+async function listRows(ctx: Ctx) {
+  const rows = (await chores(ctx).all()).sort((a, b) =>
+    (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || cmp(a._created_at, b._created_at));
   const now = Date.now();
   return rows.map((r) => {
     const cadence = asCadence(r.cadence);
     return {
-      id: r._row_id,
+      id: r.id,
       chore: r.chore,
       assignee: r.assignee,
       cadence,
@@ -107,42 +129,50 @@ async function listRows(t: Tbl) {
 }
 
 /** Next sort_order — new chores land at the end of the board. */
-async function nextOrder(t: Tbl): Promise<number> {
-  const { rows } = await t.query({ order_by: [{ col: "sort_order", dir: "desc" }], limit: 1 });
-  return rows.length ? (Number(rows[0].sort_order) || 0) + 1 : 0;
+async function nextOrder(ctx: Ctx): Promise<number> {
+  const rows = await chores(ctx).all();
+  return rows.length ? Math.max(...rows.map((r) => Number(r.sort_order) || 0)) + 1 : 0;
 }
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "chores_changed" });
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx) => ctx.push({ chore_chart: "chores" });
+
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+
+// deno-lint-ignore no-explicit-any
+async function body(request: Request): Promise<Record<string, any> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 // ----- Writes ---------------------------------------------------------------------------
-type WriteResult = { status: number; body: unknown };
-
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const t = table("chores", sfiId);
-
+// `op` is the API path with the leading "/api/" stripped.
+// deno-lint-ignore no-explicit-any
+async function write(ctx: Ctx, op: string, v: Record<string, any> | null): Promise<Response> {
   // Every op below mutates state and is editor-only. Non-members AND Viewer-role members
-  // are rejected with the same gate (never gate writes on is_sfi_member — Viewer-role
-  // members would slip through). Ticking a chore off is a write like any other: a public
-  // viewer watches the chart, they don't do the dishes on someone else's behalf.
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  // are rejected with the same gate. Ticking a chore off is a write like any other: a
+  // public viewer watches the chart, they don't do the dishes on someone else's behalf.
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return json({ error: "editors only" }, 403);
 
-  const ok = async (): Promise<WriteResult> => {
-    notify(sfiId);
-    return { status: 200, body: { chores: await listRows(t) } };
+  const ok = async () => {
+    tell(ctx);
+    return json({ chores: await listRows(ctx) });
   };
 
   // --- Chores ---------------------------------------------------------------------------
   if (op === "chore") {
     const chore = sanitizeText(v?.chore, 200);
-    if (!chore) return { status: 400, body: { error: "chore required" } };
-    await t.upsert(null, {
+    if (!chore) return json({ error: "chore required" }, 400);
+    await keep(ctx, null, {
       chore,
       assignee: sanitizeText(v?.assignee, 60),
       cadence: asCadence(v?.cadence),
       last_done_ms: 0, last_done_by: "", streak: 0,
-      sort_order: await nextOrder(t),
+      sort_order: await nextOrder(ctx),
       notes: "",
     });
     return ok();
@@ -150,11 +180,11 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
 
   if (op.startsWith("chore/")) {
     const [id, action] = op.slice("chore/".length).split("/");
-    const row = id ? await t.get(id) : null;
-    if (!row) return { status: 400, body: { error: "bad id" } };
+    const row = id ? await chores(ctx).get(id) : null;
+    if (!row) return json({ error: "bad id" }, 400);
 
     if (action === "delete") {
-      await t.delete(id);
+      await chores(ctx).delete(id);
       return ok();
     }
 
@@ -169,9 +199,9 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
       const continued = cadence !== "once" && last > 0
         && periodIndex(last, cadence) === periodIndex(now, cadence) - 1;
       const streak = continued ? (Number(row.streak) || 0) + 1 : 1;
-      await t.upsert(id, {
+      await keep(ctx, id, {
         last_done_ms: now,
-        last_done_by: sanitizeText(peer.user_name, 60),
+        last_done_by: sanitizeText(ctx.peer.user_name, 60),
         streak,
         // the record only ever goes up — undoing a mis-tap gives back the streak, but a
         // run that actually happened stays on the card
@@ -185,72 +215,59 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     // carry: this chore is simply not done this turn any more.
     if (action === "undo") {
       if (!Number(row.last_done_ms)) return ok();
-      await t.upsert(id, {
+      await keep(ctx, id, {
         last_done_ms: 0, last_done_by: "",
         streak: Math.max(0, (Number(row.streak) || 0) - 1),
       });
       return ok();
     }
 
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
 
+    const next: Record<string, unknown> = {};
     if (v?.chore !== undefined) {
       const chore = sanitizeText(v.chore, 200);
-      if (chore) await t.upsert(id, { chore });
+      if (chore) next.chore = chore;
     }
-    if (v?.assignee !== undefined) await t.upsert(id, { assignee: sanitizeText(v.assignee, 60) });
-    if (v?.cadence !== undefined) await t.upsert(id, { cadence: asCadence(v.cadence) });
-    if (v?.notes !== undefined) await t.upsert(id, { notes: sanitizeText(v.notes, 500) });
+    if (v?.assignee !== undefined) next.assignee = sanitizeText(v.assignee, 60);
+    if (v?.cadence !== undefined) next.cadence = asCadence(v.cadence);
+    if (v?.notes !== undefined) next.notes = sanitizeText(v.notes, 500);
+    if (Object.keys(next).length) await keep(ctx, id, next);
     return ok();
   }
 
-  return { status: 404, body: { error: "not found" } };
+  return json({ error: "not found" }, 404);
 }
 
-// ----- Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame) --------
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`chore_chart: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
-
 // ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const editor = ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+    const member = editor || ctx.peer.is_sfi_member;
 
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    if (request.method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+    if (pathname === "/api/whoami" && request.method === "GET") {
+      return json({
+        is_anon:       ctx.peer.is_anon,
+        is_sfi_member: member,
+        is_sfi_editor: editor,
+        is_owner:      ctx.peer.is_owner,
+        user_id:       ctx.peer.user_id,
+        user_name:     ctx.peer.user_name,
+        space_color:   ctx.peer.space_color,
+      });
+    }
 
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (pathname.startsWith("/api/") && (request.method === "POST" || request.method === "PUT")) {
+      return write(ctx, pathname.slice("/api/".length), await body(request));
+    }
 
-  // Read — open to everyone (non-members get a read-only view of the chart).
-  // No seeding: an empty chart is an honest empty chart.
-  if (reqPath === "/api/list" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      chores: await listRows(table("chores", sfiId)),
-    });
-  }
+    // Read — open to everyone (non-members get a read-only view of the chart).
+    // No seeding: an empty chart is an honest empty chart.
+    if (pathname === "/api/list" && request.method === "GET") return json({ chores: await listRows(ctx) });
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Chore Chart frame is up and running!");

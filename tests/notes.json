@@ -1,0 +1,46 @@
+{
+  "tier": "members",
+  "publish": "open",
+  "steps": [
+    { "why": "a note an installed copy left behind", "as": "collaborator", "at": "space", "do": "KV.PUT t/notes/old1", "body": { "body": "An old thought #Idea", "tags": "idea", "author_name": "Collaborator", "author_id": "{did:collaborator}", "created_ms": 5, "edited_ms": 0, "pinned": 1, "_created_at": 5, "_modified_at": 5 }, "status": 200 },
+
+    { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["id=\"app\"", "/lib/js/framelib.js", "/dyn/frame-prefs.css"], "lacks": ["<form", "busSend", "frame.api"] },
+    { "why": "a stranger is told who they are", "do": "GET {api}/whoami", "status": 200, "is": { "/is_anon": true, "/is_sfi_member": false, "/is_sfi_editor": false, "/is_owner": false, "/user_id": "" } },
+    { "why": "and reads the stream, the old note in the shape it was left", "do": "GET {api}/list", "status": 200, "is": { "/notes/0/id": "old1", "/notes/0/body": "An old thought #Idea", "/notes/0/tags": ["idea"], "/notes/0/created_ms": 5, "/notes/0/pinned": true, "/notes/0/author_name": "Collaborator" }, "absent": ["/notes/1"] },
+    { "why": "a stranger posts nothing", "do": "POST {api}/note", "body": { "body": "hi" }, "status": 403, "is": { "/error": "editors only" } },
+    { "why": "edits nothing", "do": "POST {api}/note/old1", "body": { "body": "mine" }, "status": 403 },
+    { "why": "pins nothing", "do": "POST {api}/note/old1/pin", "body": { "pinned": 0 }, "status": 403 },
+    { "why": "deletes nothing", "do": "POST {api}/note/old1/delete", "body": {}, "status": 403 },
+    { "why": "a stranger writes no row at the door", "do": "KV.PUT t/notes/x", "body": { "body": "x" }, "status": 403 },
+    { "why": "someone signed in and on no roster only reads", "as": "signed", "do": "POST {api}/note", "body": { "body": "hi" }, "status": 403 },
+    { "why": "and is named to themselves", "as": "signed", "do": "GET {api}/whoami", "is": { "/is_anon": true, "/is_sfi_member": false, "/is_sfi_editor": false, "/user_id": "{did:signed}" } },
+
+    { "why": "a viewer is a member who may not edit", "as": "viewer", "do": "GET {api}/whoami", "is": { "/is_anon": false, "/is_sfi_member": true, "/is_sfi_editor": false, "/is_owner": false } },
+    { "why": "a viewer reads the stream", "as": "viewer", "do": "GET {api}/list", "status": 200, "is": { "/notes/0/id": "old1" } },
+    { "why": "a viewer posts nothing", "as": "viewer", "do": "POST {api}/note", "body": { "body": "hi" }, "status": 403 },
+    { "why": "edits nothing", "as": "viewer", "do": "PUT {api}/note/old1", "body": { "body": "mine" }, "status": 403 },
+    { "why": "pins nothing", "as": "viewer", "do": "POST {api}/note/old1/pin", "body": { "pinned": 0 }, "status": 403 },
+    { "why": "deletes nothing", "as": "viewer", "do": "POST {api}/note/old1/delete", "body": {}, "status": 403 },
+    { "why": "nothing was written by any of that", "table": "notes", "has": ["An old thought #Idea"], "lacks": ["\"hi\"", "mine"] },
+
+    { "why": "a collaborator is an editor", "as": "collaborator", "do": "GET {api}/whoami", "is": { "/is_sfi_editor": true, "/is_owner": false, "/user_id": "{did:collaborator}" } },
+    { "why": "an empty note is refused", "as": "collaborator", "do": "POST {api}/note", "body": { "body": "   " }, "status": 400, "is": { "/error": "empty note" } },
+    { "why": "a collaborator posts, and is answered with the stream", "as": "collaborator", "do": "POST {api}/note", "body": { "body": "Buy milk #Home #errands. #home" }, "status": 200, "is": { "/notes/0/body": "Buy milk #Home #errands. #home", "/notes/0/tags": ["home", "errands"], "/notes/0/author_name": "Collaborator", "/notes/0/author_id": "{did:collaborator}", "/notes/0/pinned": false, "/notes/0/edited_ms": 0, "/notes/1/id": "old1" }, "save": { "milk": "/notes/0/id" } },
+    { "why": "as a row of the space, in the shape installed copies hold", "table": "notes", "has": ["Buy milk #Home #errands. #home", "\"tags\":\"home,errands\"", "\"pinned\":0", "\"edited_ms\":0", "\"author_name\":\"Collaborator\"", "created_ms", "_created_at", "_modified_at"] },
+    { "why": "a note that does not exist cannot be edited", "as": "collaborator", "do": "POST {api}/note/nope", "body": { "body": "x" }, "status": 400, "is": { "/error": "bad id" } },
+    { "why": "nor an act there is none of", "as": "collaborator", "do": "POST {api}/note/{milk}/frobnicate", "body": {}, "status": 404 },
+    { "why": "nor a route", "as": "collaborator", "do": "POST {api}/nothing", "body": {}, "status": 404 },
+    { "why": "an edit to nothing is refused", "as": "collaborator", "do": "PUT {api}/note/{milk}", "body": { "body": "" }, "status": 400 },
+    { "why": "an edit re-derives the tags", "as": "collaborator", "do": "PUT {api}/note/{milk}", "body": { "body": "Buy oat milk #shopping" }, "status": 200, "is": { "/notes/0/body": "Buy oat milk #shopping", "/notes/0/tags": ["shopping"], "/notes/0/author_name": "Collaborator" } },
+    { "why": "and stamps the edit over the row, which kept who wrote it", "table": "notes", "has": ["\"tags\":\"shopping\"", "\"author_id\":\"{did:collaborator}\""], "lacks": ["home,errands"] },
+    { "why": "the old note is unpinned, keeping what it held", "as": "collaborator", "do": "POST {api}/note/old1/pin", "body": { "pinned": 0 }, "status": 200, "is": { "/notes/1/id": "old1", "/notes/1/pinned": false, "/notes/1/body": "An old thought #Idea", "/notes/1/created_ms": 5, "/notes/1/tags": ["idea"] } },
+    { "why": "and a stranger sees it so", "do": "GET {api}/list", "is": { "/notes/1/pinned": false, "/notes/0/body": "Buy oat milk #shopping" } },
+
+    { "why": "the owner is an editor", "as": "owner", "do": "GET {api}/whoami", "is": { "/is_owner": true, "/is_sfi_editor": true } },
+    { "why": "the owner pins a note", "as": "owner", "do": "POST {api}/note/{milk}/pin", "body": { "pinned": 1 }, "status": 200, "is": { "/notes/0/pinned": true, "/notes/0/body": "Buy oat milk #shopping" } },
+    { "why": "and posts one", "as": "owner", "do": "POST {api}/note", "body": { "body": "Keeper here" }, "status": 200, "is": { "/notes/0/body": "Keeper here", "/notes/0/tags": [] }, "save": { "mine": "/notes/0/id" } },
+    { "why": "and deletes the old one", "as": "owner", "do": "POST {api}/note/old1/delete", "body": {}, "status": 200, "absent": ["/notes/2"] },
+    { "why": "which is gone from the table", "table": "notes", "lacks": ["An old thought"], "has": ["Keeper here", "Buy oat milk"] },
+    { "why": "a collaborator deletes the owner's note too", "as": "collaborator", "do": "POST {api}/note/{mine}/delete", "body": {}, "status": 200, "is": { "/notes/0/body": "Buy oat milk #shopping" }, "absent": ["/notes/1"] }
+  ]
+}

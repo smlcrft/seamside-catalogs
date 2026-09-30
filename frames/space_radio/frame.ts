@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------------------
-// Space Radio — synced, shared web radio player for SFI members.
+// Space Radio — synced, shared web radio player for everyone in a space.
 //
 // Auth model: reads are open to every viewer who reaches the frame — whether a
 // non-member can reach it at all is the platform's call (the space's tier, publishing
@@ -8,17 +8,15 @@
 // because the experience only makes sense for the group of people sitting in the space.
 //
 // Shared state per session: { station_id, playing, updated_by_name, updated_at }, the
-// session's own `playstate` key. Any editor can flip it; every change is pushed to everyone
-// on the session via pushToInstance() so audio elements stay in lockstep.
+// session's own `playstate` key. Any editor can flip it; every change pushes
+// `{ space_radio: "playstate" }` so every open page reads again and the audio elements
+// stay in lockstep.
 //
-// Per-user state (volume / mute / last-volume) is kept entirely in the browser's
-// localStorage — it never travels through the backend and is not synced across viewers.
+// Per-user state (volume / mute) is kept in the browser (seamside.prefs) — it never
+// travels through the backend and is not synced across viewers.
 // ----------------------------------------------------------------------------------------
-import {
-  log, parsePeerInfo, serveFileAtPath, serveHtmlShell, pushToInstance, onUiMessage,
-  jsonReply, parseJsonBody, sanitizeText,
-  sessionKv,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
 // STATION CATALOG — embedded directly so a frame update can extend the list without any
@@ -148,11 +146,8 @@ const STATIONS: Station[] = [
 const STATION_INDEX = new Set(STATIONS.map((s) => s.id));
 
 // ----------------------------------------------------------------------------------------
-// PER-SESSION STATE — the session's `playstate` key (sessionKv): station + playing + who
-// last changed it, pushed to everyone on the session. Two radios in one space play apart.
-// Per-device volume/mute is NOT stored here — each viewer keeps it in their own browser
-// localStorage via framelib (frame.localStorageSetItem/GetItem; see public/index.js), so
-// it never travels through the backend and is never synced across viewers.
+// PER-SESSION STATE — the session's `playstate` key (ctx.kv): station + playing + who
+// last changed it. Two radios in one space play apart.
 // ----------------------------------------------------------------------------------------
 type Playstate = {
   station_id: string | null;
@@ -167,9 +162,9 @@ const DEFAULT_PLAYSTATE: Playstate = {
   updated_by_name: "",
 };
 
-async function getPlaystate(): Promise<Playstate> {
+async function getPlaystate(ctx: Ctx): Promise<Playstate> {
   let r: Partial<Playstate> = {};
-  try { const op = await sessionKv.get("playstate"); if (op?.value) r = JSON.parse(op.value); } catch { /* unreadable → default */ }
+  try { const op = await ctx.kv.get("playstate"); if (op?.value) r = JSON.parse(op.value); } catch { /* unreadable → default */ }
   return {
     station_id: r.station_id ?? DEFAULT_PLAYSTATE.station_id,
     playing: r.playing ?? DEFAULT_PLAYSTATE.playing,
@@ -177,26 +172,25 @@ async function getPlaystate(): Promise<Playstate> {
     updated_by_name: r.updated_by_name ?? DEFAULT_PLAYSTATE.updated_by_name,
   };
 }
-async function setPlaystate(next: Playstate): Promise<void> {
-  await sessionKv.put("playstate", JSON.stringify(next));
+async function setPlaystate(ctx: Ctx, next: Playstate): Promise<void> {
+  await ctx.kv.put("playstate", JSON.stringify(next));
 }
 
+const isEditor = (ctx: Ctx) => ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+
 // ----------------------------------------------------------------------------------------
-// MUTATION — shared by the HTTP arm and the bus dispatcher below; same validation, same
-// role gate, either entry point.
-//
-// Set station and/or playing. Both fields are optional — omitted fields preserve the
-// current value, so the UI can toggle just play/pause without re-sending the station id.
-// An empty / null station_id explicitly clears the station and forces playing=false
-// (you can't be "playing nothing").
+// MUTATION — set station and/or playing. Both fields are optional — omitted fields
+// preserve the current value, so the UI can toggle just play/pause without re-sending the
+// station id. An empty / null station_id explicitly clears the station and forces
+// playing=false (you can't be "playing nothing").
 // ----------------------------------------------------------------------------------------
-type MutPeer = ReturnType<typeof parsePeerInfo>;
 type MutResult = { status: number; body: unknown };
 
-async function mutSet(sfiId: string, v: { station_id?: unknown; playing?: unknown } | null, peer: MutPeer): Promise<MutResult> {
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  if (!sfiId) return { status: 400, body: { error: "sfi_id missing" } };
-  const cur = await getPlaystate();
+async function mutSet(ctx: Ctx, v: { station_id?: unknown; playing?: unknown } | null): Promise<MutResult> {
+  // Never gate writes on is_sfi_member — a Viewer-role member would slip through and be
+  // able to change the station for everyone.
+  if (!isEditor(ctx)) return { status: 403, body: { error: "editors only" } };
+  const cur = await getPlaystate(ctx);
 
   let stationId: string | null = cur.station_id;
   if (Object.prototype.hasOwnProperty.call(v ?? {}, "station_id")) {
@@ -216,70 +210,57 @@ async function mutSet(sfiId: string, v: { station_id?: unknown; playing?: unknow
   }
   if (!stationId) playing = false;
 
-  const userName = sanitizeText(peer.user_name, 80) || "user";
+  const userName = sanitizeText(ctx.peer.user_name, 80) || "user";
   const next: Playstate = {
     station_id: stationId,
     playing,
     updated_at: Date.now(),
     updated_by_name: userName,
   };
-  await setPlaystate(next);
-  // A push reaches every session of the frame in the space: it says "re-read", never what.
-  pushToInstance(sfiId, { type: "radio_state" });
+  await setPlaystate(ctx, next);
+  // What changed, never what it holds: each page reads again as whoever it is.
+  ctx.push({ space_radio: "playstate" });
   return { status: 200, body: { ok: true, playstate: next } };
 }
-
-// Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame). `peer` is the
-// sender's platform-resolved identity, same shape as parsePeerInfo; the role gate lives
-// inside mutSet. Denials are logged, not answered.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  const r = d.op === "set" ? await mutSet(sfiId, d, peer) : null;
-  if (r && r.status !== 200) log(`space_radio: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
 
 // ----------------------------------------------------------------------------------------
 // HANDLER
 // ----------------------------------------------------------------------------------------
-self.onNetworkRequest = async (replyPort, reqPath, method, _headers, query, body, cookies) => {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
+const json = (v: unknown, status = 200) => Response.json(v, { status });
 
-  // UI shell — served to everyone.
-  if (reqPath === "/index.html" && method === "GET") {
-    // The script is a separate ES module file so it can import /lib/js/framelib.js —
-    // inlineJs would flatten the <script type="module"> to a non-module <script>,
-    // which can't use ES module imports, so it's intentionally omitted here.
-    return serveHtmlShell(replyPort, new URL("./public/index.html", import.meta.url), {
-      peer,
-      inlineCss: ["index.css"],
-    });
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
   }
+}
 
-  if (reqPath === "/api/state" && method === "GET") {
-    if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
-    return jsonReply(replyPort, 200, {
-      stations: STATIONS,
-      playstate: await getPlaystate(),
-      // Editor-only dial. Never gate writes on is_sfi_member — a Viewer-role member
-      // would slip through and be able to change the station for everyone.
-      can_edit: peer.is_sfi_editor,
-      me: { user_id: peer.user_id, user_name: peer.user_name, device_id: peer.device_id },
-    });
-  }
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
+    const peer = ctx.peer;
 
-  // HTTP arm kept for API compatibility (older viewers, web viewer fallback); the frame's
-  // own UI writes over the bus (see the dispatcher above). Same function, same gate.
-  if (reqPath === "/api/set" && method === "POST") {
-    const r = await mutSet(sfiId, parseJsonBody<{ station_id?: unknown; playing?: unknown }>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (pathname === "/api/state" && method === "GET") {
+      return json({
+        stations: STATIONS,
+        playstate: await getPlaystate(ctx),
+        can_edit: isEditor(ctx),
+        space_color: peer.space_color,
+        me: { user_id: peer.user_id, user_name: peer.user_name, device_id: "" },
+      });
+    }
 
-  if (method === "GET") {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-  }
-  replyPort.postMessage({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Not found.", code: "NOT_FOUND" }) });
+    if (pathname === "/api/set" && method === "POST") {
+      const r = await mutSet(ctx, await body(request));
+      return json(r.body, r.status);
+    }
+
+    // The UI shell and its files — served to everyone.
+    if (method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
+
+    return json({ error: "Not found.", code: "NOT_FOUND" }, 404);
+  },
 };
-
-log("Space Radio frame is up.");
