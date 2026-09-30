@@ -1,6 +1,6 @@
 {
     "name": "Discussion Channel",
-    "description": "A realtime chat channel for a space. Editors chat, react with Phosphor Light icons and delete their own messages; the owner renames the channel, can delete any message, and chooses whether Viewer-role members may participate too (off by default). Everyone else the frame reaches, including anyone it is published to, reads the channel live without posting. Messages and reactions are tables in the space's frame data folder, discussion_messages and discussion_reactions, synced with the space; and so is the channel's name (discussion_settings); the viewers toggle, which decides who may post, is this frame's own setting.",
+    "description": "A realtime chat channel for a space. Editors chat, react with Phosphor Light icons and delete their own messages; the owner renames the channel, can delete any message, and chooses whether Viewer-role members may participate too (off by default). Everyone else the frame reaches, including anyone it is published to, reads the channel live without posting. Messages and reactions are tables in the space's frame data folder, discussion_messages and discussion_reactions, synced with the space; the channel's name and the viewers toggle are the owner's, so they are this session's own settings, which no door reaches.",
     "frame_type": "Tandem",
     "tags": ["community", "chat"],
     "created_at": "2026-05-01T00:00:00Z",

@@ -104,7 +104,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.fill('.dialog input[type="text"]', 'Tool Shed');
   await keeper.click('.dialog-actions button:last-child');
   const kept = (await viaFrame('/api/state', (s) => s.prefs?.org_name === 'Tool Shed'))?.prefs ?? {};
-  expect(await untilRows('the shared rules', '_fdata/library_settings', (r) => r.find((x) => x.id === 'library' && /Tool Shed/.test(x.cells.v) && !/owner_only_edit/.test(x.cells.v))), "the library's rules are kept beside its items, and who may edit is not");
+  expect(await untilRows('the rules', '_settings', (r) => r.find((x) => x.id === 'library' && /Tool Shed/.test(x.cells.v) && !/owner_only_edit/.test(x.cells.v))), "the library's rules are kept as the session's own, apart from who may edit");
   expect(kept.org_name === 'Tool Shed' && kept.item_types?.length === 5 && kept.borrow_options?.length === 4 && kept.default_borrow_days === 7 && kept.owner_only_edit === false, 'the settings are kept');
   expect(await keeper.until('the name', `document.querySelector('.page-header h1').textContent === 'Tool Shed' && !document.querySelector('.dialog')`), 'and the page takes the new name');
   await keeper.shot('6-library');

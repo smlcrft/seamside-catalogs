@@ -11,9 +11,10 @@
 //   - Everyone else who reaches the frame — viewers while the toggle is off, and anyone
 //     the frame is published to — reads the channel live, through GET /api/state.
 //   - Messages and reactions are the space's frame data, _fdata/discussion_messages and
-//     _fdata/discussion_reactions, synced with the space, and so is the title, a row of
-//     _fdata/discussion_settings; the viewers toggle decides who may post, so it is a row
-//     of this session's own settings, which no door writes.
+//     _fdata/discussion_reactions, synced with the space. The title and the viewers toggle
+//     are the owner's alone, so they are rows of this session's own settings, which no door
+//     reaches: a shared table would let a collaborator rewrite them at the door, around the
+//     owner check made here.
 //
 // Realtime: a push says what changed and never what it holds. Every open page of the
 // frame hears it and reads the channel again as whoever it is.
@@ -23,10 +24,9 @@ import { declareTables, sanitizeText } from "@frame-core";
 
 const MESSAGES = "discussion_messages";
 const REACTIONS = "discussion_reactions";
-// Settings, one row per key, each value JSON under `v`. The title describes the channel, so
-// it is the space's, beside the messages; who may post is decided here alone, so it stays in
-// this session's own settings, which no door writes.
-const CHANNEL_SETTINGS = "discussion_settings";
+// Settings, one row per key, each value JSON under `v`. Only the owner changes them, so they
+// are this session's own table: a shared one would let a collaborator write them at the door
+// and get around the owner check made here.
 const SETTINGS = "settings";
 
 // ----------------------------------------------------------------------------------------
@@ -138,12 +138,12 @@ type Prefs = { title: string; public_to_space_viewers: boolean };
 const DEFAULT_PREFS: Prefs = { title: "Discussion", public_to_space_viewers: false };
 
 async function getPrefs(ctx: Ctx): Promise<Prefs> {
-  const title = await setting<string>(ctx, CHANNEL_SETTINGS, "discussion_title");
+  const title = await setting<string>(ctx, SETTINGS, "discussion_title");
   const viewers = await setting<boolean>(ctx, SETTINGS, "discussion_viewers_participate");
   return { title: title || DEFAULT_PREFS.title, public_to_space_viewers: viewers === true };
 }
 async function setPrefs(ctx: Ctx, next: Prefs): Promise<void> {
-  await setSetting(ctx, CHANNEL_SETTINGS, "discussion_title", next.title);
+  await setSetting(ctx, SETTINGS, "discussion_title", next.title);
   await setSetting(ctx, SETTINGS, "discussion_viewers_participate", next.public_to_space_viewers);
 }
 

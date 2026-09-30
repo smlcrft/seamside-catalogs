@@ -20,9 +20,9 @@
 // Posts, media rows and votes are tables in the space's frame data folder (_fdata/posts,
 // _fdata/post_media, _fdata/post_votes), where any frame of the space may read them.
 // Attached media are files beside the posts table, _fdata/posts/<post_id>/, served by this
-// worker to everyone who reads the board. The heading and tagline describe the board, so they
-// are rows of the shared _fdata/board_settings beside it; who may post decides who may act,
-// so it is a row of the session's own settings table, which no collaborator reaches.
+// worker to everyone who reads the board. The heading, tagline and who may post are the
+// owner's alone, so they are rows of the session's own settings table, which no door reaches:
+// a shared table would let a collaborator rewrite them at the door, around the owner check.
 // Every write pushes what to read again; each open page reads again as whoever it is.
 // ----------------------------------------------------------------------------------------
 import type { Ctx, FrameTableDecl, PeerInfo } from "@frame-core";
@@ -70,8 +70,7 @@ function postDir(postId: string): string {
 const POSTS = "posts";
 const MEDIA = "post_media";
 const VOTES = "post_votes";
-const BOARD = "board_settings";   // shared: title, tagline
-const SETTINGS = "settings";      // the session's own: who_can_post
+const SETTINGS = "settings";      // the session's own: title, tagline, who_can_post
 
 const TABLES: FrameTableDecl[] = [
   {
@@ -154,7 +153,7 @@ function by(...cols: string[]) {
 }
 
 // ----- Settings -------------------------------------------------------------------------
-// A setting is a row `{id: key, v: JSON}` of `table` (BOARD or SETTINGS).
+// A setting is a row `{id: key, v: JSON}` of the session's own SETTINGS.
 async function setting<T>(ctx: Ctx, table: string, key: string): Promise<T | null> {
   const row = await rows(ctx, table).get(key);
   if (row?.v == null) return null;
@@ -165,8 +164,8 @@ const setSetting = (ctx: Ctx, table: string, key: string, value: unknown) =>
 
 async function getPrefs(ctx: Ctx): Promise<Prefs> {
   const [title, tagline, who] = await Promise.all([
-    setting<string>(ctx, BOARD, "title"),
-    setting<string>(ctx, BOARD, "tagline"),
+    setting<string>(ctx, SETTINGS, "title"),
+    setting<string>(ctx, SETTINGS, "tagline"),
     setting<string>(ctx, SETTINGS, "who_can_post"),
   ]);
   return {
@@ -178,8 +177,8 @@ async function getPrefs(ctx: Ctx): Promise<Prefs> {
 
 async function setPrefs(ctx: Ctx, next: Prefs): Promise<void> {
   await Promise.all([
-    setSetting(ctx, BOARD, "title", next.title),
-    setSetting(ctx, BOARD, "tagline", next.tagline),
+    setSetting(ctx, SETTINGS, "title", next.title),
+    setSetting(ctx, SETTINGS, "tagline", next.tagline),
     setSetting(ctx, SETTINGS, "who_can_post", next.who_can_post),
   ]);
 }

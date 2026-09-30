@@ -100,11 +100,11 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.inFrame(`document.querySelector('.card .field input.txt').id = 'op-tagline'; return true;`);
   await keeper.fill('#op-tagline', 'News from the shed');
   await keeper.inFrame(`document.querySelector('#op-tagline').blur(); return true;`);
-  expect(await untilRows('the tagline', '_fdata/board_settings', (r) => r.find((x) => x.id === 'tagline' && x.cells.v === '"News from the shed"')), 'the tagline is kept as the board\'s, beside its posts');
+  expect(await untilRows('the tagline', '_settings', (r) => r.find((x) => x.id === 'tagline' && x.cells.v === '"News from the shed"')), 'the tagline is kept as the session\'s own setting');
   expect(await keeper.until('the tagline to show', `document.querySelector('.header .tagline')?.textContent === 'News from the shed'`), 'and shown under the heading');
   await keeper.fill('input.htitle', 'Shed board');
   await keeper.inFrame(`document.querySelector('input.htitle').blur(); return true;`);
-  expect(await untilRows('the heading', '_fdata/board_settings', (r) => r.find((x) => x.id === 'title' && x.cells.v === '"Shed board"')), 'and so is the heading');
+  expect(await untilRows('the heading', '_settings', (r) => r.find((x) => x.id === 'title' && x.cells.v === '"Shed board"')), 'and so is the heading');
   await keeper.click('.card .seg:not(.kinds-seg) button:nth-child(2)');
   expect(await untilRows('who may post', '_settings', (r) => r.find((x) => x.id === 'who_can_post' && x.cells.v === '"owner"')), 'Owner only is kept as the session\'s own setting');
   expect(await keeper.until('the choice to hold', `document.querySelector('.card .seg:not(.kinds-seg) button.active')?.textContent.trim() === 'Owner only' && !!document.querySelector('textarea.compose')`), 'and shown, the owner still posting');

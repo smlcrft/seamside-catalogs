@@ -4,11 +4,10 @@
 // (`_fdata/library_assets.table.jsonl`) for items + checkout info, and a `members` list —
 // `members.table.jsonl` or a subtype such as `club.members.table.jsonl` — the roster Member
 // Manager keeps, which this frame only reads. Each session is bound to one list (ctx.kv
-// `bound/members`), chosen by an editor. What describes the library (its name, item types,
-// loan lengths) goes with the items: the `library` row of `_fdata/library_settings`, so every
-// session and every member's copy follows one set of rules. Who may edit is this session's
-// own: the `prefs` row of its own `settings` table (`ctx.own`), which no wire serves, since
-// a table in `_fdata` is any collaborator's to write at the door.
+// `bound/members`), chosen by an editor. The library's rules (its name, item types, loan
+// lengths: the `library` row) and who may edit (the `prefs` row) are the owner's alone, so
+// both are rows of this session's own `settings` table (`ctx.own`), which no door reaches:
+// a table in `_fdata` is any collaborator's to write at the door, around the owner check.
 //
 // Anyone not on the space's roster is shown what is in and what is out, and nothing else:
 // the page reads no item itself, and every route decides on ctx.peer.
@@ -42,10 +41,9 @@ const NEW_ASSET = { needs_attention: 0 };
 type Row = Record<string, unknown> & { id: string };
 
 type Rows = Table<Record<string, unknown>>;
-/** The shared items and the library's rules beside them; this session's own settings (a
- *  settings value is JSON under `v`); a members list. */
+/** The shared items; this session's own settings (a settings value is JSON under `v`); a
+ *  members list. */
 const assetTable = (ctx: Ctx): Rows => ctx.shared.table(ASSETS);
-const libraryRules = (ctx: Ctx): Rows => ctx.shared.table("library_settings");
 const settings = (ctx: Ctx): Rows => ctx.own.table("settings");
 const rows = (ctx: Ctx, list: string): Rows => ctx.table(list);
 
@@ -75,7 +73,7 @@ async function boundList(ctx: Ctx): Promise<string | null> {
   return validList(v) ? v : null;
 }
 
-// ----- Preferences: the library's rules (shared) and who may edit (this session's own) ----
+// ----- Preferences: the library's rules and who may edit, both this session's own --------
 type BorrowOption = { label: string; days: number };
 type Prefs = {
   org_name: string;
@@ -101,8 +99,8 @@ const DEFAULT_PREFS: Prefs = {
 const LIBRARY_KEY = "library";
 const PREFS_KEY = "prefs";
 
-/** A settings row's JSON, or nothing when absent or unreadable. The shared row is any
- *  collaborator's to write, so what it holds is checked below as it is read. */
+/** A settings row's JSON, or nothing when absent or unreadable; what it holds is checked
+ *  below as it is read. */
 async function stored(t: Rows, id: string): Promise<Partial<Prefs>> {
   try {
     const row = await t.get(id);
@@ -114,7 +112,7 @@ async function stored(t: Rows, id: string): Promise<Partial<Prefs>> {
 }
 
 async function getPrefs(ctx: Ctx): Promise<Prefs> {
-  const library = await stored(libraryRules(ctx), LIBRARY_KEY);
+  const library = await stored(settings(ctx), LIBRARY_KEY);
   const p: Partial<Prefs> = {
     ...(Object.keys(library).length ? library : DEFAULT_PREFS),
     owner_only_edit: (await stored(settings(ctx), PREFS_KEY)).owner_only_edit,
@@ -140,7 +138,7 @@ async function getPrefs(ctx: Ctx): Promise<Prefs> {
 
 async function setPrefs(ctx: Ctx, next: Prefs): Promise<void> {
   const { owner_only_edit, ...library } = next;
-  await keep(libraryRules(ctx), LIBRARY_KEY, { v: JSON.stringify(library) });
+  await keep(settings(ctx), LIBRARY_KEY, { v: JSON.stringify(library) });
   await keep(settings(ctx), PREFS_KEY, { v: JSON.stringify({ owner_only_edit }) });
 }
 

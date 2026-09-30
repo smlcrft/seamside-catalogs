@@ -205,7 +205,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_library.tar.gz",
-      "package_sha256": "f5e2384a01052c7bc74baf4e0bed2b85f8ea20abaa957c2b5907339b0d19564c",
+      "package_sha256": "5dcad4c5be723cc4293b8b3d1a1cd9138d427bfccb0f2acf98578af959a00eb6",
       "color": "c8",
       "app_version_min": "1.0.12",
       "tags": [
@@ -218,7 +218,7 @@
       "kind": "Frames",
       "id": "discussion_channel",
       "name": "Discussion Channel",
-      "description": "A realtime chat channel for a space. Editors chat, react with Phosphor Light icons and delete their own messages; the owner renames the channel, can delete any message, and chooses whether Viewer-role members may participate too (off by default). Everyone else the frame reaches, including anyone it is published to, reads the channel live without posting. Messages and reactions are tables in the space's frame data folder, discussion_messages and discussion_reactions, synced with the space; and so is the channel's name (discussion_settings); the viewers toggle, which decides who may post, is this frame's own setting.",
+      "description": "A realtime chat channel for a space. Editors chat, react with Phosphor Light icons and delete their own messages; the owner renames the channel, can delete any message, and chooses whether Viewer-role members may participate too (off by default). Everyone else the frame reaches, including anyone it is published to, reads the channel live without posting. Messages and reactions are tables in the space's frame data folder, discussion_messages and discussion_reactions, synced with the space; the channel's name and the viewers toggle are the owner's, so they are this session's own settings, which no door reaches.",
       "icon": "ph:chats-circle",
       "modified_at": "2026-09-30T22:00:00Z",
       "frame_preview": {
@@ -228,7 +228,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/discussion_channel.tar.gz",
-      "package_sha256": "2280d8ac4e43aa7f70c1358acfde9bf8de10d25cc8af4e18ee07915619020089",
+      "package_sha256": "2fa0ba6b151a3e805366e9a343d43ee23a06561865646a2dc1cf772886339083",
       "color": "c1",
       "app_version_min": "1.0.12",
       "tags": [
@@ -683,7 +683,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/outpost.tar.gz",
-      "package_sha256": "867ab07dc869251f47dfb066e89deb126b05850ff432f6134e407b5664d2a32d",
+      "package_sha256": "0a6570027b92a1030fe374dd2dc5d8a7c21db92edd35c680899df21f482ebec6",
       "color": "c6",
       "app_version_min": "1.0.12",
       "tags": [
@@ -762,7 +762,7 @@
       "kind": "Frames",
       "id": "roundtable",
       "name": "Roundtable",
-      "description": "A space's discussion plus two prioritized idea boards. Editors chat in a single channel, add items to a Positives list (features, tasks) or a Negatives list (issues, bugs), and +1 the ones that matter; items rank by votes, then recency. Editors delete their own; the owner can delete anything, renames the frame and its two lists, and chooses whether Viewer-role members may participate too (off by default). Everyone else the frame reaches, including anyone it is published to, follows along live, read-only. Messages, items and votes are tables in the space's frame data folder (roundtable_messages, roundtable_items, roundtable_votes); and so are the title and list labels (roundtable_settings); the viewers toggle, which decides who may take part, is this frame's own setting.",
+      "description": "A space's discussion plus two prioritized idea boards. Editors chat in a single channel, add items to a Positives list (features, tasks) or a Negatives list (issues, bugs), and +1 the ones that matter; items rank by votes, then recency. Editors delete their own; the owner can delete anything, renames the frame and its two lists, and chooses whether Viewer-role members may participate too (off by default). Everyone else the frame reaches, including anyone it is published to, follows along live, read-only. Messages, items and votes are tables in the space's frame data folder (roundtable_messages, roundtable_items, roundtable_votes); the title, list labels and viewers toggle are the owner's, so they are this session's own settings, which no door reaches.",
       "icon": "ph:users-three",
       "modified_at": "2026-09-30T22:00:00Z",
       "frame_preview": {
@@ -772,7 +772,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roundtable.tar.gz",
-      "package_sha256": "9629ce063f3e1287243bd90f373022e653f053f148f855775607c2d74f5372b2",
+      "package_sha256": "70ef2f1a5854e3268b38e029e1c164b4281598a7261364e36317faaef00fa037",
       "color": "c1",
       "app_version_min": "1.0.12",
       "tags": [
