@@ -2,15 +2,16 @@
 // Assignments — what's due, and where you stand.
 //
 // Design axes:
-//   privacy:        privacy-public-view  — a study group sees the same board; space editors
-//                                           add and tick.
+//   privacy:        privacy-public-view  — a study group sees the same board, through
+//                                           GET /api/list; space editors add and tick,
+//                                           every write a route here.
 //   data_storage:   the space's tables   — `assignments.table.jsonl` (the work) and
 //                                           `assignments_courses.table.jsonl`, files at the
 //                                           space's root, synced with it. Named for this frame:
 //                                           courses are its own data, not a contract other
 //                                           frames share (see "When NOT to write a contract"
 //                                           in docs/schema-contracts.md).
-//   view_realtime:  view-collaborative    — every write pushes.
+//   view_realtime:  view-collaborative    — every write pushes what to read again.
 //   settings_scope: settings-per-sfi
 //
 // THE ARITHMETIC IS THE PRODUCT. Anyone can list due dates; the reason students keep this
@@ -18,10 +19,8 @@
 // set of rounding decisions — rather than in the frontend where an optimistic update could
 // briefly show a number that was never true.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, declareTables, ensureTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText } from "@frame-core";
 
 const COURSES = "assignments_courses";
 const WORK = "assignments";
@@ -52,8 +51,32 @@ declareTables([
   { key: WORK,    title: "Assignments", description: "Assignments for this space's courses.", local: true, schema: WORK_SCHEMA },
 ]);
 
-type Peer = ReturnType<typeof parsePeerInfo>;
-type WriteResult = { status: number; body: unknown };
+type Row = Record<string, unknown> & { id: string };
+
+const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+
+/** What a new row holds before anything is said of it: the schema's own defaults. */
+const defaultsOf = (schema: { name: string; col_type: string; default_val: string }[]) =>
+  Object.fromEntries(schema.map((c) => [c.name, c.col_type === "text" ? c.default_val : Number(c.default_val)]));
+const DEFAULTS: Record<string, Record<string, unknown>> = {
+  [COURSES]: defaultsOf(COURSES_SCHEMA),
+  [WORK]: defaultsOf(WORK_SCHEMA),
+};
+
+/** Write a row over what it held (a new one from the schema's defaults), stamped. */
+async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await rows(ctx, name).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx, name).upsert({
+    ...(was ?? { ...DEFAULTS[name], _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+const bySortOrder = (a: Row, b: Row) =>
+  (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || (Number(a._created_at) || 0) - (Number(b._created_at) || 0);
 
 /** yyyy-mm-dd from LOCAL calendar fields. Same rule as the habit tracker: a due date is
  * the day the student is living in, and deriving it by dividing a timestamp slides it a
@@ -113,24 +136,12 @@ function gradeCourse(work: WorkRow[]) {
   return { pct, graded_weight: wsum, assigned_weight: assigned, letter, points };
 }
 
-async function readyTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  for (const key of [COURSES, WORK]) {
-    if (!r.byKey[key]) {
-      try { await table(key, peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`assignments: ensure "${key}" failed: ${e}`); }
-      r = ensureTables(quiet);
-    }
-  }
-  return !!r.byKey[COURSES] && !!r.byKey[WORK];
-}
-
-async function readAll(sfiId: string) {
-  const { rows: crows } = await table(COURSES, sfiId).query({ order_by: [{ col: "sort_order" }] });
-  const { rows: wrows } = await table(WORK, sfiId).query({ limit: 2000 });
+async function readAll(ctx: Ctx) {
+  const crows = (await rows(ctx, COURSES).all()).sort(bySortOrder);
+  const wrows = (await rows(ctx, WORK).all()).slice(0, 2000);
 
   const work: WorkRow[] = wrows.map((r) => ({
-    id: r._row_id, course_id: String(r.course_id || ""), title: String(r.title || ""),
+    id: r.id, course_id: String(r.course_id || ""), title: String(r.title || ""),
     due: String(r.due || ""), weight: Number(r.weight) || 0,
     size: clamp(Number(r.size) || 2, 1, 3),
     earned: Number(r.earned), possible: Number(r.possible) || 0,
@@ -141,7 +152,7 @@ async function readAll(sfiId: string) {
   for (const w of work) (byCourse[w.course_id] ||= []).push(w);
 
   const courses = crows.map((c) => {
-    const id = String(c._row_id);
+    const id = String(c.id);
     const g = gradeCourse(byCourse[id] || []);
     return {
       id, name: c.name, credits: Number(c.credits) || 0,
@@ -166,52 +177,51 @@ async function readAll(sfiId: string) {
   };
 }
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "assignments_changed" });
-}
+const json = (v: unknown, status = 200) => Response.json(v, { status });
 
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  if (!(await readyTables(peer))) return { status: 503, body: { error: "tables not ready" } };
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  const courses = table(COURSES, sfiId);
-  const work = table(WORK, sfiId);
+// `op` is the API path with "/api/" stripped.
+async function handleWrite(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<Response> {
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return json({ error: "editors only" }, 403);
+  const courses = rows(ctx, COURSES);
+  const work = rows(ctx, WORK);
 
-  const ok = async (): Promise<WriteResult> => { notify(sfiId); return { status: 200, body: { ok: true } }; };
+  // What changed, never what it holds: each page reads again as whoever it is.
+  const ok = () => { ctx.push({ assignments: "board" }); return json({ ok: true }); };
 
   // --- Courses --------------------------------------------------------------------------
   if (op === "course") {
     const name = sanitizeText(v?.name, 100);
-    if (!name) return { status: 400, body: { error: "name required" } };
-    const { rows } = await courses.query({ order_by: [{ col: "sort_order", dir: "desc" }], limit: 1 });
-    const next = rows.length ? (Number(rows[0].sort_order) || 0) + 1 : 0;
-    await courses.upsert(null, { name, credits: clamp(Number(v?.credits) || 3, 0, 20), sort_order: next });
+    if (!name) return json({ error: "name required" }, 400);
+    const all = await courses.all();
+    const next = all.length ? Math.max(...all.map((c) => Number(c.sort_order) || 0)) + 1 : 0;
+    await keep(ctx, COURSES, null, { name, credits: clamp(Number(v?.credits) || 3, 0, 20), sort_order: next });
     return ok();
   }
   if (op.startsWith("course/")) {
     const [id, action] = op.slice("course/".length).split("/");
-    if (!id || !(await courses.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!id || !(await courses.get(id))) return json({ error: "bad id" }, 400);
     if (action === "delete") {
       // Take the work with it — an assignment whose course is gone is invisible and would
       // silently keep counting toward nothing.
-      await work.deleteWhere({ course_id: id });
+      for (const w of await work.all()) if (w.course_id === id) await work.delete(w.id);
       await courses.delete(id);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
     const patch: Record<string, unknown> = {};
     if (v?.name !== undefined) { const n = sanitizeText(v.name, 100); if (n) patch.name = n; }
     if (v?.credits !== undefined) patch.credits = clamp(Number(v.credits) || 0, 0, 20);
-    if (Object.keys(patch).length) await courses.upsert(id, patch);
+    if (Object.keys(patch).length) await keep(ctx, COURSES, id, patch);
     return ok();
   }
 
   // --- Work -----------------------------------------------------------------------------
   if (op === "work") {
     const title = sanitizeText(v?.title, 200);
-    if (!title) return { status: 400, body: { error: "title required" } };
+    if (!title) return json({ error: "title required" }, 400);
     const courseId = String(v?.course_id ?? "");
-    if (!courseId || !(await courses.get(courseId))) return { status: 400, body: { error: "pick a course" } };
-    await work.upsert(null, {
+    if (!courseId || !(await courses.get(courseId))) return json({ error: "pick a course" }, 400);
+    await keep(ctx, WORK, null, {
       course_id: courseId, title,
       due: validDue(v?.due),
       weight: clamp(Number(v?.weight) || 0, 0, 100),
@@ -224,75 +234,71 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   if (op.startsWith("work/")) {
     const [id, action] = op.slice("work/".length).split("/");
     const row = id ? await work.get(id) : null;
-    if (!row) return { status: 400, body: { error: "bad id" } };
+    if (!row) return json({ error: "bad id" }, 400);
     if (action === "delete") { await work.delete(id); return ok(); }
-    if (action === "done") { await work.upsert(id, { done: Number(v?.done) ? 1 : 0 }); return ok(); }
+    if (action === "done") { await keep(ctx, WORK, id, { done: Number(v?.done) ? 1 : 0 }); return ok(); }
     if (action === "grade") {
       // A score of "" clears the mark back to ungraded rather than storing 0 — those mean
       // very different things to the average.
       const raw = String(v?.earned ?? "").trim();
-      if (raw === "") { await work.upsert(id, { earned: -1 }); return ok(); }
+      if (raw === "") { await keep(ctx, WORK, id, { earned: -1 }); return ok(); }
       const earned = Number(raw);
-      if (!Number.isFinite(earned) || earned < 0) return { status: 400, body: { error: "bad score" } };
+      if (!Number.isFinite(earned) || earned < 0) return json({ error: "bad score" }, 400);
       const patch: Record<string, unknown> = { earned, done: 1 };
       if (v?.possible !== undefined) patch.possible = clamp(Number(v.possible) || 0, 0, 100000);
-      await work.upsert(id, patch);
+      await keep(ctx, WORK, id, patch);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
     const patch: Record<string, unknown> = {};
     if (v?.title !== undefined) { const t = sanitizeText(v.title, 200); if (t) patch.title = t; }
     if (v?.due !== undefined) patch.due = validDue(v.due);
     if (v?.weight !== undefined) patch.weight = clamp(Number(v.weight) || 0, 0, 100);
     if (v?.size !== undefined) patch.size = clamp(Math.round(Number(v.size) || 2), 1, 3);
     if (v?.course_id !== undefined && await courses.get(String(v.course_id))) patch.course_id = String(v.course_id);
-    if (Object.keys(patch).length) await work.upsert(id, patch);
+    if (Object.keys(patch).length) await keep(ctx, WORK, id, patch);
     return ok();
   }
 
-  return { status: 404, body: { error: "not found" } };
+  return json({ error: "not found" }, 404);
 }
 
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`assignments: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
-
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
-
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
   }
+}
 
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
 
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  if (!(await readyTables(peer))) return jsonReply(replyPort, 503, { error: "tables not ready" });
+    if (pathname === "/api/whoami" && method === "GET") {
+      const peer = ctx.peer;
+      const editor = peer.is_sfi_editor || peer.is_owner;
+      return json({
+        is_anon:       peer.is_anon,
+        is_sfi_member: editor || peer.is_sfi_member,
+        is_sfi_editor: editor,
+        is_owner:      peer.is_owner,
+        user_id:       peer.user_id,
+        user_name:     peer.user_name,
+        space_color:   peer.space_color,
+      });
+    }
 
-  if (reqPath === "/api/list" && method === "GET") {
-    return jsonReply(replyPort, 200, await readAll(sfiId));
-  }
+    if (pathname.startsWith("/api/") && (method === "POST" || method === "PUT")) {
+      return handleWrite(ctx, pathname.slice("/api/".length), await body(request));
+    }
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    if (pathname === "/api/list" && method === "GET") return json(await readAll(ctx));
+
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Assignments frame is up and running!");

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ASCII Runner</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <link rel="stylesheet" href="./index.css">
 </head>
 <body>
@@ -54,8 +54,10 @@
   </div>
 
   <script type="module">
-    // ASCII Runner Game Logic — pure imperative DOM, no network calls.
-    // (No framelib import needed: this frame doesn't talk to its backend.)
+    // ASCII Runner Game Logic — pure imperative DOM, no network calls. framelib is here for
+    // seamside.prefs: the high score is this device's own, and nothing is kept in the space.
+    import "/lib/js/framelib.js";
+    const HIGH_SCORE_KEY = 'asciiRunnerHighScore';
 
     const gameWorld = document.getElementById('game-world');
     const player = document.getElementById('player');
@@ -86,7 +88,7 @@
       groundOffset: 0,
       animationFrame: null,
       lastTime: 0,
-      highScore: parseInt(localStorage.getItem('asciiRunnerHighScore') || '0'),
+      highScore: 0,
     };
 
     const GRAVITY = 0.8;
@@ -97,9 +99,12 @@
     const PLAYER_WIDTH = 40;
     const WORLD_WIDTH = 700;
 
-    if (gameState.highScore > 0) {
-      highScoreStart.textContent = `High Score: ${gameState.highScore}`;
-    }
+    window.seamside.ready.then(() => window.seamside.prefs.get(HIGH_SCORE_KEY)).then((kept) => {
+      gameState.highScore = Math.max(gameState.highScore, parseInt(kept || '0') || 0);
+      if (gameState.highScore > 0) {
+        highScoreStart.textContent = `High Score: ${gameState.highScore}`;
+      }
+    });
 
     function initGroundDecorations() {
       groundDecorations.innerHTML = '';
@@ -292,7 +297,7 @@
 
       if (gameState.score > gameState.highScore) {
         gameState.highScore = gameState.score;
-        localStorage.setItem('asciiRunnerHighScore', gameState.highScore.toString());
+        window.seamside.prefs.set(HIGH_SCORE_KEY, gameState.highScore.toString());
         highScoreDisplay.textContent = `🏆 NEW HIGH SCORE: ${gameState.highScore}!`;
         highScoreDisplay.classList.add('new-record');
       } else {

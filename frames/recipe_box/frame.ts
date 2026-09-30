@@ -2,23 +2,21 @@
 // Recipe Box — the family recipe collection: store recipes, read them beautifully.
 //
 // Design axes:
-//   privacy:        privacy-public-view  — non-members get a live read-only view;
-//                                           space editors manage the collection.
+//   privacy:        privacy-public-view  — non-members get a live read-only view through
+//                                           GET /api/recipes; space editors manage the
+//                                           collection.
 //   data_storage:   the space's table    — `recipes.table.jsonl` at the space's root,
 //                                           synced with the space; the Meal Planner in
 //                                           the same space reads the same rows.
-//   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so every viewer refreshes live.
+//   view_realtime:  view-collaborative    — every write pushes, so every open page reads
+//                                           again.
 //
 // Recipe Box OWNS the `recipes` v1 contract (docs/schema-contracts.md): the schema below
 // is the contract constant, declared verbatim. Linked frames read these rows; this frame
 // has full CRUD.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText,
-  declareTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText } from "@frame-core";
 
 // ----- Schema (contract `recipes` v1, verbatim) -----------------------------------------
 const RECIPES_SCHEMA = [
@@ -33,12 +31,30 @@ const RECIPES_SCHEMA = [
 ];
 
 // ----- The space's `recipes` table (the contract name: every kitchen frame in the space reads it)
+const RECIPES = "recipes";
 declareTables([
-  { key: "recipes", title: "Recipes", description: "The recipe box of this space.", schema: RECIPES_SCHEMA },
+  { key: RECIPES, title: "Recipes", description: "The recipe box of this space.", schema: RECIPES_SCHEMA },
 ]);
 
-type Tbl = ReturnType<typeof table>;
-type Peer = ReturnType<typeof parsePeerInfo>;
+type Row = Record<string, unknown> & { id: string };
+
+const DEFAULTS: Record<string, unknown> = Object.fromEntries(
+  RECIPES_SCHEMA.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),
+);
+
+/** Write a recipe over what it held (a new one over the schema's defaults), stamped when
+ * it was made and when it changed. */
+async function keep(ctx: Ctx, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const t = ctx.table<Record<string, unknown>>(RECIPES);
+  const was = id ? await t.get(id) : null;
+  const now = Date.now();
+  return await t.upsert({
+    ...(was ?? { ...DEFAULTS, _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
 
 // ----- Field normalization --------------------------------------------------------------
 /** Comma-separated lowercase tag list (contract format), each tag sanitized. */
@@ -68,47 +84,38 @@ function normalizePhoto(v: unknown): string {
 }
 
 // ----- Queries --------------------------------------------------------------------------
-async function recipesData(recipes: Tbl) {
-  const { rows } = await recipes.query({});
+async function recipesData(ctx: Ctx) {
+  const rows = await ctx.table<Record<string, unknown>>(RECIPES).all();
   return rows
     .map((r) => ({
-      id: r._row_id, title: r.title, ingredients_lines: r.ingredients_lines,
+      id: r.id, title: r.title, ingredients_lines: r.ingredients_lines,
       steps_lines: r.steps_lines, servings: r.servings, tags: r.tags,
       notes: r.notes, created_ms: r.created_ms, photo: r.photo ?? "",
     }))
     .sort((a, b) => String(a.title).localeCompare(String(b.title), undefined, { sensitivity: "base" }));
 }
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "recipes_changed" });
-}
+const json = (v: unknown, status = 200) => Response.json(v, { status });
 
 // ----- Writes ---------------------------------------------------------------------------
-// One shared mutation path for BOTH transports: the bus dispatcher below (frame.busSend →
-// onUiMessage, the primary write path) and the HTTP POST arm in onNetworkRequest (kept for
-// older viewers whose framelib has no busSend). `op` is the API path with "api/" stripped
-// (e.g. "recipe/<id>/delete"); `v` is the parsed payload. Role gates live here so the two
-// entry points can never drift.
-type WriteResult = { status: number; body: unknown };
-
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const recipes = table("recipes", sfiId);
-
+// `op` is the API path with "/api/" stripped (e.g. "recipe/<id>/delete"); `v` the parsed body.
+async function handleWrite(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<Response> {
   // Every op below mutates state and is editor-only. Non-members AND Viewer-role
   // members are rejected with the same gate (never gate writes on is_sfi_member —
   // Viewer-role members would slip through).
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return json({ error: "editors only" }, 403);
 
-  const ok = async (): Promise<WriteResult> => {
-    notify(sfiId);
-    return { status: 200, body: { recipes: await recipesData(recipes) } };
+  // What changed, never what it holds: each page reads again as whoever it is.
+  const ok = async () => {
+    ctx.push({ recipe_box: "recipes" });
+    return json({ recipes: await recipesData(ctx) });
   };
 
   // --- Recipes --------------------------------------------------------------------------
   if (op === "recipe") {
     const title = sanitizeText(v?.title, 200);
-    if (!title) return { status: 400, body: { error: "title required" } };
-    await recipes.upsert(null, {
+    if (!title) return json({ error: "title required" }, 400);
+    await keep(ctx, null, {
       title,
       ingredients_lines: sanitizeText(v?.ingredients_lines, 8000),
       steps_lines: sanitizeText(v?.steps_lines, 8000),
@@ -123,13 +130,13 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
 
   if (op.startsWith("recipe/")) {
     const [id, action] = op.slice("recipe/".length).split("/");
-    if (!id || !(await recipes.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!id || !(await ctx.table(RECIPES).get(id))) return json({ error: "bad id" }, 400);
 
     if (action === "delete") {
-      await recipes.delete(id);
+      await ctx.table(RECIPES).delete(id);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
 
     const patch: Record<string, unknown> = {};
     if (v?.title !== undefined) {
@@ -142,65 +149,53 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     if (v?.tags !== undefined) patch.tags = normalizeTags(v.tags);
     if (v?.notes !== undefined) patch.notes = sanitizeText(v.notes, 4000);
     if (v?.photo !== undefined) patch.photo = normalizePhoto(v.photo);
-    if (Object.keys(patch).length) await recipes.upsert(id, patch);
+    if (Object.keys(patch).length) await keep(ctx, id, patch);
     return ok();
   }
 
-  return { status: 404, body: { error: "not found" } };
+  return json({ error: "not found" }, 404);
 }
 
-// ----- Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame) --------
-// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; the
-// role gates live inside handleWrite. Denials are logged, not answered — a legitimate
-// client never sends a write it isn't allowed to make.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`recipe_box: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 // ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
 
-  // Static assets — open to everyone, including anon read-only viewers.
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    // Static assets — open to everyone, including anon read-only viewers.
+    if (method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  // Identity probe — drives which render mode the frontend shows.
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+    // Identity probe — drives which render mode the frontend shows.
+    if (pathname === "/api/whoami" && method === "GET") {
+      const peer = ctx.peer;
+      return json({
+        is_anon:       peer.is_anon,
+        is_sfi_member: peer.is_sfi_member,
+        is_sfi_editor: peer.is_sfi_editor || peer.is_owner,
+        is_owner:      peer.is_owner,
+        user_id:       peer.user_id,
+        user_name:     peer.user_name,
+        space_color:   peer.space_color,
+      });
+    }
 
-  // Writes — the HTTP arm of the shared write path (see handleWrite above).
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (pathname.startsWith("/api/") && (method === "POST" || method === "PUT")) {
+      return handleWrite(ctx, pathname.slice("/api/".length), await body(request));
+    }
 
-  const recipes = table("recipes", sfiId);
+    // Read — open to everyone (non-members get a read-only view of the
+    // collection). Never seeded: an empty box renders its own empty state.
+    if (pathname === "/api/recipes" && method === "GET") return json({ recipes: await recipesData(ctx) });
 
-  // Read — open to everyone (non-members get a read-only view of the
-  // collection). Never seeded: an empty box renders its own empty state.
-  if (reqPath === "/api/recipes" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      recipes: await recipesData(recipes),
-    });
-  }
-
-  return jsonReply(replyPort, 404, { error: "not found" });
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Recipe Box frame is up and running!");

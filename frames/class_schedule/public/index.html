@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Class Schedule</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); --hour: 46px; --gutter: 44px; }
     * { box-sizing: border-box; }
@@ -345,7 +345,16 @@
 <body>
   <div id="app"></div>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useLayoutEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useLayoutEffect, useRef, useFramePush, applyChannel } from "/lib/js/framelib.js";
+
+    // Everything comes from this frame's own server half, which decides who may do what.
+    async function api(path, body) {
+      const r = await window.seamside.fetch(`/api/${path}`, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
     // JS getDay() is Sunday-first; a timetable is Monday-first.
@@ -418,24 +427,23 @@
       const spanRef = useRef(MIN_SPAN_HOURS);
 
       async function refresh() {
-        const r = await frame.api("api/list").catch(() => null);
-        if (r && r.classes) setRows(r.classes);
+        const r = await api("list").catch(() => null);
+        // A read that changes nothing redraws nothing: the push and a write's own read-back
+        // usually bring the same list.
+        if (r && r.classes) setRows((was) => JSON.stringify(was) === JSON.stringify(r.classes) ? was : r.classes);
       }
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // A write is read back when it lands, refused or not; the push brings every other page.
+      const send = (path, body) => api(path, body || {}).catch(() => {});
+      const write = (path, body) => send(path, body).then(refresh).then(() => setPending(null));
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ schedule_changed: refresh });
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((d) => { if (d.class_schedule === "classes") refresh(); });
       // The now-line and the countdown have to move on their own or they are a lie.
       useEffect(() => {
         const h = setInterval(() => setTick((n) => n + 1), 30000);
@@ -459,9 +467,14 @@
       useEffect(() => {
         const el = wrapRef.current;
         if (!el) return;
-        const ro = new ResizeObserver(() => setTick((n) => n + 1));
+        // Deferred a frame: a re-render inside the callback resizes what it observes.
+        let raf = 0;
+        const ro = new ResizeObserver(() => {
+          cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(() => setTick((n) => n + 1));
+        });
         ro.observe(el);
-        return () => ro.disconnect();
+        return () => { ro.disconnect(); cancelAnimationFrame(raf); };
       }, [view, me, rows]);
             // Whatever is naming itself takes the caret without you reaching for it.
       useEffect(() => {
@@ -580,7 +593,7 @@
           return;
         }
         setPending({ id: d.id, day: g.day, start: g.start, end: g.end });
-        write("api/class/" + d.id, { day: g.day, start_min: g.start, end_min: g.end });
+        write("class/" + d.id, { day: g.day, start_min: g.start, end_min: g.end });
       }
 
       // The same class, in the same slot, on its other days. A repeat is not a field on a
@@ -592,7 +605,7 @@
       function commitDraft() {
         const t = (draft.title || "").trim();
         const days = draft.days.length ? draft.days : [draft.day];
-        if (t) write("api/class", { title: t, days, start_min: draft.start, end_min: draft.end });
+        if (t) write("class", { title: t, days, start_min: draft.start, end_min: draft.end });
         setDraft(null);
       }
       async function commitRename() {
@@ -611,16 +624,18 @@
         }
         // Renaming applies to the whole class, not the one meeting you happened to click:
         // leaving two Mondays called the old thing is never what anyone meant.
-        if (t && t !== row.title) write("api/class/" + e.id, { title: t, apply_all: true });
+        // One after another, so a rename never lands over a meeting just removed.
+        if (t && t !== row.title) await send("class/" + e.id, { title: t, apply_all: true });
         for (const d of e.days) {
           if (e.was.includes(d)) continue;
-          write("api/class", { title: name, days: [d], start_min: row.start_min, end_min: row.end_min, place: row.place });
+          await send("class", { title: name, days: [d], start_min: row.start_min, end_min: row.end_min, place: row.place });
         }
         for (const d of dropped) {
           const gone = shown.find((x) => x.day === d && x.title === row.title
             && x.start_min === row.start_min && x.end_min === row.end_min);
-          if (gone) write("api/class/" + gone.id + "/delete");
+          if (gone) await send("class/" + gone.id + "/delete");
         }
+        refresh();
       }
       // The touch and keyboard path to the same thing the drag does.
       function quickAdd() {
@@ -639,8 +654,8 @@
         if (!title || !s.days.length) return;
         const start = parseTime(s.from, 540);
         const end = parseTime(s.to, start + 60);
-        if (s.id) write("api/class/" + s.id, { title, day: s.days[0], start_min: start, end_min: end, place: (s.place || "").trim() });
-        else write("api/class", { title, days: s.days, start_min: start, end_min: end, place: (s.place || "").trim() });
+        if (s.id) write("class/" + s.id, { title, day: s.days[0], start_min: start, end_min: end, place: (s.place || "").trim() });
+        else write("class", { title, days: s.days, start_min: start, end_min: end, place: (s.place || "").trim() });
         setSheet(null);
       }
       async function removeIt() {
@@ -655,8 +670,8 @@
               ],
             })
           : ((await frame.confirm(`Remove ${s.title}?`, { title: "Remove", okLabel: "Remove" })) ? "one" : null);
-        if (what === "one") write("api/class/" + s.id + "/delete");
-        else if (what === "all") write("api/class/" + s.id + "/delete_all");
+        if (what === "one") write("class/" + s.id + "/delete");
+        else if (what === "all") write("class/" + s.id + "/delete_all");
         if (what) setSheet(null);
       }
 
@@ -902,6 +917,7 @@
         </main>`;
     }
 
+    await window.seamside.ready;
     render(html`<${App} />`, document.getElementById("app"));
   </script>
 </body>

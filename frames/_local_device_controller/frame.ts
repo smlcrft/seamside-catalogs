@@ -10,29 +10,34 @@
 //                                          frame.json's `permissions.local_devices`.
 //   2. ensureLocalDevices(peer)          — gate every request; prompts the owner to pick a
 //                                          device FOR THIS PLACEMENT.
-//   3. localDevice(key, sfi).info()      — the schema: keys, modes, types, ranges, commands.
-//   4. localDevice(key, sfi).state()     — latest value per key (last-wins, §14.2).
-//   5. localDevice(key, sfi).onEvent()   — live records, host-throttled.
+//   3. localDevice(key, frame).info()    — the schema: keys, modes, types, ranges, commands.
+//   4. localDevice(key, frame).state()   — latest value per key (last-wins, §14.2).
+//   5. localDevice(key, frame).onEvent() — live records, host-throttled.
 //   6. .set() / .run() / .read()         — write, execute, and request a value.
 //
-// Grants are PER PLACEMENT, like SyncTable bindings: place this frame twice and each
-// copy can watch a different device. `sfi_id` is threaded through every call for
-// exactly that reason.
+// v1 has no local-device bus yet: `ensureLocalDevices` reports the key missing, so every
+// visitor is shown "no device connected", and `localDevice()` throws.
+//
+// Grants are PER PLACEMENT: place this frame twice and each copy can watch a different
+// device. The session (`ctx.frame`) is threaded through every device call for that reason.
 //
 // `requires_keys` in frame.json is a MINIMUM, not an exact shape — a device with extra
 // keys still matches, and the UI simply renders those too.
 //
-// HTTP API:
-//   GET /api/device — descriptor + current values + grant status for this placement
-//   tether { type: "set", key, value } / { type: "run", command } — see onUiMessage
+// HTTP API (under /api):
+//   GET  /device                  descriptor + current values + grant status
+//   POST /set {key, value} · /read {name} · /run {command, args}
+//   PUT  /settings/public_control {enabled} · /settings/view {key, mode}
+//        /settings/hidden {key, enabled}
+// A push says only what to read again: { local_device_controller: "values" | "settings" }.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, parsePeerInfo, jsonReply,
-  declareLocalDevices, ensureLocalDevices, localDevice, pushToInstance, onUiMessage,
-  frameSettings,
-} from "@frame-core";
+import type { Ctx, PeerInfo } from "@frame-core";
+import { declareLocalDevices, ensureLocalDevices, localDevice } from "@frame-core";
 
-// Per-placement setting: may viewers who are NOT space members drive this device?
+// Settings: rows of `__fc_settings`, one per key, the value as JSON under `v`.
+const SETTINGS = "__fc_settings";
+
+// May viewers who are NOT space members drive this device?
 //
 // Default OFF, and deliberately so — this is the one switch that turns a frame
 // shared by link into a remote control for physical hardware on the owner's
@@ -46,8 +51,7 @@ const PUBLIC_CONTROL = "allow_public_control";
 
 // Per-key presentation override, e.g. `view:rgb` -> "palette". §11.1 gives the
 // DEFAULT widget for a type; this records where an editor chose a different one
-// so every viewer of this placement — members and anon alike — sees the same
-// interface.
+// so every viewer — members and anon alike — sees the same interface.
 //
 // Editor-level, not member-level: it is cosmetic, but it is SHARED cosmetic
 // state, and a Viewer-role member changing what everyone else sees is a
@@ -62,23 +66,63 @@ const VIEW_PREFIX = "view:";
 // everything; this draws the line at the space boundary, not at edit permission.
 const HIDDEN_PREFIX = "hidden:";
 
+const TOPIC = "local_device_controller";
+
+// The handle `localDevice` gives where a device bus exists. framecore types it
+// `never` while there is none, so the frame names the shape it relies on.
+type Value = string | number | boolean;
+interface Entry { key: string; [field: string]: unknown }
+interface Device {
+  info(): {
+    uuid: string; name: string; desc: string; online: boolean; read_only: boolean;
+    can_command: boolean; rx_bytes: number; keys: Entry[]; commands: Entry[];
+  } | null;
+  state(): Record<string, string>;
+  onEvent(cb: (e: unknown) => void): void;
+  set(values: Record<string, Value>): Promise<void>;
+  read(name: string): Promise<void>;
+  run(command: string, args: Record<string, Value>): Promise<void>;
+}
+const sensor = (ctx: Ctx) => localDevice("sensor", ctx.frame) as unknown as Device;
+
+type Row = Record<string, unknown> & { id: string };
+
+const settingsTable = (ctx: Ctx) => ctx.table<Record<string, unknown>>(SETTINGS);
+
+async function allSettings(ctx: Ctx): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+  for (const r of await settingsTable(ctx).all() as Row[]) {
+    try {
+      out[r.id] = JSON.parse(String(r.v));
+    } catch { /* skip corrupt */ }
+  }
+  return out;
+}
+
+/** Write a setting over its row, stamped when it was made and when it changed. */
+async function setSetting(ctx: Ctx, key: string, value: unknown): Promise<void> {
+  const was = await settingsTable(ctx).get(key);
+  const now = Date.now();
+  await settingsTable(ctx).upsert({
+    ...(was ?? { _created_at: now }),
+    v: JSON.stringify(value),
+    id: key,
+    _modified_at: now,
+  });
+}
+
 /** Drop hidden entries for anyone outside the space. Works for keys and commands
  *  alike — both are addressed by `key`, so one namespace covers both. */
 function visibleOnly<T extends { key: string }>(list: T[], hidden: string[], isMember: boolean): T[] {
-  return isMember ? list : list.filter(e => !hidden.includes(e.key));
+  return isMember ? list : list.filter((e) => !hidden.includes(e.key));
 }
 
-async function hiddenKeys(sfiId: string): Promise<string[]> {
-  if (!sfiId) return [];
-  const all = await frameSettings(sfiId).all();
-  return Object.entries(all)
+const hiddenKeys = (all: Record<string, unknown>) =>
+  Object.entries(all)
     .filter(([k, v]) => k.startsWith(HIDDEN_PREFIX) && v === true)
     .map(([k]) => k.slice(HIDDEN_PREFIX.length));
-}
 
-async function viewModes(sfiId: string): Promise<Record<string, string>> {
-  if (!sfiId) return {};
-  const all = await frameSettings(sfiId).all();
+function viewModes(all: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(all)) {
     if (k.startsWith(VIEW_PREFIX) && typeof v === "string") out[k.slice(VIEW_PREFIX.length)] = v;
@@ -86,14 +130,11 @@ async function viewModes(sfiId: string): Promise<Record<string, string>> {
   return out;
 }
 
-async function publicControlEnabled(sfiId: string): Promise<boolean> {
-  if (!sfiId) return false;
-  return (await frameSettings(sfiId).get<boolean>(PUBLIC_CONTROL, false)) === true;
-}
+const isEditor = (peer: PeerInfo) => peer.is_sfi_editor || peer.is_owner;
 
 /** May this viewer act on the device right now? */
-async function mayAct(peer: { sfi_id: string; is_sfi_editor: boolean }): Promise<boolean> {
-  return peer.is_sfi_editor || (await publicControlEnabled(peer.sfi_id));
+async function mayAct(ctx: Ctx): Promise<boolean> {
+  return isEditor(ctx.peer) || (await allSettings(ctx))[PUBLIC_CONTROL] === true;
 }
 
 // One declared key. The host maps it to a different physical device per placement.
@@ -102,170 +143,154 @@ declareLocalDevices(["sensor"]);
 // Placements that have subscribed. A frame placed twice gets two independent streams.
 const wired = new Set<string>();
 
-function wireEvents(sfiId: string) {
-  if (!sfiId || wired.has(sfiId)) return;
-  wired.add(sfiId);
-  localDevice("sensor", sfiId).onEvent(async (e) => {
-    // `pushToInstance` reaches EVERY viewer of the placement — there is no
-    // per-viewer targeting — so a hidden key's value must never enter the
-    // stream. Filtering here is what makes hiding real: a non-member's browser
-    // never receives the bytes, rather than receiving them and not drawing them.
+function wireEvents(ctx: Ctx) {
+  if (wired.has(ctx.frame)) return;
+  wired.add(ctx.frame);
+  // A push reaches every open page, a stranger's included, and carries nothing:
+  // each page reads /api/device again as whoever it is, so a hidden key's value
+  // reaches only the people allowed to see it.
+  sensor(ctx).onEvent(() => ctx.push({ [TOPIC]: "values" }));
+}
+
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
+
+// deno-lint-ignore no-explicit-any
+async function body(request: Request): Promise<any> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+async function describe(ctx: Ctx): Promise<Response> {
+  const peer = ctx.peer;
+  const ensured = ensureLocalDevices(peer);
+  // Distinguish "the owner needs to connect one" from "you're a guest" — a
+  // viewer shouldn't be told to click something only the owner can see.
+  const notConnected = () => json({ connected: false, can_connect: peer.is_owner, missing: ensured.missingKeys });
+  if (!ensured.ready) return notConnected();
+  wireEvents(ctx);
+  const dev = sensor(ctx);
+  const info = dev.info();
+  if (!info) return notConnected();
+  const all = await allSettings(ctx);
+  const hidden = hiddenKeys(all);
+  const member = isEditor(peer) || peer.is_sfi_member;
+  return json({
+    connected: true,
+    can_edit: await mayAct(ctx),
+    // Only an editor sees or changes the settings. An anon viewer is told
+    // nothing about them — the affordance simply is not there.
+    is_editor: isEditor(peer),
+    public_control: all[PUBLIC_CONTROL] === true,
+    views: viewModes(all),
+    uuid: info.uuid,
+    name: info.name,
+    desc: info.desc,
+    online: info.online,
+    read_only: info.read_only,
+    can_command: info.can_command,
+    // The schema IS the UI spec — the frontend builds every control from this.
+    // Mode picks the kind of control, type picks the widget (§11.1).
     //
-    // The cost is that members read hidden keys from the /api/device poll (which
-    // IS per-peer) instead of live. That is the honest trade: a slower refresh
-    // for a member beats a silent disclosure to the public.
-    const hidden = await hiddenKeys(e.sfi_id);
-    const values = hidden.length
-      ? Object.fromEntries(Object.entries(e.values).filter(([k]) => !hidden.includes(k)))
-      : e.values;
-    if (Object.keys(values).length === 0 && hidden.length) return;
-    pushToInstance(e.sfi_id, { type: "device_tick", at_ms: e.at_ms, values });
+    // Hidden keys are STRIPPED for non-members rather than flagged: a viewer
+    // outside the space never learns the key exists, and cannot read its value
+    // out of the response. Members get the full schema plus the hidden list so
+    // an editor can see what is hidden and unhide it.
+    keys: visibleOnly(info.keys, hidden, member),
+    commands: visibleOnly(info.commands, hidden, member),
+    hidden: member ? hidden : [],
+    // `_r|0` means the device has no receive path, so nothing is writable.
+    rx_bytes: info.rx_bytes,
+    values: member
+      ? dev.state()
+      : Object.fromEntries(Object.entries(dev.state()).filter(([k]) => !hidden.includes(k))),
   });
 }
 
-self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, _body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const ensured = ensureLocalDevices(peer);
-  wireEvents(peer.sfi_id);
+const WRITES = new Set([
+  "POST /set", "POST /read", "POST /run",
+  "PUT /settings/public_control", "PUT /settings/view", "PUT /settings/hidden",
+]);
 
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-  }
-
-  if (reqPath === "/api/device" && method === "GET") {
-    const dev = localDevice("sensor", peer.sfi_id);
-    const info = dev.info();
-    const hidden = await hiddenKeys(peer.sfi_id);
-    if (!info) {
-      // Distinguish "the owner needs to connect one" from "you're a guest" — a
-      // viewer shouldn't be told to click something only the owner can see.
-      return jsonReply(replyPort, 200, {
-        connected: false,
-        can_connect: peer.is_owner,
-        missing: ensured.missingKeys,
-      });
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    if (!pathname.startsWith("/api/")) {
+      if (request.method !== "GET") return refuse(404, "not found");
+      return ctx.file(pathname);
     }
-    return jsonReply(replyPort, 200, {
-      connected: true,
-      can_edit: await mayAct(peer),
-      // Only an editor sees or changes the sharing switch. An anon viewer is
-      // told nothing about it — the affordance simply is not there.
-      // Both settings — presentation and control sharing — are editor-level.
-      is_editor: peer.is_sfi_editor,
-      public_control: await publicControlEnabled(peer.sfi_id),
-      views: await viewModes(peer.sfi_id),
-      uuid: info.uuid,
-      name: info.name,
-      desc: info.desc,
-      online: info.online,
-      read_only: info.read_only,
-      can_command: info.can_command,
-      // The schema IS the UI spec — the frontend builds every control from this.
-      // Mode picks the kind of control, type picks the widget (§11.1).
-      //
-      // Hidden keys are STRIPPED for non-members rather than flagged: a viewer
-      // outside the space never learns the key exists, and cannot read its value
-      // out of the response. Members get the full schema plus the hidden list so
-      // an editor can see what is hidden and unhide it.
-      keys: visibleOnly(info.keys, hidden, peer.is_sfi_member),
-      commands: visibleOnly(info.commands, hidden, peer.is_sfi_member),
-      hidden: peer.is_sfi_member ? hidden : [],
-      // `_r|0` means the device has no receive path, so nothing is writable.
-      rx_bytes: info.rx_bytes,
-      values: peer.is_sfi_member
-        ? dev.state()
-        : Object.fromEntries(Object.entries(dev.state()).filter(([k]) => !hidden.includes(k))),
-    });
-  }
+    const route = `${request.method} ${pathname.slice(4)}`;
+    if (route === "GET /device") return describe(ctx);
+    if (!WRITES.has(route)) return refuse(404, "not found");
+    const msg = (await body(request)) ?? {};
+    const named = (v: unknown): v is string => typeof v === "string" && v !== "";
 
-  return jsonReply(replyPort, 404, { error: "not found", path: reqPath });
+    // Visibility is editor-level, like presentation. It decides what people
+    // outside the space can see of this device, so it is a sharing decision.
+    if (route === "PUT /settings/hidden") {
+      if (!isEditor(ctx.peer)) return refuse(403, "only space editors can hide keys");
+      if (!named(msg.key)) return refuse(400, "key required");
+      if (msg.enabled === true) await setSetting(ctx, HIDDEN_PREFIX + msg.key, true);
+      else await settingsTable(ctx).delete(HIDDEN_PREFIX + msg.key); // shown is the default; don't store it
+      ctx.push({ [TOPIC]: "settings" });
+      return json({ ok: true });
+    }
+
+    // Presentation is editor-level. It moves no hardware, so it does not need the
+    // control gate — but it IS shared state that every viewer sees, so it takes
+    // the same edit permission as any other shared change.
+    if (route === "PUT /settings/view") {
+      if (!isEditor(ctx.peer)) return refuse(403, "only space editors can change the layout");
+      if (!named(msg.key) || !named(msg.mode)) return refuse(400, "key and mode required");
+      await setSetting(ctx, VIEW_PREFIX + msg.key, msg.mode);
+      ctx.push({ [TOPIC]: "settings" });
+      return json({ ok: true });
+    }
+
+    // Changing the sharing switch is EDITOR-ONLY, always, and is checked before
+    // anything else. If an anon viewer could flip this they would be granting
+    // themselves control, which would make the whole toggle worthless.
+    if (route === "PUT /settings/public_control") {
+      if (!isEditor(ctx.peer)) return refuse(403, "only space editors can change sharing");
+      await setSetting(ctx, PUBLIC_CONTROL, msg.enabled === true);
+      ctx.push({ [TOPIC]: "settings" });
+      return json({ ok: true });
+    }
+
+    // Who may drive the device: an editor always, or anyone if public control is
+    // switched on. The HOST independently re-checks the grant, the key's declared
+    // mode, and the range before anything reaches the wire — that is the real
+    // boundary, and this check only decides who is allowed to ask.
+    if (!(await mayAct(ctx))) return refuse(403, "you don't have permission to control this device");
+    if (route === "POST /set" && !named(msg.key)) return refuse(400, "key required");
+    if (route === "POST /read" && !named(msg.name)) return refuse(400, "name required");
+    if (route === "POST /run" && !named(msg.command)) return refuse(400, "command required");
+
+    // The placement is the session serving this request, never the body: a grant
+    // belongs to a placement, so letting the payload name one would let a viewer
+    // at placement A drive placement B's device.
+    try {
+      const dev = sensor(ctx);
+      if (route === "POST /set") {
+        await dev.set({ [msg.key]: msg.value as Value });
+      } else if (route === "POST /read") {
+        // §11.1: a control that has never seen a value asks for one instead of
+        // waiting for the device to volunteer it. The value returns as an
+        // ordinary report, not as this call's result.
+        await dev.read(msg.name);
+      } else {
+        // Arguments by NAME — the host maps them into declaration order (§8.2).
+        await dev.run(msg.command, msg.args ?? {});
+      }
+      return json({ ok: true });
+    } catch (e) {
+      // The host's message is specific ("above the device maximum of 160") and is the
+      // whole point of set()/run() rejecting instead of silently no-op'ing.
+      return refuse(409, String((e as Error)?.message ?? e));
+    }
+  },
 };
-
-// Writes arrive over the TETHER (HTTP write bodies are dropped on Android), so the
-// outcome goes back via pushToInstance rather than as a response.
-//
-// `peer` is reconstructed by the HOST from its own identity cookies — absent identity
-// parses as anonymous, so a spoofed delivery can only lose privileges.
-onUiMessage(async (sfiId, data, peer) => {
-  const msg = data as {
-    type?: string; key?: string; name?: string;
-    value?: string | number | boolean; command?: string;
-    args?: Record<string, string | number | boolean>;
-    enabled?: boolean; mode?: string;
-  };
-  if (msg?.type !== "set" && msg?.type !== "run" && msg?.type !== "read"
-      && msg?.type !== "set_public_control" && msg?.type !== "set_view"
-      && msg?.type !== "set_hidden") return;
-
-  // Visibility is editor-level, like presentation. It decides what people
-  // outside the space can see of this device, so it is a sharing decision.
-  if (msg.type === "set_hidden") {
-    if (!peer.is_sfi_editor) {
-      return pushToInstance(sfiId, { type: "act_result", ok: false, error: "only space editors can hide keys" });
-    }
-    if (!msg.key) return;
-    if (msg.enabled === true) await frameSettings(sfiId).set(HIDDEN_PREFIX + msg.key, true);
-    else await frameSettings(sfiId).remove(HIDDEN_PREFIX + msg.key);  // shown is the default; don't store it
-    return pushToInstance(sfiId, { type: "settings_changed" });
-  }
-
-  // Presentation is editor-level. It moves no hardware, so it does not need the
-  // control gate — but it IS shared state that every viewer of this placement
-  // sees, so it takes the same edit permission as any other shared change.
-  if (msg.type === "set_view") {
-    if (!peer.is_sfi_editor) {
-      return pushToInstance(sfiId, { type: "act_result", ok: false, error: "only space editors can change the layout" });
-    }
-    if (!msg.key || !msg.mode) return;
-    await frameSettings(sfiId).set(VIEW_PREFIX + msg.key, msg.mode);
-    return pushToInstance(sfiId, { type: "settings_changed" });
-  }
-
-  // Changing the sharing switch is EDITOR-ONLY, always, and is checked before
-  // anything else. If an anon viewer could flip this they would be granting
-  // themselves control, which would make the whole toggle worthless.
-  if (msg.type === "set_public_control") {
-    if (!peer.is_sfi_editor) {
-      return pushToInstance(sfiId, { type: "act_result", ok: false, error: "only space editors can change sharing" });
-    }
-    await frameSettings(sfiId).set(PUBLIC_CONTROL, msg.enabled === true);
-    return pushToInstance(sfiId, { type: "settings_changed", public_control: msg.enabled === true });
-  }
-
-  // Who may drive the device: an editor always, or anyone if this placement has
-  // public control switched on. The HOST independently re-checks the grant, the
-  // key's declared mode, and the range before anything reaches the wire — that
-  // is the real boundary, and this check only decides who is allowed to ask.
-  if (!(await mayAct(peer))) {
-    return pushToInstance(sfiId, { type: "act_result", ok: false, error: "you don't have permission to control this device" });
-  }
-
-  // The placement comes from the HOST's delivery, not from the message body: a grant
-  // belongs to a placement, so letting the payload name one would let a viewer at
-  // placement A drive placement B's device.
-  const dev = localDevice("sensor", sfiId);
-  try {
-    if (msg.type === "set") {
-      if (!msg.key) return;
-      await dev.set({ [msg.key]: msg.value as string | number | boolean });
-    } else if (msg.type === "read") {
-      // §11.1: a control that has never seen a value asks for one instead of
-      // waiting for the device to volunteer it. The value returns as an
-      // ordinary report, not as this call's result.
-      if (!msg.name) return;
-      await dev.read(msg.name);
-      return; // nothing to confirm; the report is the answer
-    } else {
-      if (!msg.command) return;
-      // Arguments by NAME — the host maps them into declaration order (§8.2).
-      await dev.run(msg.command, msg.args ?? {});
-    }
-    pushToInstance(sfiId, { type: "act_result", ok: true });
-  } catch (e) {
-    // The host's message is specific ("above the device maximum of 160") and is the
-    // whole point of set()/run() rejecting instead of silently no-op'ing.
-    pushToInstance(sfiId, { type: "act_result", ok: false, error: String((e as Error)?.message ?? e) });
-  }
-});
-
-log("local device demo: ready");

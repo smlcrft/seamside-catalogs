@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Meal Planner</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }   /* follows the space channel at runtime */
     * { box-sizing: border-box; }
@@ -303,7 +303,16 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel, Modal } from "./lib/js/framelib.js";
+    import { html, render, useState, useEffect, useRef, useFramePush, applyChannel, Modal } from "/lib/js/framelib.js";
+
+    // Everything comes from this frame's own server half, which decides who may do what.
+    async function api(path, body) {
+      const r = await window.seamside.fetch(`/api/${path}`, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     const SLOTS = ["breakfast", "lunch", "dinner", "snack"];
     const SLOT_RANK = { breakfast: 0, lunch: 1, dinner: 2, snack: 3 };
@@ -344,47 +353,37 @@
       const [edArmed, setEdArmed] = useState(false);
       const [sentNote, setSentNote] = useState(null);    // "sent n items…" text, transient
       const startRef = useRef(start);
-      const awaitingSent = useRef(false);                // this window clicked send
       const sentTimer = useRef(null);
       startRef.current = start;
 
       async function load(s) {
-        const r = await frame.api("api/week?start=" + encodeURIComponent(s)).catch(() => null);
+        const r = await api("week?start=" + encodeURIComponent(s)).catch(() => null);
         if (!r || startRef.current !== s) return;
         setWeek(r);
       }
       const refresh = () => load(startRef.current);
-      // Writes go over the tether (frame.busSend) — fire-and-forget; the week refreshes
-      // from the plan_changed push, sender included. Feature-detect: an older viewer's
-      // framelib has no busSend, so fall back to the HTTP write it was using before.
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // A write is answered, then the week is read again; the push brings every other page
+      // along. A refused write's re-read undoes what was drawn ahead of it.
+      const write = (path, body) => api(path, body).finally(refresh);
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({
-        plan_changed: (d) => {
-          // The push carries `sent` after a send_to_grocery; only the window that asked
-          // shows the note (every window receives the broadcast).
-          if (d && typeof d.sent === "number" && awaitingSent.current) {
-            awaitingSent.current = false;
-            setSentNote("sent " + d.sent + (d.sent === 1 ? " item" : " items") + " to the grocery list");
-            if (sentTimer.current) clearTimeout(sentTimer.current);
-            sentTimer.current = setTimeout(() => setSentNote(null), 5000);
-          }
-          refresh();
-        },
-        recipes_changed: refresh,   // the Recipe Box in this space changed a recipe
-      });
+      useFramePush((d) => { if (d.meal_planner === "week") refresh(); });
+
+      // A Recipe Box, other sessions of this frame and other devices write these tables too,
+      // and their pushes never reach this page: a member watches the tables themselves.
+      const watching = !!me?.is_sfi_member;
+      useEffect(() => {
+        if (!watching || !window.seamside?.kv?.watch) return;
+        let soon = 0;
+        const later = () => { clearTimeout(soon); soon = setTimeout(refresh, 250); };
+        const ws = ["t/meal_plan/", "t/recipes/"].map((p) => window.seamside.kv.watch(p, later));
+        return () => { clearTimeout(soon); ws.forEach((w) => w.close()); };
+      }, [watching]);
 
       function goWeek(s) { setStart(s); startRef.current = s; setWeek(null); load(s); }
 
@@ -459,23 +458,28 @@
       function addMealFromModal() {
         const title = addDraft.title.trim() || (addDraft.recipe_id ? recipeTitle(addDraft.recipe_id) : "");
         if (!title || !addFor) return;
-        write("api/meal", { day_date: addFor, slot: addDraft.slot, title, recipe_id: addDraft.recipe_id }).catch(() => {});
+        write("meal", { day_date: addFor, slot: addDraft.slot, title, recipe_id: addDraft.recipe_id }).catch(() => {});
         setAddFor(null);
       }
       function saveMeal(meal, patch) {
         setWeek((wk) => wk && ({ ...wk, meals: wk.meals.map((m) => m.id === meal.id ? { ...m, ...patch } : m) }));
         setEdit((e) => e && e.id === meal.id ? { ...e, ...patch } : e);
-        write("api/meal/" + meal.id, patch).catch(() => {});
+        write("meal/" + meal.id, patch).catch(() => {});
       }
       function deleteMeal(meal) {
         if (!edArmed) { setEdArmed(true); return; }
         setEdArmed(false); setEdit(null);
         setWeek((wk) => wk && ({ ...wk, meals: wk.meals.filter((m) => m.id !== meal.id) }));
-        write("api/meal/" + meal.id + "/delete", {}).catch(() => {});
+        write("meal/" + meal.id + "/delete", {}).catch(() => {});
       }
+      // Only the window that asked shows the note.
       function sendWeek() {
-        awaitingSent.current = true;
-        write("api/send_to_grocery", { week_start: start }).catch(() => {});
+        api("send_to_grocery", { week_start: start }).then((r) => {
+          const n = Number(r.sent) || 0;
+          setSentNote("sent " + n + (n === 1 ? " item" : " items") + " to the grocery list");
+          if (sentTimer.current) clearTimeout(sentTimer.current);
+          sentTimer.current = setTimeout(() => setSentNote(null), 5000);
+        }).catch(() => {});
       }
       // Drag a meal card into another day cell: the drop just re-dates the meal
       // (ordering inside a day is slot rank, so there is nothing else to author).
@@ -485,7 +489,7 @@
         const m = dragMeal.current; dragMeal.current = null;
         if (!m || m.day_date === day) return;
         setWeek((wk) => wk && ({ ...wk, meals: wk.meals.map((x) => x.id === m.id ? { ...x, day_date: day } : x) }));
-        write("api/meal/" + m.id, { day_date: day }).catch(() => {});
+        write("meal/" + m.id, { day_date: day }).catch(() => {});
       }
 
       const mode = isOwner ? "owner" : isEditor ? "editor" : "viewer";
@@ -709,6 +713,7 @@
       `;
     }
 
+    await window.seamside.ready;
     render(html`<${App}/>`, document.body);
   </script>
 </body>

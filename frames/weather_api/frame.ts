@@ -1,8 +1,9 @@
 // ----------------------------------------------------------------------------------------
 // This frame is a weather info/forecast app using the open-meteo keyless API.
 // Location is supplied per-request; the fields and units are the ones the page draws.
+// Anyone who reaches the frame may look a place up; nothing is written to the space.
 // ----------------------------------------------------------------------------------------
-import { log, serveFileAtPath } from "@frame-core"; // must include @frame-core for tandem frame.
+import type { Ctx } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
 // WEATHER FETCH + PER-LOCATION 5-MINUTE CACHE
@@ -11,7 +12,7 @@ type WeatherData = { location: { name: string; country: string; latitude: number
 const weatherCache = new Map<string, { data: WeatherData; fetchedAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-async function fetchWeather(locationQuery: string): Promise<WeatherData> {
+async function fetchWeather(ctx: Ctx, locationQuery: string): Promise<WeatherData> {
   const cacheKey = locationQuery.trim().toLowerCase();
   const now = Date.now();
   const cached = weatherCache.get(cacheKey);
@@ -45,41 +46,34 @@ async function fetchWeather(locationQuery: string): Promise<WeatherData> {
   const displayName = admin1 ? `${name}, ${admin1}` : `${name}, ${country}`;
   const data: WeatherData = { location: { name: displayName, country, latitude, longitude }, ...weatherJson };
   weatherCache.set(cacheKey, { data, fetchedAt: now });
-  log(`Weather fetched for ${displayName}`);
+  ctx.log(`Weather fetched for ${displayName}`);
   return data;
 }
+
+const json = (v: unknown, status = 200) => Response.json(v, { status });
 
 // ----------------------------------------------------------------------------------------
 // NETWORKING: Handle incoming requests and respond accordingly.
 // ----------------------------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, _body, _cookies) {
-  // /api/weather?location=<city> — returns JSON with current conditions + forecast.
-  if (reqPath === "/api/weather" && method === "GET") {
-    const locationQuery = (query.location ?? "").trim();
-    if (!locationQuery) {
-      replyPort.postMessage({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "Missing ?location= parameter" }) });
-      return;
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const url = new URL(request.url);
+    // /api/weather?location=<city> — returns JSON with current conditions + forecast.
+    if (url.pathname === "/api/weather" && request.method === "GET") {
+      const locationQuery = (url.searchParams.get("location") ?? "").trim();
+      if (!locationQuery) return json({ error: "Missing ?location= parameter" }, 400);
+      try {
+        return json(await fetchWeather(ctx, locationQuery));
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // An unknown place is the asker's miss (404); anything else is open-meteo's (502).
+        const status = (e as { status?: number })?.status ?? 502;
+        if (status !== 404) ctx.log("fetchWeather error: " + msg);
+        return json({ error: msg }, status);
+      }
     }
-    try {
-      const data = await fetchWeather(locationQuery);
-      replyPort.postMessage({ status: 200, contentType: "application/json", body: JSON.stringify(data) });
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // An unknown place is the asker's miss (404); anything else is open-meteo's (502).
-      const status = (e as { status?: number })?.status ?? 502;
-      if (status !== 404) log("fetchWeather error: " + msg);
-      replyPort.postMessage({ status, contentType: "application/json", body: JSON.stringify({ error: msg }) });
-    }
-    return;
-  }
-  // Serve static files from ./public/ — use path only, never the query string.
-  if (method === "GET") {
-    const filePath = new URL("./public" + reqPath, import.meta.url);
-    serveFileAtPath(replyPort, filePath);
-    return;
-  }
-  replyPort.postMessage({ status: 404, body: JSON.stringify({ error: "Request not handled.", code: "NOT_FOUND" }), contentType: "application/json" });
+    // Static files from ./public/, by path only, never the query string.
+    if (request.method === "GET") return ctx.file(url.pathname);
+    return json({ error: "Request not handled.", code: "NOT_FOUND" }, 404);
+  },
 };
-
-// ----------------------------------------------------------------------------------------
-log("Frame is up and running!");

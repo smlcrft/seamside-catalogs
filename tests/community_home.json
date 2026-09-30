@@ -1,0 +1,61 @@
+{
+  "tier": "members",
+  "publish": "open",
+  "steps": [
+    { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["ch-root", "data-form"], "lacks": ["<form"] },
+    { "why": "and its style", "do": "GET {frame}/index.css", "status": 200 },
+
+    { "why": "before an editor came, a stranger is shown the default page", "do": "GET {api}/page", "status": 200, "is": { "/you": { "member": false, "editor": false }, "/title": "Welcome to our community", "/updated_at": 0, "/blocks/0/id": "seed_about", "/blocks/0/heading": "About us" } },
+    { "why": "and a viewer the same, as a member who may not edit", "as": "viewer", "do": "GET {api}/page", "status": 200, "is": { "/you": { "member": true, "editor": false }, "/blocks/0/id": "seed_about" } },
+    { "why": "a reader's look seeded nothing", "as": "collaborator", "at": "space", "do": "KV.LIST t/community_home_blocks/", "lacks": ["About us"] },
+
+    { "why": "a stranger names no page", "do": "PUT {api}/admin/page", "body": { "title": "Mine" }, "status": 403 },
+    { "why": "adds no block", "do": "POST {api}/admin/blocks", "body": { "kind": "section", "heading": "Mine" }, "status": 403 },
+    { "why": "changes none", "do": "PUT {api}/admin/blocks/seed_about", "body": { "heading": "Mine" }, "status": 403 },
+    { "why": "orders none", "do": "PUT {api}/admin/blocks/reorder", "body": { "order": ["seed_about"] }, "status": 403 },
+    { "why": "removes none", "do": "DELETE {api}/admin/blocks/seed_about", "status": 403 },
+    { "why": "a stranger writes no row at the door", "do": "KV.PUT t/community_home_blocks/x", "body": { "kind": "section", "heading": "Mine" }, "status": 403 },
+    { "why": "someone signed in and on no roster is a visitor too", "as": "signed", "do": "POST {api}/admin/blocks", "body": { "kind": "section", "heading": "Mine" }, "status": 403 },
+    { "why": "a viewer names no page", "as": "viewer", "do": "PUT {api}/admin/page", "body": { "title": "Mine" }, "status": 403 },
+    { "why": "adds no block", "as": "viewer", "do": "POST {api}/admin/blocks", "body": { "kind": "link", "label": "Mine", "url": "https://example.com" }, "status": 403 },
+    { "why": "changes none", "as": "viewer", "do": "PUT {api}/admin/blocks/seed_about", "body": { "heading": "Mine" }, "status": 403 },
+    { "why": "removes none", "as": "viewer", "do": "DELETE {api}/admin/blocks/seed_about", "status": 403 },
+    { "why": "and none of it seeded or wrote anything", "table": "__fc_settings", "lacks": ["community_home_seeded", "Mine"] },
+
+    { "why": "the first editor to open it seeds the page", "as": "collaborator", "do": "GET {api}/page", "status": 200, "is": { "/you": { "member": true, "editor": true }, "/title": "Welcome to our community", "/tagline": "A place for updates, links, and news.", "/blocks/0/id": "seed_about", "/blocks/0/width": 320, "/blocks/0/label": "" } },
+    { "why": "as a row of the space, from the schema's defaults and stamped", "table": "community_home_blocks", "has": ["\"kind\":\"section\"", "\"heading\":\"About us\"", "\"format\":\"text\"", "\"label\":\"\"", "\"url\":\"\"", "\"width\":320", "\"height\":320", "\"sort_order\":0", "_created_at", "_modified_at"] },
+    { "why": "and settings where installed copies keep them", "table": "__fc_settings", "has": ["\"v\":\"true\"", "\"v\":\"\\\"Welcome to our community\\\"\"", "_created_at", "_modified_at"] },
+
+    { "why": "a title named through the frame", "as": "collaborator", "do": "PUT {api}/admin/page", "body": { "title": "Old town" }, "status": 200 },
+    { "why": "as a settings row of the session", "table": "__fc_settings", "has": ["\"v\":\"\\\"Old town\\\"\""] },
+    { "why": "a block an installed copy left behind", "as": "collaborator", "at": "space", "do": "KV.PUT t/community_home_blocks/old1", "body": { "kind": "link", "heading": "", "body": "", "format": "text", "label": "Old link", "url": "https://old.example.com", "width": 320, "height": 320, "sort_order": 5, "_created_at": 5, "_modified_at": 5 }, "status": 200 },
+    { "why": "a stranger reads both", "do": "GET {api}/page", "status": 200, "is": { "/title": "Old town", "/blocks/0/id": "seed_about", "/blocks/1/id": "old1", "/blocks/1/label": "Old link", "/blocks/1/url": "https://old.example.com", "/blocks/1/sort_order": 5 }, "lacks": ["_created_at"] },
+    { "why": "and still reads no table at the door", "do": "KV.LIST t/community_home_blocks/", "lacks": ["Old link"] },
+
+    { "why": "a collaborator names the page", "as": "collaborator", "do": "PUT {api}/admin/page", "body": { "title": "Our street", "tagline": "Neighbours, mostly." }, "status": 200 },
+    { "why": "adds a link after the last block", "as": "collaborator", "do": "POST {api}/admin/blocks", "body": { "kind": "link", "label": "Minutes", "url": " https://example.com/minutes " }, "status": 200 },
+    { "why": "but not one that is no http(s) link", "as": "collaborator", "do": "POST {api}/admin/blocks", "body": { "kind": "link", "label": "Bad", "url": "javascript:alert(1)" }, "status": 400, "is": { "/error": "valid http(s) url required" } },
+    { "why": "nor one with no label", "as": "collaborator", "do": "POST {api}/admin/blocks", "body": { "kind": "link", "label": "", "url": "https://example.com" }, "status": 400, "is": { "/error": "label required" } },
+    { "why": "nor a kind there is no such thing as", "as": "collaborator", "do": "POST {api}/admin/blocks", "body": { "kind": "video" }, "status": 400, "is": { "/error": "invalid kind" } },
+    { "why": "adds a public frame, its size kept within bounds", "as": "collaborator", "do": "POST {api}/admin/blocks", "body": { "kind": "pub_frame", "url": "https://example.com/frame", "heading": "Sign up", "width": 5000, "height": 10 }, "status": 200 },
+    { "why": "a viewer sees all of it, in order", "as": "viewer", "do": "GET {api}/page", "status": 200, "is": { "/title": "Our street", "/tagline": "Neighbours, mostly.", "/blocks/1/id": "old1", "/blocks/2/label": "Minutes", "/blocks/2/url": "https://example.com/minutes", "/blocks/2/sort_order": 6, "/blocks/2/format": "text", "/blocks/3/kind": "pub_frame", "/blocks/3/heading": "Sign up", "/blocks/3/width": 2000, "/blocks/3/height": 80, "/blocks/3/sort_order": 7 }, "save": { "link": "/blocks/2/id", "pub": "/blocks/3/id" }, "lacks": ["Bad"] },
+    { "why": "a new block is a row in the shape installed copies hold", "table": "community_home_blocks", "has": ["\"label\":\"Minutes\"", "\"url\":\"https://example.com/minutes\"", "\"sort_order\":6", "\"width\":2000", "\"height\":80"], "lacks": ["javascript:"] },
+
+    { "why": "a change lands over the row, which keeps what it held", "as": "collaborator", "do": "PUT {api}/admin/blocks/old1", "body": { "label": "Older link" }, "status": 200 },
+    { "why": "the old row among them", "do": "GET {api}/page", "is": { "/blocks/1/label": "Older link", "/blocks/1/url": "https://old.example.com", "/blocks/1/kind": "link", "/blocks/1/sort_order": 5 } },
+    { "why": "and keeps when it was made", "table": "community_home_blocks", "has": ["\"label\":\"Older link\"", "\"_created_at\":5"], "lacks": ["Old link"] },
+    { "why": "a section turns to HTML", "as": "collaborator", "do": "PUT {api}/admin/blocks/seed_about", "body": { "format": "html", "body": "<b>Hello</b>" }, "status": 200 },
+    { "why": "but to no format there is no such thing as", "as": "collaborator", "do": "PUT {api}/admin/blocks/seed_about", "body": { "format": "markdown" }, "status": 400, "is": { "/error": "invalid format" } },
+    { "why": "a link is given no unsafe address", "as": "collaborator", "do": "PUT {api}/admin/blocks/{link}", "body": { "url": "file:///etc/passwd" }, "status": 400, "is": { "/error": "invalid url" } },
+    { "why": "a block that is not there is not made", "as": "collaborator", "do": "PUT {api}/admin/blocks/nope", "body": { "heading": "Ghost" }, "status": 404 },
+    { "why": "an unknown admin route says so", "as": "collaborator", "do": "POST {api}/admin/nothing", "body": {}, "status": 404 },
+
+    { "why": "the blocks are put in another order, unknown ids left alone", "as": "collaborator", "do": "PUT {api}/admin/blocks/reorder", "body": { "order": ["{pub}", "ghost", "{link}", "old1", "seed_about"] }, "status": 200 },
+    { "why": "which a stranger sees", "do": "GET {api}/page", "is": { "/blocks/0/id": "{pub}", "/blocks/1/id": "{link}", "/blocks/2/id": "old1", "/blocks/3/id": "seed_about", "/blocks/3/format": "html", "/blocks/3/body": "<b>Hello</b>", "/blocks/1/url": "https://example.com/minutes" }, "lacks": ["Ghost", "ghost"] },
+
+    { "why": "a block goes", "as": "collaborator", "do": "DELETE {api}/admin/blocks/old1", "status": 200 },
+    { "why": "the seeded one too", "as": "collaborator", "do": "DELETE {api}/admin/blocks/seed_about", "status": 200 },
+    { "why": "and is not seeded twice", "as": "collaborator", "do": "GET {api}/page", "is": { "/blocks/0/id": "{pub}", "/blocks/1/id": "{link}" }, "lacks": ["About us", "Older link"] },
+    { "why": "and is gone", "as": "collaborator", "do": "DELETE {api}/admin/blocks/old1", "status": 404 }
+  ]
+}

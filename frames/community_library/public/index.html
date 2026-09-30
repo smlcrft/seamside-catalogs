@@ -4,27 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Community Library</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <link rel="stylesheet" href="./index.css">
 </head>
 <body class="ch2">
 <div id="root"></div>
 <script type="module">
-import { frame, html, render, useState, useEffect, useFramePush, WAITING } from "./lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useFramePush } from "/lib/js/framelib.js";
 import { ListLine, chooseList, settleList } from "./members_list.js";
 
-// Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are dropped
-// on Android (issue #750), the tether carries them everywhere. Fire-and-forget — resulting
-// state arrives via the assets_changed / settings_changed pushes below.
-// Reads stay HTTP GETs. Feature-detect: an older viewer framelib has no busSend — fall
-// back to the HTTP write it was using before.
-const api = (path, body, method) => {
-  if (body !== undefined && typeof frame.busSend === "function") {
-    frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-    return Promise.resolve({});
-  }
-  return frame.apiSafe(path, body, method);
-};
+// Everything about the library comes from the page's own server half, which decides what
+// this visitor is shown and may change. A call with a body is a write.
+async function api(path, body) {
+  const r = await window.seamside.fetch(`/${path}`, body === undefined
+    ? { method: "GET" }
+    : { method: "POST", body: JSON.stringify(body) });
+  let v = {};
+  try { v = r.json(); } catch { /* the status says it */ }
+  if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+  return v;
+}
 
 const fmtDate = (ms) => {
   const n = Number(ms);
@@ -41,7 +40,7 @@ const DEFAULT_PREFS = {
 };
 
 // Only the checked_out → overdue transition is time-based; every other status change is
-// driven by a table mutation, which already arrives over useFramePush. So locally upgrade
+// driven by a write, which is followed by a push. So locally upgrade
 // an item to "overdue" once its due date passes, and otherwise trust the server's status.
 function liveStatus(a, now) {
   if (a.status === "checked_out" && a.due_at && now > a.due_at) return "overdue";
@@ -49,49 +48,47 @@ function liveStatus(a, now) {
 }
 
 function App() {
-  const [state, setState] = useState(null); // { prefs, viewer, can_edit, now } | "waiting" | null
+  const [state, setState] = useState(null); // { prefs, viewer, can_edit, now } | "failed" | null
   const [assets, setAssets] = useState([]);
   const [members, setMembers] = useState([]);
   const [dialog, setDialog] = useState(null); // { kind, ...payload } | null
 
   // Returns the fetched state object so callers can read viewer without a
-  // second round-trip. "waiting" sentinel on a 503, null only on hard error.
+  // second round-trip; null when it could not be read.
   async function loadState() {
-    const s = await api("api/state");
-    if (s === WAITING || !s) { setState("waiting"); return null; }
+    let s;
+    try { s = await api("api/state"); } catch { setState("failed"); return null; }
     setState(s);
     document.title = s.prefs.org_name || "Community Library";
     return s;
   }
   async function loadMembers(viewer) {
     if (viewer?.is_anon) { setMembers([]); return; }
-    const r = await api("api/members");
-    if (r === WAITING) return;
-    setMembers((r && r.rows) || []);
+    try { setMembers((await api("api/members")).rows || []); } catch { /* as it was */ }
   }
   async function loadAssets() {
-    const r = await api("api/assets");
-    if (r === WAITING || !r) return;
-    setAssets(r.rows || []);
+    try { setAssets((await api("api/assets")).rows || []); } catch { /* as it was */ }
+  }
+  async function loadAll() {
+    const s = await loadState();
+    if (s) await Promise.all([loadMembers(s.viewer), loadAssets()]);
+    return s;
   }
 
   async function bind(list) {
     try {
-      await frame.api("api/bind", { list });
+      await api("api/bind", { list });
     } catch (e) {
       await frame.alert(e.message || "failed");
     }
-    const s = await loadState();
-    if (s) await Promise.all([loadMembers(s.viewer), loadAssets()]);
+    await loadAll();
   }
 
   // Boot.
   useEffect(() => {
     (async () => {
-      const s = await loadState();
-      if (!s) return;
-      await Promise.all([loadMembers(s.viewer), loadAssets()]);
-      await settleList(s, bind);
+      const s = await loadAll();
+      if (s) await settleList(s, bind);
     })();
   }, []);
 
@@ -110,21 +107,16 @@ function App() {
     return () => { clearTimeout(soon); w.close(); };
   }, [bound, watching]);
 
-  // Live updates from peers. useFramePush refreshes handlers each render, so
-  // they always see the latest state?.viewer in their closure.
-  useFramePush({
-    assets_changed: () => loadAssets(),
-    settings_changed: async () => {
-      const s = await loadState();
-      if (!s) return;
-      await Promise.all([loadMembers(s.viewer), loadAssets()]);
-    },
+  // The worker says what changed and never what it holds: read it again, as whoever this is.
+  useFramePush((d) => {
+    if (d.community_library === "assets") loadAssets();
+    else if (d.community_library === "settings") loadAll();
   });
 
   // Overdue is purely time-based — no table write happens when an item crosses its due date,
-  // so a table-change push can never fire for it. Instead of re-fetching every minute, tick a
-  // local clock and recompute status client-side via liveStatus(). Zero network; every actual
-  // data change still arrives through the useFramePush handlers above.
+  // so no push can fire for it. Instead of re-fetching every minute, tick a local clock and
+  // recompute status client-side via liveStatus(). Zero network; every actual data change
+  // still arrives through the push above.
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const id = setInterval(() => { if (!document.hidden) setNow(Date.now()); }, 30000);
@@ -134,7 +126,7 @@ function App() {
   }, []);
 
   if (state === null) return html`<div class="empty">Loading…</div>`;
-  if (state === "waiting") return html`<div class="empty">The library could not be loaded.</div>`;
+  if (state === "failed") return html`<div class="empty">The library could not be loaded.</div>`;
 
   const { prefs, viewer, can_edit } = state;
   const closeDialog = () => setDialog(null);
@@ -195,7 +187,7 @@ function App() {
     ${dialog?.kind === "checkout" && html`<${CheckoutDialog} row=${dialog.row} members=${members} prefs=${prefs} onClose=${closeDialog} reload=${loadAssets} />`}
     ${dialog?.kind === "attention" && html`<${AttentionDialog} row=${dialog.row} onClose=${closeDialog} reload=${loadAssets} />`}
     ${dialog?.kind === "edit" && html`<${EditDialog} row=${dialog.row} prefs=${prefs} onClose=${closeDialog} reload=${loadAssets} />`}
-    ${dialog?.kind === "settings" && html`<${SettingsDialog} prefs=${prefs} onClose=${closeDialog} />`}
+    ${dialog?.kind === "settings" && html`<${SettingsDialog} prefs=${prefs} onClose=${closeDialog} reload=${loadAll} />`}
   `;
 }
 
@@ -446,7 +438,7 @@ function parseBorrowLines(text) {
   }).filter(Boolean);
 }
 
-function SettingsDialog({ prefs, onClose }) {
+function SettingsDialog({ prefs, onClose, reload }) {
   const [org, setOrg] = useState(prefs.org_name || "");
   const [typesText, setTypesText] = useState((prefs.item_types || []).join("\n"));
   const [borrowText, setBorrowText] = useState((prefs.borrow_options || []).map((o) => `${o.label}, ${o.days}`).join("\n"));
@@ -472,6 +464,7 @@ function SettingsDialog({ prefs, onClose }) {
         owner_only_edit: ownerOnly,
       });
       onClose();
+      reload();
     } catch (err) { await frame.alert(err.message || "failed"); }
   }
 
@@ -507,6 +500,7 @@ function SettingsDialog({ prefs, onClose }) {
   `;
 }
 
+await window.seamside.ready;
 render(html`<${App}/>`, document.getElementById("root"));
 </script>
 </body>

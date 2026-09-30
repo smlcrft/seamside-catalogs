@@ -4,33 +4,36 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Roundtable</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <link rel="stylesheet" href="./index.css">
 </head>
 <body>
   <main id="app" class="rt-loading"></main>
   <script type="module">
-import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, Editable, Modal, applyChannel } from "./lib/js/framelib.js";
+import { frame, html, render, useState, useEffect, useRef, Fragment, useFramePush, Editable, Modal, applyChannel } from "/lib/js/framelib.js";
 
-const peer = window.__peer || {};
-const isSfiMember = !!peer.is_sfi_member;
-const isOwner = !!peer.is_owner;
-const userId = peer.user_id || "";
+// Who the door says this is, as the worker answers with every read of the state.
+let isSfiMember = false;
+let isOwner = false;
+let userId = "";
 const DEFAULT_PREFS = { title: "Roundtable", positive_label: "Positives", negative_label: "Negatives", public_to_space_viewers: false };
 
-const api = frame.api;
+// Everything this page knows comes from its own server half (./api/…), and every write
+// is a request there with an answer: the page reads again after its own, and a push
+// brings everyone else along.
+async function api(method, path, body) {
+  const r = await window.seamside.fetch(`/api${path}`, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+  let v = {};
+  try { v = r.json(); } catch { /* the status says it */ }
+  if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+  return v;
+}
+const write = (path, body) => api("POST", path, body);
 
-// Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are dropped
-// on Android (issue #750). Fire-and-forget — resulting state arrives via the rt_* pushes,
-// which is how this frontend already renders every change (its own included).
-// Feature-detect: an older viewer's framelib has no busSend — fall back to the HTTP write.
-const write = (path, body) => {
-  if (typeof frame.busSend === "function") {
-    frame.busSend({ op: path.replace(/^\.\/api\//, ""), ...(body || {}) });
-    return Promise.resolve({});
-  }
-  return api(path, body);
-};
+// A page has no form submit: a button's click asks each control whether it is filled in.
+const filled = (e) => [...e.target.closest("[data-form]").querySelectorAll("input, select, textarea")]
+  .every((el) => el.reportValidity());
+const onEnter = (act) => (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); act(e); } };
 
 function fmtTime(ts) {
   const d = new Date(ts);
@@ -112,9 +115,8 @@ function ListColumn({ kind, items, prefs, canParticipate, collapsed, onToggleCol
   const placeholder = kind === "positive" ? "Add a feature or task…" : "Add an issue or bug…";
 
   const submit = (e) => {
-    e.preventDefault();
     const text = draft.trim();
-    if (!text) return;
+    if (!text || !filled(e)) return;
     setDraft("");
     onAdd(kind, text);
   };
@@ -127,11 +129,11 @@ function ListColumn({ kind, items, prefs, canParticipate, collapsed, onToggleCol
         <i class="ph-light ph-caret-down chev"></i>
       </span>
     </div>
-    ${canParticipate && html`<form class="rt-item-composer" autocomplete="off" onSubmit=${submit}>
-      <input type="text" maxlength="280" placeholder=${placeholder}
-        value=${draft} onInput=${(e) => setDraft(e.target.value)} />
-      <button type="submit" disabled=${!draft.trim()} title="Add"><i class="ph-light ph-plus"></i></button>
-    </form>`}
+    ${canParticipate && html`<div class="rt-item-composer" data-form>
+      <input type="text" maxlength="280" autocomplete="off" placeholder=${placeholder}
+        value=${draft} onInput=${(e) => setDraft(e.target.value)} onKeyDown=${onEnter(submit)} />
+      <button disabled=${!draft.trim()} title="Add" onClick=${submit}><i class="ph-light ph-plus"></i></button>
+    </div>`}
     <div class="rt-list">
       ${items.length === 0
         ? html`<div class="rt-list-empty">
@@ -200,9 +202,8 @@ function ChatStrip({ messages, canParticipate, collapsed, onToggleCollapse, onSe
   }, [messages, collapsed]);
 
   const submit = (e) => {
-    e.preventDefault();
     const body = draft.trim();
-    if (!body) return;
+    if (!body || !filled(e)) return;
     setDraft("");
     setTimeout(autosize, 0);
     onSend(body);
@@ -238,15 +239,15 @@ function ChatStrip({ messages, canParticipate, collapsed, onToggleCollapse, onSe
             </div>`;
           })}
       </div>
-      ${canParticipate && html`<form class="rt-composer" autocomplete="off" onSubmit=${submit}>
-        <textarea ref=${taRef} rows="1" placeholder="Write a message..." maxlength="4000"
+      ${canParticipate && html`<div class="rt-composer" data-form>
+        <textarea ref=${taRef} rows="1" placeholder="Write a message..." maxlength="4000" autocomplete="off"
           value=${draft}
           onInput=${(e) => { setDraft(e.target.value); autosize(); }}
-          onKeyDown=${(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(e); } }} />
-        <button type="submit" class="rt-send" title="Send" disabled=${!draft.trim()}>
+          onKeyDown=${onEnter(submit)} />
+        <button class="rt-send" title="Send" disabled=${!draft.trim()} onClick=${submit}>
           <i class="ph-light ph-paper-plane-tilt"></i>
         </button>
-      </form>`}
+      </div>`}
     </div>
   </div>`;
 }
@@ -273,8 +274,12 @@ function App() {
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [listCollapsed, setListCollapsed] = useState({ positive: false, negative: false });
 
-  const load = () => api("./api/state")
+  const load = () => window.seamside.ready.then(() => api("GET", "/state"))
       .then((data) => {
+        isSfiMember = !!data.is_member;
+        isOwner = !!data.me?.is_owner;
+        userId = data.me?.user_id || "";
+        applyChannel(document.getElementById("app"), data.color);
         setState({
           prefs: { ...DEFAULT_PREFS, ...(data.prefs || {}) },
           messages: data.messages || [],
@@ -283,52 +288,18 @@ function App() {
           canEditSettings: !!data.can_edit_settings,
           canParticipate: !!data.can_participate,
         });
-      })
-      .catch((e) => setErr(e.message || String(e)));
-  useEffect(() => { load(); }, []);
+      });
+  useEffect(() => { load().catch((e) => setErr(e.message || String(e))); }, []);
 
-  useFramePush({
-    rt_message: (d) => setState((prev) => {
-      if (!prev || prev.messages.some((m) => m.id === d.message.id)) return prev;
-      return { ...prev, messages: [...prev.messages, d.message] };
-    }),
-    rt_message_delete: (d) => setState((prev) => prev ? { ...prev, messages: prev.messages.filter((m) => m.id !== d.id) } : prev),
-    rt_item_add: (d) => setState((prev) => {
-      if (!prev) return prev;
-      const list = d.kind === "positive" ? prev.positives : prev.negatives;
-      if (list.some((x) => x.id === d.item.id)) return prev;
-      const incoming = { ...d.item, i_voted: d.item.user_id === userId ? d.item.i_voted : false };
-      const next = sortItems([...list, incoming]);
-      return d.kind === "positive" ? { ...prev, positives: next } : { ...prev, negatives: next };
-    }),
-    rt_item_delete: (d) => setState((prev) => {
-      if (!prev) return prev;
-      if (d.kind === "positive") return { ...prev, positives: prev.positives.filter((x) => x.id !== d.id) };
-      return { ...prev, negatives: prev.negatives.filter((x) => x.id !== d.id) };
-    }),
-    rt_item_vote: (d) => setState((prev) => {
-      if (!prev) return prev;
-      const list = d.kind === "positive" ? prev.positives : prev.negatives;
-      const next = sortItems(list.map((x) => x.id === d.id ? { ...x, votes: d.votes } : x));
-      return d.kind === "positive" ? { ...prev, positives: next } : { ...prev, negatives: next };
-    }),
-    // The viewers toggle changes who may write, which only the worker can say — re-read.
-    rt_prefs: (d) => {
-      setState((prev) => prev ? { ...prev, prefs: { ...prev.prefs, ...d.prefs } } : prev);
-      load();
-    },
-  });
+  // The worker says what changed and never what it holds: read it again, as whoever this is.
+  const reread = () => load().catch(() => {});
+  useFramePush((d) => { if (d.roundtable) reread(); });
 
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => setToast(null), 2000);
     return () => clearTimeout(id);
   }, [toast]);
-
-  // The frame follows the space channel.
-  useEffect(() => {
-    applyChannel(document.getElementById("app"), peer.space_color);
-  }, []);
 
   useEffect(() => {
     const root = document.getElementById("app");
@@ -347,10 +318,10 @@ function App() {
 
   const { prefs, messages, positives, negatives, canEditSettings, canParticipate } = state;
 
-  const sendMessage = (body) => write("./api/send", { body }).catch(fail("send"));
-  const deleteMessage = (id) => write("./api/delete-message", { id }).catch(fail("delete"));
+  const sendMessage = (body) => write("/send", { body }).then(reread).catch(fail("send"));
+  const deleteMessage = (id) => write("/delete-message", { id }).then(reread).catch(fail("delete"));
 
-  const addItem = (kind, text) => write("./api/item-add", { kind, body: text }).catch(fail("add"));
+  const addItem = (kind, text) => write("/item-add", { kind, body: text }).then(reread).catch(fail("add"));
   const voteItem = (kind, id) => {
     // Optimistic update.
     setState((prev) => {
@@ -361,7 +332,7 @@ function App() {
         : x));
       return kind === "positive" ? { ...prev, positives: next } : { ...prev, negatives: next };
     });
-    write("./api/item-vote", { id }).catch((e) => {
+    write("/item-vote", { id }).then(reread, (e) => {
       // Roll back on failure.
       setState((prev) => {
         if (!prev) return prev;
@@ -377,15 +348,14 @@ function App() {
   const deleteItem = async (kind, id) => {
     const ok = await frame.confirm("Are you sure you want to delete this item?", { danger: true, okLabel: "Delete" });
     if (!ok) return;
-    write("./api/item-delete", { id }).catch(fail("delete"));
+    write("/item-delete", { id }).then(reread).catch(fail("delete"));
   };
 
   const saveSettings = async (next) => {
-    // No response over the bus — the rt_prefs push (which reaches the sender too)
-    // applies the saved prefs.
     try {
-      await write("./api/settings", next);
+      await write("/settings", next);
       setShowSettings(false);
+      reread();
     } catch (e) {
       setToast(e.message || "save failed");
     }

@@ -7,10 +7,13 @@
 //   data_storage:   the space's tables   — `flashcards_decks`, `flashcards` (the cards) and
 //                                           `flashcards_reviews`, files at the space's root,
 //                                           synced with it; no contract (docs/schema-contracts.md).
-//   view_realtime:  view-collaborative    — deck and card edits push, so a group building a
-//                                           deck together sees it grow. Reviews do NOT push
-//                                           (see below).
-//   settings_scope: settings-per-sfi
+//   view_realtime:  view-collaborative    — deck and card edits push `{ flashcards: "decks" }`,
+//                                           which says to read again and never what changed,
+//                                           so a group building a deck together sees it grow.
+//                                           Reviews do NOT push (see below).
+//
+// The page reads no table: everything comes from GET /api/list, which folds in only the
+// asker's own schedule, and every write is a route here that decides on ctx.peer.
 //
 // THE SPLIT THAT MAKES THIS WORTH BUILDING: cards are shared, scheduling is personal. A
 // study group writes one deck between them, and every member gets their own intervals —
@@ -24,10 +27,8 @@
 // wrong easiness factor does not throw an error, it quietly teaches you the wrong things at
 // the wrong time, and you would not notice for weeks.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, declareTables, ensureTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText } from "@frame-core";
 
 const DECKS = "flashcards_decks";
 const CARDS = "flashcards";
@@ -62,8 +63,36 @@ declareTables([
   { key: REVIEWS, title: "Review progress", description: "Each person's spaced-repetition state, one row per card per person.", local: true, schema: REVIEWS_SCHEMA },
 ]);
 
-type Peer = ReturnType<typeof parsePeerInfo>;
+type Row = Record<string, unknown> & { id: string };
+type Schema = ReadonlyArray<{ name: string; col_type: "text" | "integer" | "real"; default_val: string }>;
 type WriteResult = { status: number; body: unknown };
+
+const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+
+const defaultsOf = (schema: Schema): Record<string, unknown> => Object.fromEntries(
+  schema.map((c) => [c.name, c.col_type === "text" ? c.default_val : Number(c.default_val)]),
+);
+const DEFAULTS: Record<string, Record<string, unknown>> = {
+  [DECKS]: defaultsOf(DECKS_SCHEMA),
+  [CARDS]: defaultsOf(CARDS_SCHEMA),
+  [REVIEWS]: defaultsOf(REVIEWS_SCHEMA),
+};
+
+/** Write a row over what it held (a new one from the schema's defaults), stamped. */
+async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await rows(ctx, name).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx, name).upsert({
+    ...(was ?? { ...DEFAULTS[name], _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+async function drop(ctx: Ctx, name: string, match: (r: Row) => boolean): Promise<void> {
+  for (const r of await rows(ctx, name).all()) if (match(r)) await rows(ctx, name).delete(r.id);
+}
 
 function dayStr(ms: number): string {
   const d = new Date(ms);
@@ -119,25 +148,15 @@ function schedule(prev: Sched, q: number): Sched {
   return next;
 }
 
-async function readyTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  for (const key of [DECKS, CARDS, REVIEWS]) {
-    if (!r.byKey[key]) {
-      try { await table(key, peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`flashcards: ensure "${key}" failed: ${e}`); }
-      r = ensureTables(quiet);
-    }
-  }
-  return !!r.byKey[DECKS] && !!r.byKey[CARDS] && !!r.byKey[REVIEWS];
-}
-
 /** Everything the viewer needs, with THEIR schedule folded in. A card with no review row
  * is new and therefore due — that is how a fresh deck presents itself. */
-async function readAll(sfiId: string, peer: Peer) {
+async function readAll(ctx: Ctx) {
+  const peer = ctx.peer;
   const today = dayStr(Date.now());
-  const { rows: drows } = await table(DECKS, sfiId).query({ order_by: [{ col: "sort_order" }] });
-  const { rows: crows } = await table(CARDS, sfiId).query({ limit: 5000 });
-  const { rows: rrows } = await table(REVIEWS, sfiId).query({ limit: 20000 });
+  const drows = (await rows(ctx, DECKS).all())
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
+  const crows = await rows(ctx, CARDS).all();
+  const rrows = await rows(ctx, REVIEWS).all();
 
   const mine: Record<string, { reps: number; ef: number; ivl: number; due: string }> = {};
   const uid = String(peer.user_id ?? "");
@@ -150,7 +169,7 @@ async function readAll(sfiId: string, peer: Peer) {
   }
 
   const cards = crows.map((c) => {
-    const id = String(c._row_id);
+    const id = c.id;
     const s = mine[id];
     const prev: Sched = { reps: s ? s.reps : 0, ef: s ? s.ef : 2.5, ivl: s ? s.ivl : 0 };
     return {
@@ -171,7 +190,7 @@ async function readAll(sfiId: string, peer: Peer) {
   for (const c of cards) (byDeck[c.deck_id] ||= []).push(c);
 
   const decks = drows.map((d) => {
-    const id = String(d._row_id);
+    const id = d.id;
     const list = byDeck[id] || [];
     return {
       id, name: d.name, sort_order: Number(d.sort_order) || 0,
@@ -187,56 +206,51 @@ async function readAll(sfiId: string, peer: Peer) {
   return { today, decks, cards, next_due: upcoming[0] || "", can_study: !!peer.is_sfi_member };
 }
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "flashcards_changed" });
-}
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx) => ctx.push({ flashcards: "decks" });
 
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  if (!(await readyTables(peer))) return { status: 503, body: { error: "tables not ready" } };
-  const decks = table(DECKS, sfiId);
-  const cards = table(CARDS, sfiId);
-  const reviews = table(REVIEWS, sfiId);
+async function handleWrite(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<WriteResult> {
+  const peer = ctx.peer;
+  const editor = peer.is_sfi_editor || peer.is_owner;
+  const member = editor || peer.is_sfi_member;
 
   // Reviewing is member work, not editor work: it writes only YOUR OWN row and changes
   // nothing anyone else can see. Everything that edits the shared deck stays editor-only.
-  // (This is the legitimate use of is_sfi_member — never for the editor gate below.)
   if (op === "review") {
-    if (!peer.is_sfi_member) return { status: 403, body: { error: "members only" } };
+    if (!member) return { status: 403, body: { error: "members only" } };
     const uid = String(peer.user_id ?? "");
     if (!uid) return { status: 403, body: { error: "no identity to schedule against" } };
     const cardId = String(v?.card_id ?? "");
-    if (!cardId || !(await cards.get(cardId))) return { status: 400, body: { error: "bad card" } };
+    if (!cardId || !(await rows(ctx, CARDS).get(cardId))) return { status: 400, body: { error: "bad card" } };
     const q = Number(v?.quality);
     if (!Number.isFinite(q) || q < 0 || q > 5) return { status: 400, body: { error: "bad quality" } };
 
-    const { rows } = await reviews.query({ where: { card_id: cardId, user_id: uid }, limit: 1 });
-    const prev: Sched = rows.length
-      ? { reps: Number(rows[0].reps) || 0, ef: Number(rows[0].ef) || 2.5, ivl: Number(rows[0].ivl) || 0 }
+    const was = (await rows(ctx, REVIEWS).all()).find((r) => String(r.card_id) === cardId && String(r.user_id) === uid);
+    const prev: Sched = was
+      ? { reps: Number(was.reps) || 0, ef: Number(was.ef) || 2.5, ivl: Number(was.ivl) || 0 }
       : { reps: 0, ef: 2.5, ivl: 0 };
     const next = schedule(prev, q);
     const today = dayStr(Date.now());
     const patch = { card_id: cardId, user_id: uid, reps: next.reps, ef: next.ef, ivl: next.ivl,
                     due: addDays(today, next.ivl), seen_ms: Date.now() };
-    await reviews.upsert(rows.length ? String(rows[0]._row_id) : null, patch);
+    await keep(ctx, REVIEWS, was ? was.id : null, patch);
     // Deliberately NO push: this changed one person's schedule and nobody else's screen
     // should move because of it.
     return { status: 200, body: { ok: true, reps: next.reps, ef: next.ef, ivl: next.ivl, due: patch.due } };
   }
 
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  const ok = async (): Promise<WriteResult> => { notify(sfiId); return { status: 200, body: { ok: true } }; };
+  if (!editor) return { status: 403, body: { error: "editors only" } };
+  const ok = (): WriteResult => { tell(ctx); return { status: 200, body: { ok: true } }; };
+  const decks = rows(ctx, DECKS);
+  const cards = rows(ctx, CARDS);
 
   if (op === "deck") {
     const name = sanitizeText(v?.name, 100);
     if (!name) return { status: 400, body: { error: "name required" } };
-    const { rows } = await decks.query({ order_by: [{ col: "sort_order", dir: "desc" }], limit: 1 });
-    const nextOrder = rows.length ? (Number(rows[0].sort_order) || 0) + 1 : 0;
-    const { row_id } = await decks.upsert(null, { name, sort_order: nextOrder });
-    // Must push like every other mutation. Returning early to hand back the row id
-    // skipped notify(), so a deck created over the bus (which is fire-and-forget, and
-    // therefore relies ENTIRELY on the push to refresh) appeared to do nothing at all.
-    notify(sfiId);
-    return { status: 200, body: { ok: true, id: row_id } };
+    const last = (await decks.all()).reduce((m, d) => Math.max(m, Number(d.sort_order) || 0), -1);
+    const row = await keep(ctx, DECKS, null, { name, sort_order: last + 1 });
+    tell(ctx);
+    return { status: 200, body: { ok: true, id: row.id } };
   }
   if (op.startsWith("deck/")) {
     const [id, action] = op.slice("deck/".length).split("/");
@@ -244,14 +258,14 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     if (action === "delete") {
       // Take the cards and everybody's progress on them: an orphaned review row is
       // invisible and would resurrect if a row id were ever reused.
-      const { rows } = await cards.query({ where: { deck_id: id }, limit: 5000 });
-      for (const c of rows) await reviews.deleteWhere({ card_id: String(c._row_id) });
-      await cards.deleteWhere({ deck_id: id });
+      const gone = new Set((await cards.all()).filter((c) => String(c.deck_id) === id).map((c) => c.id));
+      await drop(ctx, REVIEWS, (r) => gone.has(String(r.card_id)));
+      await drop(ctx, CARDS, (c) => gone.has(c.id));
       await decks.delete(id);
       return ok();
     }
     if (action) return { status: 404, body: { error: "not found" } };
-    if (v?.name !== undefined) { const n = sanitizeText(v.name, 100); if (n) await decks.upsert(id, { name: n }); }
+    if (v?.name !== undefined) { const n = sanitizeText(v.name, 100); if (n) await keep(ctx, DECKS, id, { name: n }); }
     return ok();
   }
 
@@ -261,21 +275,22 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     if (!front || !back) return { status: 400, body: { error: "both sides are needed" } };
     const deckId = String(v?.deck_id ?? "");
     if (!deckId || !(await decks.get(deckId))) return { status: 400, body: { error: "pick a deck" } };
-    await cards.upsert(null, { deck_id: deckId, front, back, added_ms: Date.now() });
+    await keep(ctx, CARDS, null, { deck_id: deckId, front, back, added_ms: Date.now() });
     return ok();
   }
   if (op.startsWith("card/")) {
     const [id, action] = op.slice("card/".length).split("/");
     if (!id || !(await cards.get(id))) return { status: 400, body: { error: "bad id" } };
     if (action === "delete") {
-      await reviews.deleteWhere({ card_id: id });
+      await drop(ctx, REVIEWS, (r) => String(r.card_id) === id);
       await cards.delete(id);
       return ok();
     }
     if (action === "reset") {
       // Forget MY progress on this card only — a deck author must not be able to wipe
       // somebody else's schedule.
-      await reviews.deleteWhere({ card_id: id, user_id: String(peer.user_id ?? "") });
+      const uid = String(peer.user_id ?? "");
+      await drop(ctx, REVIEWS, (r) => String(r.card_id) === id && String(r.user_id) === uid);
       return ok();
     }
     if (action) return { status: 404, body: { error: "not found" } };
@@ -283,55 +298,53 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     if (v?.front !== undefined) { const f = sanitizeText(v.front, 1000); if (f) patch.front = f; }
     if (v?.back !== undefined) { const b = sanitizeText(v.back, 2000); if (b) patch.back = b; }
     if (v?.deck_id !== undefined && await decks.get(String(v.deck_id))) patch.deck_id = String(v.deck_id);
-    if (Object.keys(patch).length) await cards.upsert(id, patch);
+    if (Object.keys(patch).length) await keep(ctx, CARDS, id, patch);
     return ok();
   }
 
   return { status: 404, body: { error: "not found" } };
 }
 
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`flashcards: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+const json = (v: unknown, status = 200) => Response.json(v, { status });
 
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
-
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
   }
+}
 
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
 
-  // A review needs its result back — the next interval is shown on the button that
-  // produced it — so the write arm answers rather than being fire-and-forget.
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  if (!(await readyTables(peer))) return jsonReply(replyPort, 503, { error: "tables not ready" });
+    if (pathname === "/api/whoami" && method === "GET") {
+      const peer = ctx.peer;
+      return json({
+        is_anon:       peer.is_anon,
+        is_sfi_member: peer.is_sfi_member,
+        is_sfi_editor: peer.is_sfi_editor,
+        is_owner:      peer.is_owner,
+        user_id:       peer.user_id,
+        user_name:     peer.user_name,
+        space_color:   peer.space_color,
+      });
+    }
 
-  if (reqPath === "/api/list" && method === "GET") {
-    return jsonReply(replyPort, 200, await readAll(sfiId, peer));
-  }
+    // A review needs its result back — the next interval is shown on the button that
+    // produced it — and every other write answers too, so the page re-reads after it.
+    if (pathname.startsWith("/api/") && (method === "POST" || method === "PUT")) {
+      const r = await handleWrite(ctx, pathname.slice("/api/".length), await body(request));
+      return json(r.body, r.status);
+    }
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    if (pathname === "/api/list" && method === "GET") return json(await readAll(ctx));
+
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Flashcards frame is up and running!");

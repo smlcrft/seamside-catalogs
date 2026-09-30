@@ -1,0 +1,20 @@
+{
+  "tier": "members",
+  "publish": "open",
+  "steps": [
+    { "why": "the page is served to a stranger at the published address", "do": "GET {frame}/index.html", "status": 200, "has": ["ASCII RUNNER", "/lib/js/framelib.js", "asciiRunnerHighScore", "seamside.prefs"], "lacks": ["localStorage"] },
+    { "why": "and at the root", "do": "GET {frame}/", "status": 200, "has": ["game-container"] },
+    { "why": "and its style", "do": "GET {frame}/index.css", "status": 200, "has": ["#game-area"] },
+    { "why": "the worker's own code is not a page", "do": "GET {frame}/frame.ts", "status": 404, "lacks": ["METHOD_NOT_ALLOWED"] },
+    { "why": "the server half takes no write from a stranger", "do": "POST {frame}/index.html", "body": {}, "status": 405, "is": { "/code": "METHOD_NOT_ALLOWED" } },
+    { "why": "a stranger writes no key at the door", "do": "KV.PUT asciiRunnerHighScore f:{id}", "body": "999", "status": 403 },
+    { "why": "someone signed in and on no roster plays too", "as": "signed", "do": "GET {frame}/index.html", "status": 200, "has": ["ASCII RUNNER"] },
+    { "why": "and writes nothing", "as": "signed", "do": "POST {frame}/score", "body": { "score": 5 }, "status": 405 },
+    { "why": "a viewer plays", "as": "viewer", "do": "GET {frame}/index.html", "status": 200, "has": ["ASCII RUNNER"] },
+    { "why": "and writes nothing", "as": "viewer", "do": "POST {frame}/score", "body": { "score": 5 }, "status": 405 },
+    { "why": "a collaborator plays", "as": "collaborator", "do": "GET {frame}/index.html", "status": 200 },
+    { "why": "and the server half keeps nothing for them either", "as": "collaborator", "do": "POST {frame}/score", "body": { "score": 5 }, "status": 405 },
+    { "why": "the owner plays", "as": "owner", "do": "GET {frame}/index.css", "status": 200 },
+    { "why": "and nothing is kept in the session's keys", "as": "collaborator", "at": "space", "do": "KV.GET asciiRunnerHighScore f:{id}", "lacks": ["999"] }
+  ]
+}

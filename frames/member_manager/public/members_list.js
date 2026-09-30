@@ -1,8 +1,8 @@
 // Which members list this session uses: `members.table.jsonl` at the space's root, or a
 // subtype such as `club.members.table.jsonl`. An editor chooses, and always confirms; the
-// worker keeps the choice per session (sessionKv `bound/members`). Companion frames agree by
+// worker keeps the choice per session (its kv, `bound/members`). Companion frames agree by
 // the person choosing the same list in each.
-import { frame, html } from "./lib/js/framelib.js";
+import { frame, html } from "/lib/js/framelib.js";
 
 export const LIST_NAME = /^([a-z0-9][a-z0-9_-]*\.)*members$/;
 const TABLE_FILE = /^(.+)\.table\.jsonl$/;

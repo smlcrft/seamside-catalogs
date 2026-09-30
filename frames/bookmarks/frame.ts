@@ -2,28 +2,27 @@
 // Bookmarks — save a link, find it again.
 //
 // Design axes:
-//   privacy:        privacy-public-view  — non-members read and follow the links; space
-//                                           editors save and edit.
+//   privacy:        privacy-public-view  — non-members read and follow the links, through
+//                                           GET /api/list; space editors save and edit.
 //   data_storage:   the space's table    — `bookmarks.table.jsonl` at the space's root,
 //                                           synced with the space to every member. No
 //                                           contract: nothing else acts on these rows
 //                                           (docs/schema-contracts.md, "When NOT to write a
 //                                           contract").
-//   view_realtime:  view-collaborative    — every write pushes.
+//   view_realtime:  view-collaborative    — every write pushes what to read again.
 //   settings_scope: settings-per-sfi
 //
 // THIS FRAME FETCHES NOTHING. It would be easy to reach out for each page's <title> and
 // favicon, and it would make the list prettier. It would also mean that saving a link
 // privately quietly told that site you had done so, and turned a bookmark list into a
 // browsing history broadcast — and bookmarks can point anywhere, so no list of hosts would do. So the title is derived from the address itself and the user renames it if the
-// URL was unhelpful. `permissions.net` stays empty, which is a promise the manifest makes
-// on the frame's behalf and the platform enforces.
+// URL was unhelpful. The manifest declares no `permissions_backend.net`, which is a promise it
+// makes on the frame's behalf and the platform enforces.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, declareTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText } from "@frame-core";
 
+const BOOKMARKS = "bookmarks";
 const BOOKMARKS_SCHEMA = [
   { name: "url",      col_type: "text"    as const, nullable: false, default_val: "" },
   { name: "title",    col_type: "text"    as const, nullable: false, default_val: "" },
@@ -35,11 +34,28 @@ const BOOKMARKS_SCHEMA = [
 ];
 
 declareTables([
-  { key: "bookmarks", title: "Bookmarks", description: "Saved links for this space.", local: true, schema: BOOKMARKS_SCHEMA },
+  { key: BOOKMARKS, title: "Bookmarks", description: "Saved links for this space.", local: true, schema: BOOKMARKS_SCHEMA },
 ]);
 
-type Peer = ReturnType<typeof parsePeerInfo>;
-type WriteResult = { status: number; body: unknown };
+type Row = Record<string, unknown> & { id: string };
+
+const DEFAULTS: Record<string, unknown> = Object.fromEntries(
+  BOOKMARKS_SCHEMA.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),
+);
+
+/** Write a bookmark over what it held (a new one over the schema's defaults), stamped when
+ * it was made and when it changed. */
+async function keep(ctx: Ctx, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const t = ctx.table<Record<string, unknown>>(BOOKMARKS);
+  const was = id ? await t.get(id) : null;
+  const now = Date.now();
+  return await t.upsert({
+    ...(was ?? { ...DEFAULTS, _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
 
 /** Accept only what a browser could actually open. A bookmark is a URL a person pasted, so
  * it is checked before it is stored, not when it is clicked. */
@@ -82,104 +98,100 @@ function cleanTags(raw: unknown): string {
   return [...new Set(parts)].slice(0, 12).join(",");
 }
 
-async function listRows(sfiId: string) {
-  const { rows } = await table("bookmarks", sfiId).query({ order_by: [{ col: "added_ms", dir: "desc" }], limit: 2000 });
+async function listRows(ctx: Ctx) {
+  const rows = (await ctx.table<Record<string, unknown>>(BOOKMARKS).all())
+    .sort((a, b) => (Number(b.added_ms) || 0) - (Number(a.added_ms) || 0))
+    .slice(0, 2000);
   return rows.map((r) => ({
-    id: r._row_id, url: r.url, title: r.title, domain: r.domain, note: r.note,
+    id: r.id, url: r.url, title: r.title, domain: r.domain, note: r.note,
     tags: String(r.tags || "").split(",").filter(Boolean),
     added_ms: Number(r.added_ms) || 0, added_by: r.added_by,
   }));
 }
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "bookmarks_changed" });
-}
+const json = (v: unknown, status = 200) => Response.json(v, { status });
 
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  const t = table("bookmarks", sfiId);
+async function handleWrite(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<Response> {
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return json({ error: "editors only" }, 403);
+  const t = ctx.table<Record<string, unknown>>(BOOKMARKS);
 
-  const ok = async (extra?: Record<string, unknown>): Promise<WriteResult> => {
-    notify(sfiId);
-    return { status: 200, body: { ok: true, ...(extra ?? {}) } };
+  // What changed, never what it holds: each page reads again as whoever it is.
+  const ok = (extra?: Record<string, unknown>) => {
+    ctx.push({ bookmarks: "bookmarks" });
+    return json({ ok: true, ...(extra ?? {}) });
   };
 
   if (op === "bookmark") {
     const norm = normalizeUrl(v?.url);
-    if (!norm) return { status: 400, body: { error: "that doesn't look like a web address" } };
+    if (!norm) return json({ error: "that doesn't look like a web address" }, 400);
 
     // Saving the same link twice is a mistake, not an intent: keep the original (and its
     // tags) and say so, rather than growing a second row that splits the tags between them.
-    const { rows } = await t.query({ where: { url: norm.url }, limit: 1 });
-    if (rows.length) return { status: 200, body: { ok: true, duplicate: true, id: rows[0]._row_id } };
+    const same = (await t.all()).find((r) => r.url === norm.url);
+    if (same) return json({ ok: true, duplicate: true, id: same.id });
 
     const title = sanitizeText(v?.title, 300) || titleFromUrl(norm.url, norm.domain);
-    const { row_id } = await t.upsert(null, {
+    const row = await keep(ctx, null, {
       url: norm.url, title, domain: norm.domain,
       note: sanitizeText(v?.note, 500),
       tags: cleanTags(v?.tags),
-      added_ms: Date.now(), added_by: sanitizeText(peer.user_name, 60),
+      added_ms: Date.now(), added_by: sanitizeText(ctx.peer.user_name, 60),
     });
-    return ok({ id: row_id, title, domain: norm.domain });
+    return ok({ id: row.id, title, domain: norm.domain });
   }
 
   if (op.startsWith("bookmark/")) {
     const [id, action] = op.slice("bookmark/".length).split("/");
-    if (!id || !(await t.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!id || !(await t.get(id))) return json({ error: "bad id" }, 400);
     if (action === "delete") { await t.delete(id); return ok(); }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
 
     const patch: Record<string, unknown> = {};
     if (v?.title !== undefined) { const s = sanitizeText(v.title, 300); if (s) patch.title = s; }
     if (v?.note !== undefined) patch.note = sanitizeText(v.note, 500);
     if (v?.tags !== undefined) patch.tags = cleanTags(v.tags);
-    if (Object.keys(patch).length) await t.upsert(id, patch);
+    if (Object.keys(patch).length) await keep(ctx, id, patch);
     return ok();
   }
 
-  return { status: 404, body: { error: "not found" } };
+  return json({ error: "not found" }, 404);
 }
 
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`bookmarks: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
-
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
-
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
   }
+}
 
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
 
-  // Saving returns its result (a duplicate, or the title we derived), so the paste path
-  // stays on HTTP; everything else the frontend does is fire-and-forget over the bus.
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  if (reqPath === "/api/list" && method === "GET") {
-    return jsonReply(replyPort, 200, { bookmarks: await listRows(sfiId) });
-  }
+    if (pathname === "/api/whoami" && method === "GET") {
+      const peer = ctx.peer;
+      return json({
+        is_anon:       peer.is_anon,
+        is_sfi_member: peer.is_sfi_member,
+        is_sfi_editor: peer.is_sfi_editor || peer.is_owner,
+        is_owner:      peer.is_owner,
+        user_id:       peer.user_id,
+        user_name:     peer.user_name,
+        space_color:   peer.space_color,
+      });
+    }
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    if (pathname.startsWith("/api/") && (method === "POST" || method === "PUT")) {
+      return handleWrite(ctx, pathname.slice("/api/".length), await body(request));
+    }
+
+    if (pathname === "/api/list" && method === "GET") return json({ bookmarks: await listRows(ctx) });
+
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Bookmarks frame is up and running!");

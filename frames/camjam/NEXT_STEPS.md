@@ -13,11 +13,11 @@ not a TODO — most of them would cost more error surface than they're worth.
 - **Auto-rung.** The ladder is a manual owner choice; the host could pick a rung from the
   observed viewer count (a 12-person space probably doesn't want the 1080px rung).
 - **A "raise hand" queue.** Today taking over is immediate and unannounced. A one-row
-  queue (`frameSettings` is enough) would let the next person ask instead of interrupt.
+  queue (a row of `__fc_settings` is enough) would let the next person ask instead of interrupt.
 - **Mirror the sharer's own preview.** The sharer currently watches the same round-tripped
   still as everyone else, which is honest but lags by up to one interval. A local
   `<video>` preview beside it would show both.
-- **Remember the chosen camera.** `frame.localStorageSetItem` could hold the last
+- **Remember the chosen camera.** `seamside.prefs.set` could hold the last
   `deviceId` per space so a returning sharer doesn't re-pick.
 
 ## Deliberately NOT here

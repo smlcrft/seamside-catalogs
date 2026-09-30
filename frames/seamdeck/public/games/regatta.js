@@ -6,7 +6,7 @@
 // A REALTIME race: everyone casts off together after the countdown. Steer with
 // ←/→; the wind blows from the top of the course, so the upwind marks demand
 // real tacking. Rivals sail the same water live (position beacons → ghosts).
-import { html } from "../lib/js/framelib.js";
+import { html } from "/lib/js/framelib.js";
 import { useRaceRunner } from "../console-kit.js";
 import {
   MAX_MS, NO_GO, MARK_R, FINISH_R,
@@ -71,7 +71,7 @@ function PlayScreen({ ctx }) {
   const boat = sailing ? (live || integrate([], ctx.seed, 0)) : null;
   const next = boat ? boat.next : 0;
   const luffing = phase === "running" && boat && boat.offWind < NO_GO;
-  const ghosts = (ctx.racers || []).filter((r) => r.client_id !== ctx.clientId);
+  const ghosts = (ctx.racers || []).filter((r) => r.player_id !== ctx.playerId);
   const nameOf = (seat_no) => {
     const s = ctx.seats.find((x) => x.seat_no === seat_no);
     return s ? (s.initials || (s.display_name || "").slice(0, 4)) : "";
@@ -97,7 +97,7 @@ function PlayScreen({ ctx }) {
           <i class="ph-light ph-flag-checkered"></i>
         </div>
         ${ghosts.map((g) => html`
-          <div key=${g.client_id}>
+          <div key=${g.player_id}>
             <div class="rg-ghost" style=${`left:calc(${px(g.x)}% - 6.5px); top:calc(${px(g.y)}% - 9.5px); transform: rotate(${g.heading}rad);`}></div>
             <div class="rg-ghost-tag" style=${`left:${px(g.x)}%; top:${px(g.y)}%;`}>${nameOf(g.seat_no)}</div>
           </div>`)}

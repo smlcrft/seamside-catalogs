@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>File Folder</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c4); }          /* frame accent: amber */
     * { box-sizing: border-box; }
@@ -124,7 +124,7 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush } from "./lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useRef, useFramePush } from "/lib/js/framelib.js";
 
     function fmtSize(n) {
       if (n < 1024) return n + " B";
@@ -132,24 +132,18 @@
       if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
       return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
     }
-    function withSfi(p) {
-      try {
-        const sfi = new URLSearchParams(location.search).get("sfi");
-        if (sfi && !/[?&]sfi=/.test(p)) return p + (p.includes("?") ? "&" : "?") + "sfi=" + encodeURIComponent(sfi);
-      } catch (_) {}
-      return p;
+    // Everything this page knows comes from its own server half (/api/…), which decides who
+    // may do what; a refused request throws the worker's own words.
+    async function ask(path, init, what = "Request") {
+      await window.seamside.ready;
+      const r = await window.seamside.fetch(`/api/${path}`, init);
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || `${what} failed (${r.status})`);
+      return v;
     }
-
-    // JSON writes go over frame.busSend; the folder_changed push — which reaches the sender
-    // too — is the confirmation the UI renders from. A framelib without busSend falls back
-    // to the HTTP write.
-    function write(path, body) {
-      if (typeof frame.busSend === "function") {
-        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-        return Promise.resolve({});
-      }
-      return frame.api(path, body || {}, "POST");
-    }
+    // A write answers with the folder as it now stands; the push brings every other page along.
+    const write = (path, body) => ask(path, { method: "POST", body: JSON.stringify(body || {}) });
 
     function App() {
       const [st, setSt]       = useState(null);
@@ -200,8 +194,12 @@
       }, []);
 
       async function refresh() {
-        const s = await frame.api("api/state").catch(() => null);
+        const s = await ask("state").catch(() => null);
         if (s) setSt(s);
+      }
+      // A write draws from its answer; a refused one says why and reads the folder again.
+      function change(path, body) {
+        return write(path, body).then(setSt).catch(async (e) => { await frame.alert(e.message); refresh(); });
       }
       useEffect(() => {
         refresh();
@@ -211,7 +209,8 @@
         window.addEventListener("focus", again);
         return () => { document.removeEventListener("visibilitychange", again); window.removeEventListener("focus", again); };
       }, []);
-      useFramePush({ folder_changed: refresh });
+      // The worker says what changed and never what it holds: read the folder again.
+      useFramePush((d) => { if (d.file_folder) refresh(); });
 
       // Opened on a folder of the space (the space offers this frame on one): an editor is
       // asked to show it here; anyone else is told whose call that is.
@@ -224,7 +223,7 @@
         if (!at || at === st.folder) return;
         if (!st.can_move) { setOpenedOn(at); return; }
         frame.confirm(`Show the folder “${at}” in this File Folder? It shows “${st.folder}” now.`, { title: "Use this folder", okLabel: "Use it" })
-          .then((yes) => { if (yes) write("api/folder", { folder: at }); });
+          .then((yes) => { if (yes) change("folder", { folder: at }); });
       }, [st]);
 
       if (!st) return html`<div></div>`;
@@ -235,8 +234,8 @@
 
       function savePrefs(patch) {
         const next = { ...prefs, ...patch };
-        setSt({ ...st, prefs: next });          // optimistic; the push confirms
-        write("api/prefs", next).catch(() => {});
+        setSt({ ...st, prefs: next });          // optimistic; the answer confirms
+        change("prefs", next);
       }
 
       async function uploadFiles(list) {
@@ -254,12 +253,9 @@
               continue;
             }
             // The raw bytes are the body; the name rides in ?name=.
-            const buf = await f.arrayBuffer();
-            const res = await frame.fetch(withSfi("api/upload?name=" + encodeURIComponent(f.name)), { method: "POST", body: buf });
-            if (!res.ok) {
-              const msg = await res.json().catch(() => ({}));
-              await frame.alert(msg.error || ("Upload failed (" + res.status + ")"));
-            }
+            const bytes = new Uint8Array(await f.arrayBuffer());
+            await ask("upload?name=" + encodeURIComponent(f.name), { method: "POST", body: bytes }, "Upload")
+              .catch((e) => frame.alert(e.message));
           }
           await refresh();
         } finally { setBusy(false); }
@@ -267,14 +263,19 @@
 
       async function download(f) {
         try {
-          const res = await frame.fetch(withSfi("api/download/" + encodeURIComponent(f.id)));
+          await window.seamside.ready;
+          const res = await window.seamside.fetch("/api/download/" + encodeURIComponent(f.id));
           if (!res.ok) { await frame.alert("Download failed (" + res.status + ")"); return; }
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url; a.download = f.name;
-          document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 4000);
+          const blob = new Blob([res.bytes()], { type: res.type });
+          // A seated frame cannot start a download itself; the viewer saves it. A page open at
+          // its own address has no viewer, and saves it as any page does.
+          await window.seamside.saveFile(f.name, blob).catch(() => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = f.name;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 4000);
+          });
         } catch (_) { await frame.alert("Download failed."); }
       }
 
@@ -287,12 +288,12 @@
           return;
         }
         disarm();
-        write("api/delete/" + encodeURIComponent(f.id), {}).catch(() => {});
+        change("delete/" + encodeURIComponent(f.id), {});
       }
 
       async function changeFolder() {
         const next = await frame.prompt("Which folder of this space should File Folder show? It is made when the first file lands.", { title: "Folder", defaultValue: st.folder, okLabel: "Use it" });
-        if (next && next.trim() && next.trim() !== st.folder) write("api/folder", { folder: next.trim() });
+        if (next && next.trim() && next.trim() !== st.folder) change("folder", { folder: next.trim() });
       }
 
       const mode = me.is_owner ? "owner" : me.is_sfi_editor ? "editor" : "viewer";
@@ -366,7 +367,7 @@
                     <button class="iconbtn dl" title="Download" onClick=${() => download(f)}>
                       <i class="ph-light ph-download-simple"></i>
                     </button>
-                    ${can_add && !f.link ? html`
+                    ${can_add ? html`
                       <button class=${"iconbtn del" + (armed === f.id ? " armed" : "")}
                         title=${armed === f.id ? "Click again to delete" : "Delete"}
                         onClick=${() => del(f)} onBlur=${disarm}>

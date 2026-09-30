@@ -10,6 +10,6 @@ Where this frame could grow:
 
 ## Uploads & downloads
 
-**Downloads.** `fetch → Blob → object-URL → <a download>.click()`; the worker's `Content-Disposition` does not reach the page, so the name comes from the list.
+**Downloads.** `seamside.fetch` → Blob → `seamside.saveFile(name, blob)`, since a seated frame cannot start a download itself (a page open at its own address falls back to `<a download>`); the worker's `Content-Disposition` does not reach the page, so the name comes from the list.
 
-**Uploads.** The file's bytes are the raw body, the name rides in `?name=`. A request reaches the worker whole up to 8 MiB (and a frame writes a file of the space at most 8 MiB) and is refused (413) past it, so the per-file limit tops out at 8 MB; a larger file would need chunked uploads.
+**Uploads.** The file's bytes are the raw body (a `Uint8Array` through `seamside.fetch`), the name rides in `?name=`. A request reaches the worker whole up to 8 MiB (and a frame writes a file of the space at most 8 MiB) and is refused (413) past it, so the per-file limit tops out at 8 MB; a larger file would need chunked uploads.

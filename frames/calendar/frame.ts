@@ -11,17 +11,15 @@
 //                                           per event (row id = event id): synced with the space
 //                                           to every member, openable in any table tool. Two
 //                                           editors changing different events never collide.
-//   view_realtime:  view-collaborative   — every mutation calls pushToInstance so all viewers of
-//                                           the space refresh live.
+//   view_realtime:  view-collaborative   — every mutation pushes that the events changed, never
+//                                           what they hold; each open page reads again.
 //   settings_scope: settings-per-space   — the table is the space's; the frame keeps nothing else.
 //
 // Events are either one-time (a specific YYYY-MM-DD) or weekly-recurring (a set of weekdays,
 // e.g. Mon/Wed/Fri). Recurrence is expanded for display on the frontend; the backend only stores.
 // ----------------------------------------------------------------------------------------
-import {
-  log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance, onUiMessage,
-  serveFileAtPath, declareTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables } from "@frame-core";
 
 declareTables([{
   key: "calendar",
@@ -79,15 +77,18 @@ function todayIso(): string {
 }
 
 // ----- The events table -----------------------------------------------------------------
-const events = () => table("calendar");
+const events = (ctx: Ctx) => ctx.table<Record<string, unknown>>("calendar");
 
-async function loadEvents(): Promise<CalEvent[]> {
-  const { rows } = await events().query({ order_by: [{ col: "_created_at", dir: "asc" }] });
-  return rows.map((r) => sanitizeEvent({ ...r, id: r._row_id })).filter(Boolean) as CalEvent[];
+async function loadEvents(ctx: Ctx): Promise<CalEvent[]> {
+  const rows = (await events(ctx).all())
+    .sort((a, b) => (Number(a._created_at) || 0) - (Number(b._created_at) || 0));
+  return rows.map((r) => sanitizeEvent(r)).filter(Boolean) as CalEvent[];
 }
-async function saveEvent(ev: CalEvent): Promise<void> {
-  const { id, ...fields } = ev;
-  await events().upsert(id, fields);
+// Laid over what the row held, stamped when it was made and when it changed.
+async function saveEvent(ctx: Ctx, ev: CalEvent): Promise<void> {
+  const was = await events(ctx).get(ev.id);
+  const now = Date.now();
+  await events(ctx).upsert({ ...(was ?? { _created_at: now }), ...ev, _modified_at: now });
 }
 
 // ----- Validation -----------------------------------------------------------------------
@@ -98,9 +99,9 @@ function oneOf(v: unknown, allowed: string[], def: string): string {
 
 function sanitizeRecur(v: any): Recur {
   if (!v || !Array.isArray(v.days)) return null;
-  const days = [...new Set(
+  const days = [...new Set<number>(
     v.days.map((d: unknown) => Number(d)).filter((d: number) => Number.isInteger(d) && d >= 0 && d <= 6),
-  )].sort((a, b) => a - b) as number[];
+  )].sort((a, b) => a - b);
   if (!days.length) return null;
   // start = the day the series begins (its creation day); recurrence never extends before it.
   const start = DATE_RE.test(String(v.start || "")) ? String(v.start) : todayIso();
@@ -141,9 +142,10 @@ function sanitizeEvent(e: any): CalEvent | null {
 
 // ----- State for a peer -----------------------------------------------------------------
 // Reads are open to every viewer who reaches the frame; the identity flags only decide which
-// controls the frontend renders. Writes are gated per-endpoint on is_sfi_editor below.
-async function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
-  const list = await loadEvents();
+// controls the frontend renders. Writes are gated per-endpoint on the editor rung below.
+async function stateFor(ctx: Ctx) {
+  const peer = ctx.peer;
+  const list = await loadEvents(ctx);
   const me = {
     is_anon: peer.is_anon, is_sfi_member: peer.is_sfi_member,
     is_sfi_editor: peer.is_sfi_editor, is_owner: peer.is_owner,
@@ -154,75 +156,62 @@ async function stateFor(peer: ReturnType<typeof parsePeerInfo>) {
 }
 
 // ----- Mutations ------------------------------------------------------------------------
-// Shared by the HTTP arms and the bus dispatcher — the two entry points must never drift
-// on validation or role gates. Role gates live here.
-type MutPeer = ReturnType<typeof parsePeerInfo>;
-type MutResult = { status: number; body: unknown };
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const isEditor = (ctx: Ctx) => ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx) => ctx.push({ calendar: "events" });
+
+// deno-lint-ignore no-explicit-any
+async function body(request: Request): Promise<any> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
 
 // Create or update one event — editors only. id present + known → update; else insert.
-async function mutEvent(sfiId: string, v: { event?: any; by?: unknown }, peer: MutPeer): Promise<MutResult> {
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+// deno-lint-ignore no-explicit-any
+async function mutEvent(ctx: Ctx, v: { event?: any }): Promise<Response> {
+  if (!isEditor(ctx)) return json({ error: "editors only" }, 403);
   const ev = sanitizeEvent(v.event);
-  if (!ev) return { status: 400, body: { error: "invalid event" } };
-  if (!(await events().get(ev.id)) && (await loadEvents()).length >= MAX_EVENTS) {
-    return { status: 413, body: { error: "calendar is full" } };
+  if (!ev) return json({ error: "invalid event" }, 400);
+  if (!(await events(ctx).get(ev.id)) && (await loadEvents(ctx)).length >= MAX_EVENTS) {
+    return json({ error: "calendar is full" }, 413);
   }
-  await saveEvent(ev);
-  pushToInstance(sfiId, { type: "cal_changed", by: str(v.by, 64) });
-  return { status: 200, body: { ok: true, id: ev.id } };
+  await saveEvent(ctx, ev);
+  tell(ctx);
+  return json({ ok: true, id: ev.id });
 }
 
 // Delete one event — editors only.
-async function mutEventDelete(sfiId: string, v: { id?: unknown; by?: unknown }, peer: MutPeer): Promise<MutResult> {
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+async function mutEventDelete(ctx: Ctx, v: { id?: unknown }): Promise<Response> {
+  if (!isEditor(ctx)) return json({ error: "editors only" }, 403);
   const id = String(v.id || "");
-  if (ID_RE.test(id) && await events().get(id)) {
-    await events().delete(id);
-    pushToInstance(sfiId, { type: "cal_changed", by: str(v.by, 64) });
+  if (ID_RE.test(id) && await events(ctx).get(id)) {
+    await events(ctx).delete(id);
+    tell(ctx);
   }
-  return { status: 200, body: { ok: true } };
+  return json({ ok: true });
 }
 
-// ----- Bus dispatcher -------------------------------------------------------------------
-// The frontend's write path (frame.busSend → BusUiToFrame → here). `peer` is the sender's
-// platform-resolved identity, same shape as parsePeerInfo; the role gates live inside the
-// mutation functions. Denials are logged, not answered — a legitimate client never sends
-// a write it isn't allowed to make.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  const r =
-    d.op === "event"          ? await mutEvent(sfiId, d, peer)
-    : d.op === "event_delete" ? await mutEventDelete(sfiId, d, peer)
-    : null;
-  if (r && r.status !== 200) log(`calendar: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
-
 // ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
 
-  // Static assets — open to everyone (read-only viewers still need the shell).
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    // Static assets — open to everyone (read-only viewers still need the shell).
+    if (method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  // Full calendar + identity in one round trip. Open to every viewer who reaches the frame.
-  if (reqPath === "/api/state" && method === "GET") {
-    return jsonReply(replyPort, 200, await stateFor(peer));
-  }
+    // Full calendar + identity in one round trip. Open to every viewer who reaches the frame.
+    if (pathname === "/api/state" && method === "GET") return json(await stateFor(ctx));
 
-  // Writes — kept as HTTP arms for older viewers; same shared logic as the bus dispatcher.
-  if (reqPath === "/api/event" && method === "POST") {
-    const r = await mutEvent(peer.sfi_id, parseJsonBody<{ event?: any; by?: unknown }>(body) || {}, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
-  if (reqPath === "/api/event_delete" && method === "POST") {
-    const r = await mutEventDelete(peer.sfi_id, parseJsonBody<{ id?: unknown; by?: unknown }>(body) || {}, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (pathname === "/api/event" && method === "POST") return mutEvent(ctx, await body(request));
+    if (pathname === "/api/event_delete" && method === "POST") return mutEventDelete(ctx, await body(request));
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Calendar frame is up and running!");

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Family Budget</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }   /* follows the space channel at runtime; categories re-scope --ch locally */
     * { box-sizing: border-box; }
@@ -276,7 +276,16 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel, Modal } from "./lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel, Modal } from "/lib/js/framelib.js";
+
+    // Everything comes from this frame's own server half, which decides who may do what.
+    async function api(path, body) {
+      const r = await window.seamside.fetch(`/api/${path}`, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     const CHANNELS = Array.from({ length: 12 }, (_, i) => "c" + (i + 1));
 
@@ -317,29 +326,23 @@
       const monthRef = useRef(month);
 
       async function refresh() {
-        const r = await frame.api("api/month?month=" + monthRef.current).catch(() => null);
+        const r = await api("month?month=" + monthRef.current).catch(() => null);
         if (!r) return;
         if (r.settings) setCurrency(r.settings.currency || "$");
         if (r.categories) setData(r);
       }
-      // Writes go over the tether (frame.busSend) — fire-and-forget; the view refreshes
-      // from the budget_changed push, sender included. Feature-detect: an older viewer's
-      // framelib has no busSend, so fall back to the HTTP write it was using before.
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body).catch(() => null);
-      };
+      // A write is answered once it landed; the page reads the month again, a refused
+      // one included, and the push brings every other open page along.
+      const write = (path, body) => api(path, body).catch(() => null).then(refresh);
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
       }, []);
       useEffect(() => { monthRef.current = month; refresh(); }, [month]);
-      useFramePush({ budget_changed: refresh });
+      // The worker says what changed and never what it holds: read it again, as whoever this is.
+      useFramePush((d) => { if (d.family_budget === "month") refresh(); });
 
       // Default the add-row select to the last-used category (the month's newest
       // transaction), else the first expense category.
@@ -358,7 +361,7 @@
       const isEditor = !!me.is_sfi_editor;
       const cur = currency;
 
-      // ---- optimistic local patches (push reconciles the aggregates) -------------------
+      // ---- optimistic local patches (the read after the write reconciles the aggregates) ---
       function patchCatLocal(id, patch) {
         setData((d) => d && ({
           ...d,
@@ -376,12 +379,12 @@
         const v = name.trim();
         clear();
         if (!v) return;
-        write("api/category", { name: v, is_income: isIncome ? 1 : 0 });
+        write("category", { name: v, is_income: isIncome ? 1 : 0 });
       }
       function saveCat(cat, patch) {
         patchCatLocal(cat.id, patch);
         setEditCat((c) => c && c.id === cat.id ? { ...c, ...patch } : c);
-        write("api/category/" + cat.id, patch);
+        write("category/" + cat.id, patch);
       }
       function deleteCategory(cat) {
         if (!catArmed) { setCatArmed(true); return; }
@@ -391,14 +394,14 @@
           categories: d.categories.filter((c) => c.id !== cat.id),
           transactions: d.transactions.filter((t) => t.category_id !== cat.id),
         }));
-        write("api/category/" + cat.id + "/delete", {});
+        write("category/" + cat.id + "/delete", {});
       }
       function addTx() {
         const amount = Math.abs(parseFloat(addAmt));
         if (!addCat || !Number.isFinite(amount) || amount <= 0) return;
         // Adding while looking at another month lands the entry in that month.
         const date = month === curMonth() ? localToday() : month + "-01";
-        write("api/tx", { category_id: addCat, amount, note: addNote.trim(), date });
+        write("tx", { category_id: addCat, amount, note: addNote.trim(), date });
         setAddAmt(""); setAddNote("");
       }
       function saveTx(tx, patch) {
@@ -409,13 +412,13 @@
           return { ...d, transactions: d.transactions.map((t) => t.id === tx.id ? { ...t, ...patch, ...extra } : t) };
         });
         setEditTx((t) => t && t.id === tx.id ? { ...t, ...patch } : t);
-        write("api/tx/" + tx.id, patch);
+        write("tx/" + tx.id, patch);
       }
       function deleteTx(tx) {
         if (!txArmed) { setTxArmed(true); return; }
         setTxArmed(false); setEditTx(null);
         setData((d) => d && ({ ...d, transactions: d.transactions.filter((t) => t.id !== tx.id) }));
-        write("api/tx/" + tx.id + "/delete", {});
+        write("tx/" + tx.id + "/delete", {});
       }
       async function onCurrencyClick() {
         if (typeof frame.prompt !== "function") return;
@@ -425,7 +428,7 @@
         if (v === null) return;
         const c = (v.trim() || "$").slice(0, 4);
         setCurrency(c);
-        write("api/settings", { currency: c });
+        write("settings", { currency: c });
       }
 
       const mode = me.is_owner ? "owner" : isEditor ? "editor" : "viewer";
@@ -667,6 +670,7 @@
       `;
     }
 
+    await window.seamside.ready;
     render(html`<${App}/>`, document.body);
   </script>
 </body>

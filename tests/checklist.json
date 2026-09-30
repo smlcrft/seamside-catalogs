@@ -1,0 +1,57 @@
+{
+  "tier": "members",
+  "publish": "open",
+  "steps": [
+    { "why": "an item an installed copy left behind, completed", "as": "collaborator", "at": "space", "do": "KV.PUT t/checklist/old1", "body": { "text": "Water the plants", "state": 2, "sort_order": 0, "created_ms": 5, "actor_id": "did:old", "actor_name": "Ana", "_created_at": 5, "_modified_at": 5 }, "status": 200 },
+    { "why": "and one not started", "as": "collaborator", "at": "space", "do": "KV.PUT t/checklist/old2", "body": { "text": "Take out the bins", "state": 0, "sort_order": 1, "created_ms": 6, "actor_id": "", "actor_name": "", "_created_at": 6, "_modified_at": 6 }, "status": 200 },
+
+    { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["Checklist", "/lib/js/framelib.js"] },
+    { "why": "a stranger is told they are nobody here", "do": "GET {api}/whoami", "status": 200, "is": { "/is_anon": true, "/is_sfi_member": false, "/is_sfi_editor": false, "/is_owner": false, "/user_id": "" } },
+    { "why": "a stranger is shown the list, oldest shape and all, in order", "do": "GET {api}/list", "status": 200, "is": { "/items/0/id": "old1", "/items/0/text": "Water the plants", "/items/0/state": 2, "/items/0/actor_name": "Ana", "/items/0/sort_order": 0, "/items/1/id": "old2", "/items/1/actor_name": "" }, "absent": ["/items/0/actor_id", "/items/0/created_ms", "/items/2"] },
+    { "why": "a stranger adds nothing", "do": "POST {api}/add", "body": { "text": "sneak" }, "status": 403, "is": { "/error": "editors only" } },
+    { "why": "checks nothing off", "do": "POST {api}/item/old2", "body": { "state": 2 }, "status": 403 },
+    { "why": "reorders nothing", "do": "POST {api}/reorder", "body": { "ids": ["old2", "old1"] }, "status": 403 },
+    { "why": "deletes nothing", "do": "POST {api}/delete/old1", "body": {}, "status": 403 },
+    { "why": "a stranger writes no row at the door", "do": "KV.PUT t/checklist/x", "body": { "text": "x" }, "status": 403 },
+    { "why": "and reads no table there", "do": "KV.LIST t/checklist/", "lacks": ["Water the plants", "Ana"] },
+    { "why": "the list is as it was", "table": "checklist", "has": ["Water the plants", "Take out the bins"], "lacks": ["sneak", "\"x\""] },
+
+    { "why": "someone signed in and on no roster is a visitor too", "as": "signed", "do": "GET {api}/whoami", "is": { "/is_anon": true, "/is_sfi_member": false, "/is_sfi_editor": false, "/user_id": "{did:signed}" } },
+    { "why": "who reads the list", "as": "signed", "do": "GET {api}/list", "status": 200, "is": { "/items/0/id": "old1" } },
+    { "why": "and writes nothing", "as": "signed", "do": "POST {api}/add", "body": { "text": "sneak" }, "status": 403 },
+
+    { "why": "a viewer is a member who may not edit", "as": "viewer", "do": "GET {api}/whoami", "is": { "/is_anon": false, "/is_sfi_member": true, "/is_sfi_editor": false, "/user_name": "Viewer" } },
+    { "why": "a viewer reads the list", "as": "viewer", "do": "GET {api}/list", "status": 200, "is": { "/items/1/text": "Take out the bins" } },
+    { "why": "a viewer adds nothing", "as": "viewer", "do": "POST {api}/add", "body": { "text": "mine" }, "status": 403, "is": { "/error": "editors only" } },
+    { "why": "checks nothing off", "as": "viewer", "do": "POST {api}/item/old2", "body": { "state": 1 }, "status": 403 },
+    { "why": "renames nothing", "as": "viewer", "do": "POST {api}/item/old2", "body": { "text": "mine" }, "status": 403 },
+    { "why": "reorders nothing", "as": "viewer", "do": "POST {api}/reorder", "body": { "ids": ["old2", "old1"] }, "status": 403 },
+    { "why": "deletes nothing", "as": "viewer", "do": "POST {api}/delete/old2", "body": {}, "status": 403 },
+    { "why": "and writes no row at the door", "as": "viewer", "at": "space", "do": "KV.PUT t/checklist/x", "body": { "text": "x" }, "status": 403 },
+
+    { "why": "a collaborator may edit", "as": "collaborator", "do": "GET {api}/whoami", "is": { "/is_sfi_member": true, "/is_sfi_editor": true, "/user_id": "{did:collaborator}" } },
+    { "why": "an empty task is refused", "as": "collaborator", "do": "POST {api}/add", "body": { "text": "   " }, "status": 400, "is": { "/error": "text required" } },
+    { "why": "a collaborator adds a task, last, and is answered with the list", "as": "collaborator", "do": "POST {api}/add", "body": { "text": "  Buy milk  " }, "status": 200, "is": { "/items/2/text": "Buy milk", "/items/2/state": 0, "/items/2/sort_order": 2, "/items/2/actor_name": "" }, "save": { "milk": "/items/2/id" } },
+    { "why": "as a row of the space, in the shape installed copies hold", "table": "checklist", "has": ["\"text\":\"Buy milk\"", "\"state\":0", "\"sort_order\":2", "\"created_ms\":", "\"actor_id\":\"\"", "\"actor_name\":\"\"", "_created_at", "_modified_at"] },
+    { "why": "started, it credits who started it", "as": "collaborator", "do": "POST {api}/item/{milk}", "body": { "state": 1 }, "status": 200, "is": { "/items/2/state": 1, "/items/2/actor_name": "Collaborator", "/items/2/text": "Buy milk" } },
+    { "why": "by their ID in the row", "table": "checklist", "has": ["\"actor_id\":\"{did:collaborator}\""] },
+    { "why": "a state past complete is held to complete", "as": "collaborator", "do": "POST {api}/item/{milk}", "body": { "state": 9 }, "status": 200, "is": { "/items/2/state": 2, "/items/2/actor_name": "Collaborator" } },
+    { "why": "back to unstarted clears the credit", "as": "collaborator", "do": "POST {api}/item/{milk}", "body": { "state": 0 }, "status": 200, "is": { "/items/2/state": 0, "/items/2/actor_name": "" } },
+    { "why": "an item there is no such thing as is refused, never made", "as": "collaborator", "do": "POST {api}/item/ghost", "body": { "state": 1 }, "status": 400, "is": { "/error": "bad id" } },
+    { "why": "an old item is renamed", "as": "collaborator", "do": "POST {api}/item/old1", "body": { "text": " Water the ferns " }, "status": 200, "is": { "/items/0/text": "Water the ferns", "/items/0/state": 2, "/items/0/actor_name": "Ana" } },
+    { "why": "over the row, which kept what it held and when it was made", "table": "checklist", "has": ["\"actor_id\":\"did:old\"", "\"created_ms\":5", "\"_created_at\":5"], "lacks": ["ghost", "Water the plants"] },
+    { "why": "the list is reordered, an unknown id passed over", "as": "collaborator", "do": "POST {api}/reorder", "body": { "ids": ["{milk}", "ghost", "old2", "old1"] }, "status": 200, "is": { "/items/0/id": "{milk}", "/items/1/id": "old2", "/items/2/id": "old1", "/items/1/sort_order": 2, "/items/2/sort_order": 3 }, "absent": ["/items/3"] },
+    { "why": "and nothing was made for it", "table": "checklist", "lacks": ["ghost"] },
+    { "why": "an item is deleted", "as": "collaborator", "do": "POST {api}/delete/old2", "body": {}, "status": 200, "lacks": ["old2", "Take out the bins"] },
+    { "why": "and gone from the table", "table": "checklist", "lacks": ["Take out the bins"] },
+    { "why": "a route there is none of", "as": "collaborator", "do": "POST {api}/nope", "body": {}, "status": 404 },
+    { "why": "nor a read", "as": "collaborator", "do": "GET {api}/nope", "status": 404 },
+
+    { "why": "an admin edits too", "as": "admin", "do": "POST {api}/add", "body": { "text": "Sweep" }, "status": 200, "is": { "/items/2/text": "Sweep", "/items/2/sort_order": 4 } },
+    { "why": "the owner may edit", "as": "owner", "do": "GET {api}/whoami", "is": { "/is_anon": false, "/is_sfi_editor": true, "/user_id": "{did:owner}" } },
+    { "why": "the owner adds a task", "as": "owner", "do": "POST {api}/add", "body": { "text": "Call the plumber" }, "status": 200, "is": { "/items/3/text": "Call the plumber" }, "save": { "plumber": "/items/3/id" } },
+    { "why": "and checks it off", "as": "owner", "do": "POST {api}/item/{plumber}", "body": { "state": 2 }, "status": 200, "is": { "/items/3/state": 2 } },
+    { "why": "and deletes it", "as": "owner", "do": "POST {api}/delete/{plumber}", "body": {}, "status": 200, "lacks": ["Call the plumber"] },
+    { "why": "a stranger sees every change", "do": "GET {api}/list", "is": { "/items/0/text": "Buy milk", "/items/1/text": "Water the ferns", "/items/2/text": "Sweep" }, "absent": ["/items/3"] }
+  ]
+}

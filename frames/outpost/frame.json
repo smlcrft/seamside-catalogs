@@ -4,12 +4,9 @@
     "frame_type": "Tandem",
     "data": "write",
     "tags": ["community", "social"],
-    "app_version_min": "1.0.0",
-    "permissions": {
-        "net": []
-    },
+    "app_version_min": "1.0.11",
     "created_at": "2026-07-01T00:00:00Z",
-    "modified_at": "2026-09-23T14:07:02Z",
+    "modified_at": "2026-09-29T23:00:00Z",
     "default_width_px": 480,
     "default_height_px": 640,
     "licensed_under_cc0": true,

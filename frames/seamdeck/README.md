@@ -47,10 +47,11 @@ Every game keeps its feel in named constants at the top of its sim:
 
 ## Architecture in three sentences
 
-One worker, on the space owner's device, serves every space the frame runs in;
-every player's requests reach it, so worker memory — keyed by the space — is
-already shared multiplayer state (high scores are the space's `seamdeck_scores`
-table, one board per space). Live updates are pushed with
-`pushToInstance(sfi, { type: "state_changed" })`. Races run locally on each
+One worker, on the space owner's device, serves every session of the frame;
+every player's requests reach it, so worker memory — keyed by the session
+(`ctx.frame`) — is already shared multiplayer state (high scores are the
+space's `seamdeck_scores` table, one board per space). Live updates are
+`ctx.push({ seamdeck: "state" })`, which carries nothing: every open page
+reads `/api/state` again. Races run locally on each
 player's screen from a shared per-round `seed`; the finished input trace is
 re-simulated by the worker for the authoritative score, so nobody can lie.

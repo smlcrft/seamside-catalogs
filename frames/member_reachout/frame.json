@@ -4,12 +4,9 @@
     "frame_type": "Tandem",
     "tags": ["community", "members"],
     "opens": ["members.table.jsonl"],
-    "permissions": {
-        "net": []
-    },
     "created_at": "2026-06-27T14:00:00Z",
-    "modified_at": "2026-09-23T14:20:00Z",
-    "app_version_min": "1.0.0",
+    "modified_at": "2026-09-30T02:00:00Z",
+    "app_version_min": "1.0.11",
     "licensed_under_cc0": true,
     "attribution_log": [],
     "icon": "ph:megaphone-simple",

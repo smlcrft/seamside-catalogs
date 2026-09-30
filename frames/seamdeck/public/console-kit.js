@@ -2,7 +2,7 @@
 // its game modules. A game imports { useInput, animator, wait, rng } from here
 // and everything else from its own files. Keep this file small on purpose: it IS
 // the console's public API for forks.
-import { useEffect, useRef, useState } from "./lib/js/framelib.js";
+import { useEffect, useRef, useState } from "/lib/js/framelib.js";
 
 // ---------------------------------------------------------------------------
 // Input bus — input is UI, not shared state. A tiny emitter fans key/touch
@@ -163,7 +163,7 @@ export function useRaceRunner(ctx, opts) {
 // your player starts a live run and endLive() when it settles; gate input on
 // settled(). isFinal is true on a seat's last attempt (cue an exit flourish).
 // ---------------------------------------------------------------------------
-export function useTurnRunner({ turns, clientId, attempts, replay }) {
+export function useTurnRunner({ turns, playerId, attempts, replay }) {
   const busy = useRef(false);
   const shown = useRef(0);
   const [, force] = useState(0);
@@ -179,7 +179,7 @@ export function useTurnRunner({ turns, clientId, attempts, replay }) {
       while (shown.current < turnsRef.current.length) {
         const idx = shown.current;
         const row = turnsRef.current[idx];
-        if (row.client_id !== clientId) {
+        if (row.player_id !== playerId) {
           const nth = turnsRef.current.slice(0, idx + 1).filter((r) => r.seat_no === row.seat_no).length;
           await replayRef.current(row, nth >= attempts);
         }

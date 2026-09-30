@@ -3,7 +3,7 @@
     "description": "A turnout forecaster for outdoor commerce \u2014 farmers markets, festivals, food trucks, street vendors, walkable storefronts. An editor of the space sets the market's location and its weekly events; the frame's server half pulls 72 hours of weather from Open-Meteo (keyless), compares it against the last 30 days' local norms, and folds temperature comfort, rain, UV, daylight, wind, weekend bonus and time of day into one turnout curve, with each factor drawn as a faint band so you can see WHY the line moves. Members of the space read the forecast (viewers cannot change the market); it is private to them, so an anonymous link-holder sees nothing. Each Market Weather keeps its location and events as its own session state in the space, so two in one space can forecast two markets.",
     "frame_type": "Tandem",
     "tags": ["smallbiz", "weather"],
-    "permissions": {
+    "permissions_backend": {
         "net": [
             "api.open-meteo.com",
             "geocoding-api.open-meteo.com"
@@ -12,8 +12,8 @@
     "default_width_px": 720,
     "default_height_px": 560,
     "created_at": "2026-05-20T14:40:14Z",
-    "modified_at": "2026-09-23T14:21:48Z",
-    "app_version_min": "1.0.0",
+    "modified_at": "2026-09-30T02:00:00Z",
+    "app_version_min": "1.0.11",
     "licensed_under_cc0": true,
     "attribution_log": [],
     "icon": "ph:storefront",

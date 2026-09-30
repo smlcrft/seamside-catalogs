@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dice Roller</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     body { max-width: 320px; margin: 0 auto; }
     .die {
@@ -34,12 +34,21 @@
     </button>
   </div>
   <script type="module">
-    import { frame } from "./lib/js/framelib.js";
+    import "/lib/js/framelib.js";   // window.seamside
 
     const FACES = ['⚀','⚁','⚂','⚃','⚄','⚅'];
     const die = document.getElementById('die');
     const result = document.getElementById('result');
     let rolling = false;
+    let seen = 0;   // the roll this page last showed (`n` from the worker)
+
+    async function api(path, method = 'GET') {
+      const r = await window.seamside.fetch(path, { method });
+      let v = {};
+      try { v = r.json(); } catch { /* no body: the status says it */ }
+      if (!r.ok) throw new Error(v.error || 'Something went wrong.');
+      return v;
+    }
 
     function show(value, sides) {
       if (!value) { die.textContent = '?'; return; }
@@ -65,29 +74,35 @@
       })();
     }
 
-    function roll() {
-      if (rolling) return;
-      // Writes go over the tether (frame.busSend); feature-detect and fall back to the
-      // HTTP POST for older viewer builds. Fire-and-forget — the result arrives via the
-      // 'rolled' push below.
-      if (typeof frame.busSend === 'function') { frame.busSend({ op: 'roll' }); return; }
-      frame.api('api/roll', null, 'POST').catch(() => {});
+    // A roll this page has not shown tumbles; the first read only shows where things stand.
+    async function follow() {
+      const s = await api('/api/state').catch(() => null);
+      if (!s || rolling || s.n === seen) return;
+      seen = s.n;
+      animate(s.value, s.sides, s.roll_time_ms);
     }
 
-    frame.api('api/state').then(({ value, sides, can_roll }) => {
+    // The roller reads again once answered; the push brings everyone else.
+    function roll() {
+      if (rolling) return;
+      api('/api/roll', 'POST').then(follow).catch(() => {});
+    }
+
+    await window.seamside.ready;
+
+    api('/api/state').then(({ value, sides, can_roll, n }) => {
       // Rolling is an editor's; everyone else watches the same dice.
       if (!can_roll) {
         document.getElementById('roll-btn').style.display = 'none';
         die.style.cursor = 'default';
         result.textContent = 'watching the dice';
       }
+      seen = n;
       show(value, sides);
     }).catch(() => {});
 
     window.addEventListener('message', (e) => {
-      if (e.data?.type === 'rolled' && !rolling) {
-        animate(e.data.value, e.data.sides, e.data.roll_time_ms);
-      }
+      if (e.data?.game_dice_roller === 'roll') follow();
     });
 
     die.addEventListener('click', roll);

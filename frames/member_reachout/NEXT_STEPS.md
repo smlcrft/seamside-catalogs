@@ -22,7 +22,7 @@ Ideas to grow it:
 7. **Export the log** — the sent history is already a table file of the space
    (`reachout_sent.table.jsonl`); a one-tap CSV download of it would suit record-keeping.
 8. **Smarter text run** — remember the last position in a long texting run across reloads via
-   `frame.localStorageSetItem`, so an interrupted send can resume where it left off.
+   `seamside.prefs.set`, so an interrupted send can resume where it left off.
 
 Note on logging behaviour: a texting run is only recorded if at least one person was actually
 tapped, mirroring how an email send is logged once the `mailto:` is opened. "Everyone" sends

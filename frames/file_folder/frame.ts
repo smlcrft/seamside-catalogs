@@ -10,17 +10,14 @@
 //   data_storage:   storage-space-files  — the files are files of the space, in one folder
 //                                           (default "File Folder/"), so they show in the space,
 //                                           sync with it and open in other tools. Which folder,
-//                                           and the sharing settings, are this session's keys.
-//   view_realtime:  view-collaborative    — every change calls pushToInstance so all viewers
-//                                           refresh live.
-//   settings_scope: settings-per-session  — sessionKv `folder` and `prefs`.
+//                                           and the sharing settings, are this session's settings.
+//   view_realtime:  view-collaborative    — every change is pushed, so every open page reads
+//                                           the folder again as whoever it is.
+//   settings_scope: settings-per-session  — `__fc_settings` rows `folder` and `prefs`.
 // ----------------------------------------------------------------------------------------
-import {
-  log, jsonReply, parseJsonBody, parsePeerInfo, pushToInstance, sessionKv, spaceFiles,
-  serveFileAtPath, clampInt, contentType, extname, onUiMessage,
-} from "@frame-core";
+import type { Ctx, PeerInfo } from "@frame-core";
+import { clampInt, contentType, extname } from "@frame-core";
 
-type Peer = ReturnType<typeof parsePeerInfo>;
 type Prefs = {
   who_can_add: "owner" | "editors";       // who may upload / delete
   max_size_mb: number;                    // per-file size cap
@@ -32,10 +29,36 @@ const MAX_SIZE_MB = 8;
 const DEFAULT_PREFS: Prefs = { who_can_add: "owner", max_size_mb: MAX_SIZE_MB, max_files: 10 };
 const DEFAULT_FOLDER = "File Folder";
 
-async function getPrefs(): Promise<Prefs> {
-  let saved: Partial<Prefs> = {};
-  try { saved = JSON.parse((await sessionKv.get("prefs"))?.value || "{}"); } catch { /* defaults */ }
-  const p = { ...DEFAULT_PREFS, ...saved };
+// Settings are rows of this session's own `__fc_settings`, the value as JSON under `v`.
+const SETTINGS = "__fc_settings";
+
+async function setSetting(ctx: Ctx, key: string, value: unknown) {
+  const t = ctx.table<Record<string, unknown>>(SETTINGS);
+  const was = await t.get(key), now = Date.now();
+  await t.upsert({ ...(was ?? { _created_at: now }), id: key, v: JSON.stringify(value), _modified_at: now });
+}
+
+// A missing row is written on first read, from the session key an older copy kept (`prefs`
+// as JSON, `folder` as text) or else the default, and the key goes: a key written at the
+// door later is never taken up.
+async function setting(ctx: Ctx, key: string, keyIsJson: boolean, fallback: unknown): Promise<unknown> {
+  const row = await ctx.table<Record<string, unknown>>(SETTINGS).get(key);
+  if (row?.v != null) {
+    try { return JSON.parse(String(row.v)); } catch { return null; }
+  }
+  const old = await ctx.kv.get(key);
+  let value: unknown = old?.value ?? fallback;
+  if (keyIsJson && old?.value != null) {
+    try { value = JSON.parse(old.value); } catch { value = fallback; }
+  }
+  await setSetting(ctx, key, value);
+  if (old) await ctx.kv.del(key);
+  return value;
+}
+
+async function getPrefs(ctx: Ctx): Promise<Prefs> {
+  const saved = await setting(ctx, "prefs", true, DEFAULT_PREFS);
+  const p = { ...DEFAULT_PREFS, ...(saved && typeof saved === "object" ? saved as Partial<Prefs> : {}) };
   return {
     who_can_add: p.who_can_add === "editors" ? "editors" : "owner",
     max_size_mb: clampInt(Number(p.max_size_mb) || MAX_SIZE_MB, 1, MAX_SIZE_MB),
@@ -50,8 +73,8 @@ function cleanFolder(raw: unknown): string | null {
   if (parts.some((p) => p.startsWith(".") || p === "_meta" || p.length > 120)) return null;
   return parts.join("/");
 }
-async function getFolder(): Promise<string> {
-  return cleanFolder((await sessionKv.get("folder"))?.value) || DEFAULT_FOLDER;
+async function getFolder(ctx: Ctx): Promise<string> {
+  return cleanFolder(await setting(ctx, "folder", false, DEFAULT_FOLDER)) || DEFAULT_FOLDER;
 }
 
 // Reduce an incoming filename to a safe basename (no path traversal, no control chars).
@@ -62,11 +85,11 @@ function safeName(raw: unknown): string {
   return n;
 }
 
-type FileRow = { id: string; name: string; size: number; link: boolean };
-async function listFiles(folder: string): Promise<FileRow[]> {
-  const entries = await spaceFiles.list(folder).catch(() => []);
+type FileRow = { id: string; name: string; size: number };
+async function listFiles(ctx: Ctx, folder: string): Promise<FileRow[]> {
+  const entries = await ctx.files.list(folder).catch(() => []);
   return entries.filter((e) => !e.dir)
-    .map((e) => ({ id: e.name, name: e.name, size: e.bytes, link: e.link }))
+    .map((e) => ({ id: e.name, name: e.name, size: e.bytes }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 // A file's name as the page sends it on a path (encodeURIComponent).
@@ -80,12 +103,13 @@ function freeName(name: string, taken: Set<string>): string {
   for (let i = 2; ; i++) if (!taken.has(`${stem} (${i})${ext}`)) return `${stem} (${i})${ext}`;
 }
 
-function canAdd(peer: Peer, p: Prefs): boolean {
+function canAdd(peer: PeerInfo, p: Prefs): boolean {
   return p.who_can_add === "editors" ? peer.is_sfi_editor : peer.is_owner;
 }
 
-async function stateFor(peer: Peer) {
-  const prefs = await getPrefs(), folder = await getFolder();
+async function stateFor(ctx: Ctx) {
+  const peer = ctx.peer;
+  const prefs = await getPrefs(ctx), folder = await getFolder(ctx);
   return {
     me: {
       is_anon: peer.is_anon, is_sfi_member: peer.is_sfi_member,
@@ -95,117 +119,105 @@ async function stateFor(peer: Peer) {
     prefs, folder,
     can_add: canAdd(peer, prefs),
     can_move: peer.is_sfi_editor,
-    files: await listFiles(folder),
+    files: await listFiles(ctx, folder),
   };
 }
 
-// ----- Shared write logic ---------------------------------------------------------------
-// The HTTP POST arms and the bus dispatcher (frame.busSend → onUiMessage) both land here, so
-// the role gates cannot drift. `op` is the API path with the leading "api/" stripped. The
-// binary upload (/api/upload) stays HTTP-only.
-type WriteResult = { status: number; body: unknown };
+// What changed, never what it holds: each page reads the folder again as whoever it is.
+const tell = (ctx: Ctx, what: "files" | "settings") => ctx.push({ file_folder: what });
 
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>, peer: Peer): Promise<WriteResult> {
-  // Owner-only: this session's sharing preferences.
-  if (op === "prefs") {
-    if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
-    const next: Prefs = {
-      who_can_add: v.who_can_add === "editors" ? "editors" : "owner",
-      max_size_mb: clampInt(Number(v.max_size_mb) || MAX_SIZE_MB, 1, MAX_SIZE_MB),
-      max_files:   clampInt(Number(v.max_files) || DEFAULT_PREFS.max_files, 1, 1000),
-    };
-    await sessionKv.put("prefs", JSON.stringify(next));
-    pushToInstance(sfiId, { type: "folder_changed" });
-    return { status: 200, body: await stateFor(peer) };
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
+
+// deno-lint-ignore no-explicit-any
+async function body(request: Request): Promise<any> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
   }
-
-  // Editors: which folder of the space this session shows.
-  if (op === "folder") {
-    if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-    const folder = cleanFolder(v.folder);
-    if (!folder) return { status: 400, body: { error: "not a folder of this space" } };
-    await sessionKv.put("folder", folder);
-    pushToInstance(sfiId, { type: "folder_changed" });
-    return { status: 200, body: await stateFor(peer) };
-  }
-
-  // Delete — gated by who_can_add (same right as adding). Something linked in is not ours.
-  if (op.startsWith("delete/")) {
-    if (!canAdd(peer, await getPrefs())) return { status: 403, body: { error: "not allowed to delete files" } };
-    const name = nameOnPath(op.slice("delete/".length));
-    const folder = await getFolder();
-    const f = (await listFiles(folder)).find((x) => x.name === name);
-    if (!f) return { status: 404, body: { error: "not found" } };
-    if (f.link) return { status: 403, body: { error: "linked in by someone; not this folder's to delete" } };
-    await spaceFiles.remove(`${folder}/${name}`);
-    pushToInstance(sfiId, { type: "folder_changed" });
-    return { status: 200, body: await stateFor(peer) };
-  }
-
-  return { status: 404, body: { error: "not found" } };
 }
 
-// Fire-and-forget: denials are logged, not answered — a legitimate client never sends a
-// write it isn't allowed to make, and every mutation confirms itself via pushToInstance.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const { op, ...v } = data as Record<string, unknown>;
-  if (typeof op !== "string") return;
-  const r = await handleWrite(sfiId, op, v, peer);
-  if (r.status !== 200) log(`file_folder: bus op ${op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const url = new URL(request.url);
+    const { pathname } = url;
+    const method = request.method;
+    const peer = ctx.peer;
 
-// ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
-
-  if (reqPath === "/api/state" && method === "GET") {
-    return jsonReply(replyPort, 200, await stateFor(peer));
-  }
-
-  if ((reqPath === "/api/prefs" || reqPath === "/api/folder") && method === "POST") {
-    const r = await handleWrite(peer.sfi_id, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body) || {}, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
-
-  // Upload — gated by who_can_add. Filename rides in ?name=, bytes are the raw body.
-  if (reqPath === "/api/upload" && method === "POST") {
-    const prefs = await getPrefs();
-    if (!canAdd(peer, prefs)) return jsonReply(replyPort, 403, { error: "not allowed to add files" });
-    const name = safeName(query.name);
-    if (!name) return jsonReply(replyPort, 400, { error: "missing file name" });
-    const folder = await getFolder();
-    if ((await listFiles(folder)).length >= prefs.max_files) {
-      return jsonReply(replyPort, 409, { error: `file limit reached (${prefs.max_files})` });
+    if (!pathname.startsWith("/api/")) {
+      if (method !== "GET") return refuse(404, "not found");
+      return ctx.file(pathname);
     }
-    if (body.byteLength > prefs.max_size_mb * 1024 * 1024) {
-      return jsonReply(replyPort, 413, { error: `file exceeds ${prefs.max_size_mb} MB` });
+
+    if (pathname === "/api/state" && method === "GET") return json(await stateFor(ctx));
+
+    // Owner-only: this session's sharing preferences.
+    if (pathname === "/api/prefs" && method === "POST") {
+      if (!peer.is_owner) return refuse(403, "owner only");
+      const v = await body(request);
+      const next: Prefs = {
+        who_can_add: v.who_can_add === "editors" ? "editors" : "owner",
+        max_size_mb: clampInt(Number(v.max_size_mb) || MAX_SIZE_MB, 1, MAX_SIZE_MB),
+        max_files:   clampInt(Number(v.max_files) || DEFAULT_PREFS.max_files, 1, 1000),
+      };
+      await setSetting(ctx, "prefs", next);
+      tell(ctx, "settings");
+      return json(await stateFor(ctx));
     }
-    const taken = new Set((await spaceFiles.list(folder).catch(() => [])).map((e) => e.name));
-    await spaceFiles.write(`${folder}/${freeName(name, taken)}`, new Uint8Array(body));
-    pushToInstance(peer.sfi_id, { type: "folder_changed" });
-    return jsonReply(replyPort, 200, await stateFor(peer));
-  }
 
-  // Download — open to everyone who reaches the frame, from this session's folder only.
-  if (reqPath.startsWith("/api/download/") && method === "GET") {
-    const name = nameOnPath(reqPath.slice("/api/download/".length));
-    const buf = name ? await spaceFiles.read(`${await getFolder()}/${name}`).catch(() => null) : null;
-    if (!buf) return jsonReply(replyPort, 404, { error: "not found" });
-    const mime = contentType(extname(name)) || "application/octet-stream";
-    return replyPort.postMessage({ status: 200, body: buf, contentType: mime }, [buf.buffer as ArrayBuffer]);
-  }
+    // Editors: which folder of the space this session shows.
+    if (pathname === "/api/folder" && method === "POST") {
+      if (!peer.is_sfi_editor) return refuse(403, "editors only");
+      const folder = cleanFolder((await body(request)).folder);
+      if (!folder) return refuse(400, "not a folder of this space");
+      await setSetting(ctx, "folder", folder);
+      tell(ctx, "settings");
+      return json(await stateFor(ctx));
+    }
 
-  if (reqPath.startsWith("/api/delete/") && method === "POST") {
-    const r = await handleWrite(peer.sfi_id, reqPath.slice("/api/".length), {}, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    // Upload — gated by who_can_add. Filename rides in ?name=, bytes are the raw body.
+    if (pathname === "/api/upload" && method === "POST") {
+      const prefs = await getPrefs(ctx);
+      if (!canAdd(peer, prefs)) return refuse(403, "not allowed to add files");
+      const name = safeName(url.searchParams.get("name"));
+      if (!name) return refuse(400, "missing file name");
+      const folder = await getFolder(ctx);
+      if ((await listFiles(ctx, folder)).length >= prefs.max_files) {
+        return refuse(409, `file limit reached (${prefs.max_files})`);
+      }
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      if (bytes.byteLength > prefs.max_size_mb * 1024 * 1024) {
+        return refuse(413, `file exceeds ${prefs.max_size_mb} MB`);
+      }
+      const taken = new Set((await ctx.files.list(folder).catch(() => [])).map((e) => e.name));
+      await ctx.files.write(`${folder}/${freeName(name, taken)}`, bytes);
+      tell(ctx, "files");
+      return json(await stateFor(ctx));
+    }
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    // Download — open to everyone who reaches the frame, from this session's folder only.
+    if (pathname.startsWith("/api/download/") && method === "GET") {
+      const name = nameOnPath(pathname.slice("/api/download/".length));
+      const buf = name ? await ctx.files.read(`${await getFolder(ctx)}/${name}`).catch(() => null) : null;
+      if (!buf) return refuse(404, "not found");
+      const mime = contentType(extname(name)) || "application/octet-stream";
+      return new Response(buf as Uint8Array<ArrayBuffer>, { headers: { "content-type": mime } });
+    }
+
+    // Delete — gated by who_can_add (same right as adding).
+    if (pathname.startsWith("/api/delete/") && method === "POST") {
+      if (!canAdd(peer, await getPrefs(ctx))) return refuse(403, "not allowed to delete files");
+      const name = nameOnPath(pathname.slice("/api/delete/".length));
+      const folder = await getFolder(ctx);
+      const f = (await listFiles(ctx, folder)).find((x) => x.name === name);
+      if (!f) return refuse(404, "not found");
+      await ctx.files.remove(`${folder}/${name}`);
+      tell(ctx, "files");
+      return json(await stateFor(ctx));
+    }
+
+    return refuse(404, "not found");
+  },
 };
-
-log("File Folder frame is up and running!");

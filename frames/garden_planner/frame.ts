@@ -9,15 +9,16 @@
 // (high). Plots are the space's `garden_plots` table; a plot can be assigned to someone on
 // a `members` list of the space (Member Manager's roster: `members.table.jsonl` or a
 // subtype such as `club.members.table.jsonl`), the one this session is bound to
-// (sessionKv `bound/members`). The garden's settings are this session's own (sessionKv
-// `prefs`).
+// (ctx.kv `bound/members`). The garden's settings are this session's own: the `prefs` row of
+// `__fc_settings`, which no wire serves.
+//
+// Who is asking is ctx.peer, what the door proved. Someone not on the space's roster is
+// handed the layout only while the owner allows public viewing, and never a name or a note.
+// A push says what changed and never what it holds: each open page reads again as whoever
+// it is.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, pushToInstance, parsePeerInfo, onUiMessage,
-  declareTables, table, sessionKv,
-  jsonReply, parseJsonBody, sanitizeText, toIntOrNull, clampInt,
-  wireTableChangeListener, serveHtmlShell
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText, toIntOrNull, clampInt } from "@frame-core";
 
 // ----- The space's tables -----------------------------------------------------------------
 // PLOTS are this frame's own rows. The members list is Member Manager's roster (name, role
@@ -47,13 +48,10 @@ declareTables([
 // ----- Which members list: `members` or a subtype `<name>.members`, bound per session -----
 const LIST_NAME = /^([a-z0-9][a-z0-9_-]*\.)*members$/;
 const validList = (n: unknown): n is string => typeof n === "string" && n.length <= 64 && LIST_NAME.test(n);
-async function boundList(): Promise<string | null> {
-  const v = (await sessionKv.get("bound/members"))?.value;
+async function boundList(ctx: Ctx): Promise<string | null> {
+  const v = (await ctx.kv.get("bound/members"))?.value;
   return validList(v) ? v : null;
 }
-
-type Tbl = ReturnType<typeof table>;
-type PeerInfo = ReturnType<typeof parsePeerInfo>;
 
 // ----- Plant profiles + stress lookup ---------------------------------------------------
 // Each tuple is [low_ideal, high_ideal, low_extreme, high_extreme]. Inside the ideal band
@@ -212,9 +210,32 @@ const DEFAULT_PREFS: Prefs = {
   allow_public_viewing: false,
 };
 
-async function getPrefs(): Promise<Prefs> {
+const SETTINGS = "__fc_settings";
+
+/** The row stamped when it was made and when it changed. */
+async function keepPrefs(ctx: Ctx, v: string): Promise<void> {
+  const table = ctx.table<Record<string, unknown>>(SETTINGS);
+  const was = await table.get("prefs");
+  const now = Date.now();
+  await table.upsert({ ...(was ?? { _created_at: now }), v, id: "prefs", _modified_at: now });
+}
+
+/** The stored JSON: the settings row, else what an older copy kept in the session key,
+ *  which a stranger could read and a collaborator write, moved into the row once. The row
+ *  is written on the first read either way, so a key written at the door later is ignored. */
+async function storedPrefs(ctx: Ctx): Promise<string> {
+  const row = await ctx.table<Record<string, unknown>>(SETTINGS).get("prefs");
+  if (row?.v != null) return String(row.v);
+  const old = (await ctx.kv.get("prefs"))?.value;
+  const v = old ?? JSON.stringify(DEFAULT_PREFS);
+  await keepPrefs(ctx, v);
+  if (old != null) await ctx.kv.del("prefs");
+  return v;
+}
+
+async function getPrefs(ctx: Ctx): Promise<Prefs> {
   let p: Partial<Prefs> | null = null;
-  try { p = JSON.parse((await sessionKv.get("prefs"))?.value ?? "null"); } catch { /* defaults */ }
+  try { p = JSON.parse(await storedPrefs(ctx)); } catch { /* defaults */ }
   if (!p) return { ...DEFAULT_PREFS };
   const cols = Number.isFinite(Number(p.grid_cols)) ? Math.max(4, Math.min(80, Math.trunc(Number(p.grid_cols)))) : DEFAULT_PREFS.grid_cols;
   const rows = Number.isFinite(Number(p.grid_rows)) ? Math.max(4, Math.min(80, Math.trunc(Number(p.grid_rows)))) : DEFAULT_PREFS.grid_rows;
@@ -230,8 +251,8 @@ async function getPrefs(): Promise<Prefs> {
   };
 }
 
-async function setPrefs(next: Prefs): Promise<void> {
-  await sessionKv.put("prefs", JSON.stringify(next));
+async function setPrefs(ctx: Ctx, next: Prefs): Promise<void> {
+  await keepPrefs(ctx, JSON.stringify(next));
 }
 
 // ----- Weather fetch + 30 min cache (per location) --------------------------------------
@@ -239,7 +260,7 @@ type WeatherCache = { summary: WeatherSummary; resolved_name: string; fetchedAt:
 const weatherCache = new Map<string, WeatherCache>();
 const WEATHER_TTL_MS = 30 * 60 * 1000;
 
-async function fetchWeatherSummary(location: string): Promise<{ summary: WeatherSummary; resolved_name: string } | null> {
+async function fetchWeatherSummary(ctx: Ctx, location: string): Promise<{ summary: WeatherSummary; resolved_name: string } | null> {
   const cacheKey = location.trim().toLowerCase();
   if (!cacheKey) return null;
   const now = Date.now();
@@ -293,20 +314,22 @@ async function fetchWeatherSummary(location: string): Promise<{ summary: Weather
     };
     const resolved_name = admin1 ? `${name}, ${admin1}` : `${name}, ${country}`;
     weatherCache.set(cacheKey, { summary, resolved_name, fetchedAt: now });
-    log(`weather fetched | ${resolved_name} | ${summary.days_used} days`);
+    ctx.log(`weather fetched | ${resolved_name} | ${summary.days_used} days`);
     return { summary, resolved_name };
   } catch (e) {
-    log(`weather fetch error: ${e instanceof Error ? e.message : String(e)}`);
+    ctx.log(`weather fetch error: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
 }
 
 // ----- Helpers --------------------------------------------------------------------------
-function canEdit(peer: ReturnType<typeof parsePeerInfo>, prefs: Prefs): boolean {
-  // The gate is is_sfi_editor, never "not anonymous": a Viewer-role member is authenticated
+const isEditor = (ctx: Ctx) => ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+
+function canEdit(ctx: Ctx, prefs: Prefs): boolean {
+  // The gate is the editor rung, never "not anonymous": a Viewer-role member is signed in
   // and has frame access, and would otherwise have slipped straight through this.
-  if (!peer.is_sfi_editor) return false;
-  if (prefs.owner_only_edit) return peer.is_owner;
+  if (!isEditor(ctx)) return false;
+  if (prefs.owner_only_edit) return ctx.peer.is_owner;
   return true;
 }
 // Snap shade input to one of three legal buckets (0/50/100). Anything else falls back
@@ -349,33 +372,68 @@ function serializePlantEntries(entries: PlantEntry[]): string {
   })));
 }
 
-type PlotRow = Record<string, unknown> & { _row_id: string; _created_at: number };
+type PlotRow = Record<string, unknown> & { id: string };
+
+const PLOTS = "garden_plots";
+const plotRows = (ctx: Ctx) => ctx.table<Record<string, unknown>>(PLOTS);
+
+/** Write a plot over what it held, stamped when it was made and when it changed; a new
+ *  row starts from the schema's defaults. */
+async function keep(ctx: Ctx, id: string | null, values: Record<string, unknown>): Promise<PlotRow> {
+  const was = id ? await plotRows(ctx).get(id) : null;
+  const now = Date.now();
+  const fresh: Record<string, unknown> = {};
+  if (!was) {
+    for (const c of PLOTS_SCHEMA) if (c.default_val !== undefined) fresh[c.name] = Number(c.default_val);
+    fresh._created_at = now;
+  }
+  return await plotRows(ctx).upsert({
+    ...(was ?? fresh),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+/** The bound members list's rows, or none while no list is bound. */
+async function roster(ctx: Ctx, list: string | null): Promise<PlotRow[]> {
+  return list ? await ctx.table<Record<string, unknown>>(list).all() : [];
+}
+
+// What changed, never what it holds.
+const tell = (ctx: Ctx, what: "plots" | "settings") => ctx.push({ garden_planner: what });
+
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
+
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 // ----- Writes -----------------------------------------------------------------------------
-// ONE shared mutation path for both transports: the bus dispatcher below (frame.busSend →
-// onUiMessage, the primary write path, because Android drops HTTP request bodies — see
-// docs/tether-writes.md) and the HTTP POST arm in onNetworkRequest, kept for older viewers
-// whose framelib has no busSend. `op` is the API path with "api/" stripped. Role gates live
-// here so the two entry points can never drift.
-type WriteResult = { status: number; body: unknown };
-
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: PeerInfo): Promise<WriteResult> {
-  const prefs = await getPrefs();
+// `op` is the API path with "/api/" stripped. Every one decides on ctx.peer.
+async function handleWrite(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<Response> {
+  const prefs = await getPrefs(ctx);
 
   // --- Which members list (editors) ------------------------------------------------------
   if (op === "bind") {
-    if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+    if (!isEditor(ctx)) return refuse(403, "editors only");
     const name = v?.list;
-    if (!validList(name)) return { status: 400, body: { error: "a members list is named members or <name>.members" } };
-    await sessionKv.put("bound/members", name);
-    pushToInstance(sfiId, { type: "settings_changed" });
-    return { status: 200, body: { bound: name } };
+    if (!validList(name)) return refuse(400, "a members list is named members or <name>.members");
+    await ctx.kv.put("bound/members", name);
+    tell(ctx, "settings");
+    return json({ bound: name });
   }
 
   // --- Garden settings (owner-only) ----------------------------------------------------
   if (op === "settings") {
-    if (!peer.is_owner) return { status: 403, body: { error: "only the frame owner can change settings" } };
-    if (!v) return { status: 400, body: { error: "invalid JSON" } };
+    if (!ctx.peer.is_owner) return refuse(403, "only the frame owner can change settings");
+    if (!v) return refuse(400, "invalid JSON");
     const org_name = sanitizeText(v.org_name, 120) || DEFAULT_PREFS.org_name;
     const location = sanitizeText(v.location, 120);
     const grid_cols = clampInt(Number(v.grid_cols) || DEFAULT_PREFS.grid_cols, 4, 80);
@@ -386,20 +444,19 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
       owner_only_edit: !!v.owner_only_edit,
       allow_public_viewing: !!v.allow_public_viewing,
     };
-    await setPrefs(next);
+    await setPrefs(ctx, next);
     // Drop weather cache for any stale location so the next /api/state refreshes.
     weatherCache.clear();
-    pushToInstance(sfiId, { type: "settings_changed" });
-    return { status: 200, body: { prefs: next } };
+    tell(ctx, "settings");
+    return json({ prefs: next });
   }
 
   // --- Plots ---------------------------------------------------------------------------
   // Everything below touches the garden itself and needs the edit right.
-  if (!canEdit(peer, prefs)) return { status: 403, body: { error: "editing is restricted" } };
-  const plots: Tbl = table("garden_plots", sfiId);
+  if (!canEdit(ctx, prefs)) return refuse(403, "editing is restricted");
 
   if (op === "plot") {
-    if (!v) return { status: 400, body: { error: "invalid JSON" } };
+    if (!v) return refuse(400, "invalid JSON");
     // Plot names are optional — viewers fall back to a "Plot" placeholder. We still
     // sanitize and cap length to keep the row size bounded.
     const name = sanitizeText(v.name, 200);
@@ -429,8 +486,7 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
       plants.push({ plant_type: pt as PlantKey, planted_at: at, planted_stage: stage });
     }
     const notes = sanitizeText(v.notes, 1000);
-    const rowId = v.row_id ? String(v.row_id) : null;
-    const { row_id } = await plots.upsert(rowId, {
+    const row = await keep(ctx, v.row_id ? String(v.row_id) : null, {
       name,
       pos_json: serializePos(pos),
       assigned_member_id: memberId,
@@ -439,181 +495,152 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
       shade_pct,
       notes,
     });
-    return { status: 200, body: { row_id } };
+    tell(ctx, "plots");
+    return json({ row_id: row.id });
   }
 
   if (op === "plot/move") {
     // Lightweight: just update geometry, used during drag/resize so we don't blow away
     // unrelated fields if something else changed concurrently.
-    if (!v) return { status: 400, body: { error: "invalid JSON" } };
+    if (!v) return refuse(400, "invalid JSON");
     const rowId = String(v.row_id ?? "");
-    if (!rowId) return { status: 400, body: { error: "row_id required" } };
+    if (!rowId) return refuse(400, "row_id required");
     const pos = parsePos(serializePos({
       x: Number(v.pos_x) || 0, y: Number(v.pos_y) || 0,
       w: Number(v.width) || 1, h: Number(v.height) || 1,
     }), prefs);
-    await plots.upsert(rowId, { pos_json: serializePos(pos) });
-    return { status: 200, body: { row_id: rowId } };
+    await keep(ctx, rowId, { pos_json: serializePos(pos) });
+    tell(ctx, "plots");
+    return json({ row_id: rowId });
   }
 
   if (op === "plot/delete") {
     const rowId = String(v?.row_id ?? "");
-    if (!rowId) return { status: 400, body: { error: "row_id required" } };
-    await plots.delete(rowId);
-    return { status: 200, body: { ok: true } };
+    if (!rowId) return refuse(400, "row_id required");
+    await plotRows(ctx).delete(rowId);
+    tell(ctx, "plots");
+    return json({ ok: true });
   }
 
-  return { status: 404, body: { error: "not found" } };
+  return refuse(404, "not found");
 }
 
-// ----- Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame) --------
-// Denials are logged, not answered — a legitimate client never sends a write it isn't
-// allowed to make.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`garden_planner: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+// ----- What a visitor is handed of one plot -----------------------------------------------
+function enrich(
+  r: PlotRow, prefs: Prefs, weather: { summary: WeatherSummary } | null,
+  memberById: Map<string, PlotRow>, anon: boolean, now: number,
+) {
+  const pos = parsePos(r.pos_json, prefs);
+  const entries = parsePlantEntries(r.plant_types_json);
+  const memberId = String(r.assigned_member_id ?? "");
+  const member = memberId ? memberById.get(memberId) : undefined;
+  const manualName = String(r.assigned_manual_name ?? "");
+  const shade_pct = clampShade(toIntOrNull(r.shade_pct));
+  // Shade attenuates UV: full shade (0) wipes UV out, part shade (50) halves it,
+  // full sun (100) leaves UV untouched. Temperature/humidity/rain are kept as-is —
+  // a shaded plot still feels the same air temp and rainfall.
+  const localWeather: WeatherSummary | null = weather
+    ? { ...weather.summary, max_uv: weather.summary.max_uv * (shade_pct / 100) }
+    : null;
+  const perPlant: PerPlantStress[] = entries.map((e) => {
+    const label = PLANT_TYPES.find((p) => p.key === e.plant_type)?.label || e.plant_type;
+    const known = !!(localWeather && e.planted_at && e.planted_stage);
+    const cur = e.planted_at && e.planted_stage ? currentStage(e.planted_at, e.planted_stage, now) : "adult";
+    return {
+      plant: e.plant_type,
+      label,
+      planted_at: e.planted_at,
+      planted_stage: e.planted_stage,
+      current_stage: cur,
+      stress: known ? plantStress(e.plant_type, cur, localWeather!) : 0,
+      stress_known: known,
+    };
+  });
+  const stress = aggregateStress(perPlant);
+  const base = {
+    _row_id: r.id,
+    name: r.name,
+    pos_x: pos.x, pos_y: pos.y, width: pos.w, height: pos.h,
+    shade_pct,
+    per_plant: perPlant,
+    stress,
+    stress_known: !!stress,
+  };
+  if (anon) return { ...base, assigned_label: "" };
+  return {
+    ...base,
+    assigned_member_id: memberId,
+    assigned_member_name: member ? String(member.name) : "",
+    assigned_manual_name: manualName,
+    assigned_label: member ? String(member.name) : (manualName || ""),
+    notes: String(r.notes ?? ""),
+  };
+}
 
-// ----- HTTP handler ---------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-
-  // Static assets are open to everyone and must never wait on a table.
-  if (method === "GET" && !reqPath.startsWith("/api/") && reqPath !== "/index.html") {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-  }
-
-  wireTableChangeListener("garden_plots", peer.sfi_id, "plots_changed");
-  const plots: Tbl = table("garden_plots", peer.sfi_id);
-  const list = await boundList();
-  const roster = async () => list ? (await table(list, peer.sfi_id).query({ limit: 1000 })).rows as Record<string, unknown>[] : [];
-  const prefs = await getPrefs();
-  const editable = canEdit(peer, prefs);
-  const now = Date.now();
-
-  if (reqPath === "/api/state" && method === "GET") {
-    const weather = prefs.location ? await fetchWeatherSummary(prefs.location) : null;
-    return jsonReply(replyPort, 200, {
-      prefs,
-      viewer: {
-        user_name: peer.user_name || "anon",
-        is_owner: peer.is_owner,
-        is_anon: peer.is_anon,
-      },
-      can_edit: editable,
-      bound: list,
-      can_bind: peer.is_sfi_editor,
-      plant_types: PLANT_TYPES,
-      stages: STAGE_KEYS.map((k) => ({ key: k, label: STAGE_LABEL[k] })),
-      weather: weather
-        ? { resolved_name: weather.resolved_name, ...weather.summary }
-        : null,
-      now,
-    });
-  }
-
-  if (reqPath === "/api/members" && method === "GET") {
-    // No roster in the space is a normal state, not an error: plots take typed-in names.
-    if (peer.is_anon) return jsonReply(replyPort, 200, { rows: [] });
-    const rows = await roster();
-    rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    const slim = rows.map((r: Record<string, unknown>) => ({
-      _row_id: r._row_id, name: r.name, role: r.role,
-    }));
-    return jsonReply(replyPort, 200, { rows: slim });
-  }
-
-  if (reqPath === "/api/plots" && method === "GET") {
-    if (peer.is_anon && !prefs.allow_public_viewing) {
-      return jsonReply(replyPort, 200, { rows: [], public_disabled: true });
+// ----- Networking -------------------------------------------------------------------------
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
+    if (!pathname.startsWith("/api/")) {
+      if (method !== "GET") return refuse(404, "Not found.");
+      return ctx.file(pathname);
     }
-    const weather = prefs.location ? await fetchWeatherSummary(prefs.location) : null;
-    const { rows } = await plots.query({ limit: 2000 }) as { rows: PlotRow[] };
-    rows.sort((a, b) => Number(a._created_at) - Number(b._created_at));
-    const memberRows = peer.is_anon ? [] : await roster();
-    const memberById = new Map(memberRows.map((m) => [String(m._row_id), m]));
 
-    const enriched = rows.map((r) => {
-      const pos = parsePos(r.pos_json, prefs);
-      const entries = parsePlantEntries(r.plant_types_json);
-      const memberId = String(r.assigned_member_id ?? "");
-      const member = memberId ? memberById.get(memberId) : undefined;
-      const manualName = String(r.assigned_manual_name ?? "");
-      const shade_pct = clampShade(toIntOrNull(r.shade_pct));
-      // Shade attenuates UV: full shade (0) wipes UV out, part shade (50) halves it,
-      // full sun (100) leaves UV untouched. Temperature/humidity/rain are kept as-is —
-      // a shaded plot still feels the same air temp and rainfall.
-      const localWeather: WeatherSummary | null = weather
-        ? { ...weather.summary, max_uv: weather.summary.max_uv * (shade_pct / 100) }
-        : null;
-      const perPlant: PerPlantStress[] = entries.map((e) => {
-        const label = PLANT_TYPES.find((p) => p.key === e.plant_type)?.label || e.plant_type;
-        const known = !!(localWeather && e.planted_at && e.planted_stage);
-        const cur = e.planted_at && e.planted_stage ? currentStage(e.planted_at, e.planted_stage, now) : "adult";
-        return {
-          plant: e.plant_type,
-          label,
-          planted_at: e.planted_at,
-          planted_stage: e.planted_stage,
-          current_stage: cur,
-          stress: known ? plantStress(e.plant_type, cur, localWeather!) : 0,
-          stress_known: known,
-        };
+    // Every write goes through the one path above.
+    if (method === "POST") return handleWrite(ctx, pathname.slice("/api/".length), await body(request));
+    if (method !== "GET") return refuse(404, "Not found.");
+
+    const peer = ctx.peer;
+    const list = await boundList(ctx);
+    const prefs = await getPrefs(ctx);
+    const now = Date.now();
+
+    if (pathname === "/api/state") {
+      const weather = prefs.location ? await fetchWeatherSummary(ctx, prefs.location) : null;
+      return json({
+        prefs,
+        viewer: {
+          user_name: peer.user_name || "anon",
+          is_owner: peer.is_owner,
+          is_anon: peer.is_anon,
+        },
+        can_edit: canEdit(ctx, prefs),
+        bound: list,
+        can_bind: isEditor(ctx),
+        plant_types: PLANT_TYPES,
+        stages: STAGE_KEYS.map((k) => ({ key: k, label: STAGE_LABEL[k] })),
+        weather: weather
+          ? { resolved_name: weather.resolved_name, ...weather.summary }
+          : null,
+        now,
       });
-      const stress = aggregateStress(perPlant);
-      const stress_known = !!stress;
-      const base = {
-        _row_id: r._row_id,
-        name: r.name,
-        pos_x: pos.x, pos_y: pos.y, width: pos.w, height: pos.h,
-        shade_pct,
-        per_plant: perPlant,
-        stress,
-        stress_known,
-      };
-      if (peer.is_anon) {
-        return { ...base, assigned_label: "" };
+    }
+
+    if (pathname === "/api/members") {
+      // No roster in the space is a normal state, not an error: plots take typed-in names.
+      if (peer.is_anon) return json({ rows: [] });
+      const rows = await roster(ctx, list);
+      rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      return json({ rows: rows.map((r) => ({ _row_id: r.id, name: r.name, role: r.role })) });
+    }
+
+    if (pathname === "/api/plots") {
+      if (peer.is_anon && !prefs.allow_public_viewing) {
+        return json({ rows: [], public_disabled: true });
       }
-      return {
-        ...base,
-        assigned_member_id: memberId,
-        assigned_member_name: member ? String(member.name) : "",
-        assigned_manual_name: manualName,
-        assigned_label: member ? String(member.name) : (manualName || ""),
-        notes: String(r.notes ?? ""),
-      };
-    });
+      const weather = prefs.location ? await fetchWeatherSummary(ctx, prefs.location) : null;
+      const rows = (await plotRows(ctx).all()).slice(0, 2000);
+      rows.sort((a, b) => Number(a._created_at) - Number(b._created_at));
+      const memberRows = peer.is_anon ? [] : await roster(ctx, list);
+      const memberById = new Map(memberRows.map((m) => [m.id, m]));
+      return json({
+        rows: rows.map((r) => enrich(r, prefs, weather, memberById, peer.is_anon, now)),
+        anon_view: peer.is_anon,
+        weather_available: !!weather,
+      });
+    }
 
-    return jsonReply(replyPort, 200, {
-      rows: enriched,
-      anon_view: peer.is_anon,
-      weather_available: !!weather,
-    });
-  }
-
-  // ----- Mutations -------------------------------------------------------------------
-  // Every write goes through the ONE shared path below, whichever transport carried it.
-  if (reqPath.startsWith("/api/") && method === "POST") {
-    const r = await handleWrite(peer.sfi_id, reqPath.slice("/api/".length),
-                                parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
-
-  if (method === "GET") {
-    // The script is a separate ES module file (`<script type="module" src="./index.js">`)
-    // so it can import /lib/js/framelib.js — inlineJs would flatten that to a non-module
-    // <script>, which can't use ES module imports, so it's intentionally omitted here.
-    if(reqPath == "/index.html") return serveHtmlShell(replyPort, new URL("./public/index.html", import.meta.url), {
-      peer: undefined,
-      inlineCss: ["index.css"],
-    });
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-  }
-
-  replyPort.postMessage({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Not found.", code: "NOT_FOUND" }) });
+    return refuse(404, "Not found.");
+  },
 };
-
-log("Garden Plotter frame is up and running.");

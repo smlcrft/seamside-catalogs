@@ -3,94 +3,133 @@
 // members see a realtime inbox with status + correspondence notes.
 //
 // Auth model:
-//   - Not on the space's roster (v1's `is_anon`, signed in or not): sees the submit form.
+//   - Not on the space's roster (signed in or not): sees the submit form. A visitor
+//     writes no row at the door, so a submission is a route here.
 //   - A member of the space: sees the inbox. Every member reads it — the submissions are
 //     a table file of the space, which every member can read anyway — and only editors
 //     (collaborator and up) change status, add notes, or edit the form.
 //   - Submissions, fields and notes are the space's tables (help_desk_submissions,
-//     help_desk_fields, help_desk_notes). A stranger reaches none of them: the space's
-//     tables are its members', and pushes carry ids, never a submitter's details.
+//     help_desk_fields, help_desk_notes). A stranger reaches none of them: the page reads
+//     no table, and every route below decides on ctx.peer, who the door proved is asking.
 //
-// Realtime: submissions, status changes, notes, and field-config edits are announced to
-// every live viewer via pushToInstance(sfi_id, …); the inbox re-reads what it is told of.
+// Realtime: a push says what changed and never what it holds. Every open page of the
+// frame hears it, the public form included, and each reads again as whoever it is.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, serveHtmlShell, pushToInstance, parsePeerInfo, onUiMessage,
-  parseJsonBody, declareTables, ensureTables, table, frameSettings,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
 // THE SPACE'S TABLES — named for this frame, so no other frame's rows land in them.
 // ----------------------------------------------------------------------------------------
+const SUBMISSIONS = "help_desk_submissions";
+const FIELDS = "help_desk_fields";
+const NOTES = "help_desk_notes";
+// Settings (title, one-time seed marker) are rows of a store every frame in the space
+// shares, so the keys carry this frame's name. Each value is JSON under `v`.
+const SETTINGS = "__fc_settings";
+
 declareTables([
   {
-    key: "help_desk_submissions",
+    key: SUBMISSIONS,
     title: "Help Desk Submissions",
     description: "Visitor submissions for this help desk.",
-    schema: [
-      { name: "submitted_at", col_type: "integer", nullable: false, default_val: "0" },
-      { name: "email",        col_type: "text",    nullable: false, default_val: "" },
-      { name: "fields_json",  col_type: "text",    nullable: false, default_val: "{}" },
-      { name: "status",       col_type: "text",    nullable: false, default_val: "new" },
-    ],
+    columns: {
+      submitted_at: { type: "number" },
+      email: { type: "text", required: true },
+      fields_json: { type: "text" },
+      status: { type: "text", required: true },
+    },
   },
   {
-    key: "help_desk_fields",
+    key: FIELDS,
     title: "Help Desk Fields",
     description: "Admin-configured form fields.",
-    schema: [
-      { name: "label",        col_type: "text",    nullable: false, default_val: "" },
-      { name: "type",         col_type: "text",    nullable: false, default_val: "text" },
-      { name: "options_json", col_type: "text",    nullable: false, default_val: "[]" },
-      { name: "required",     col_type: "integer", nullable: false, default_val: "0" },
-      { name: "sort_order",   col_type: "integer", nullable: false, default_val: "0" },
-    ],
+    columns: {
+      label: { type: "text", required: true },
+      type: { type: "text", required: true },
+      options_json: { type: "text" },
+      required: { type: "number" },
+      sort_order: { type: "number" },
+    },
   },
   {
-    key: "help_desk_notes",
+    key: NOTES,
     title: "Help Desk Notes",
     description: "Admin correspondence notes per submission.",
-    schema: [
-      { name: "submission_id",  col_type: "text",    nullable: false, default_val: "" },
-      { name: "author_user_id", col_type: "text",    nullable: false, default_val: "" },
-      { name: "author_name",    col_type: "text",    nullable: false, default_val: "" },
-      { name: "body",           col_type: "text",    nullable: false, default_val: "" },
-      { name: "created_at",     col_type: "integer", nullable: false, default_val: "0" },
-    ],
+    columns: {
+      submission_id: { type: "text", required: true },
+      author_user_id: { type: "text" },
+      author_name: { type: "text" },
+      body: { type: "text", required: true },
+      created_at: { type: "number" },
+    },
   },
 ]);
-// Settings (title, one-time seed marker) are frameSettings rows of the space, a store
-// every frame in the space shares — so the keys carry this frame's name.
 
 // ----------------------------------------------------------------------------------------
 // HELPERS
 // ----------------------------------------------------------------------------------------
-type Tbl = ReturnType<typeof table>;
+type Row = Record<string, unknown> & { id: string };
 
-function hydrateSubmission(row: any) {
+const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+
+/** Write a row over what it held, stamped when it was made and when it changed. */
+async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await rows(ctx, name).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx, name).upsert({
+    ...(was ?? { _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+/** Order by these columns, each ascending; `-name` descends. */
+function by(...cols: string[]) {
+  return (a: Row, b: Row) => {
+    for (const c of cols) {
+      const [name, dir] = c.startsWith("-") ? [c.slice(1), -1] : [c, 1];
+      const x = a[name], y = b[name];
+      const d = typeof x === "number" && typeof y === "number" ? x - y : String(x ?? "").localeCompare(String(y ?? ""));
+      if (d) return dir * d;
+    }
+    return 0;
+  };
+}
+
+function parsed<T>(text: unknown, fallback: T): T {
+  try {
+    return JSON.parse(String(text)) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function hydrateSubmission(row: Row) {
   return {
-    id: row._row_id,
+    id: row.id,
     submitted_at: row.submitted_at,
     email: row.email,
-    fields: JSON.parse(row.fields_json || "{}"),
+    fields: parsed(row.fields_json || "{}", {}),
     status: row.status,
   };
 }
 
-function hydrateField(row: any) {
+function hydrateField(row: Row) {
   return {
-    id: row._row_id,
-    label: row.label,
-    type: row.type,
-    options: JSON.parse(row.options_json || "[]"),
+    id: row.id,
+    label: String(row.label ?? ""),
+    type: String(row.type ?? "text"),
+    options: parsed<string[]>(row.options_json || "[]", []),
     required: row.required === 1,
     sort_order: row.sort_order,
   };
 }
 
-function hydrateNote(row: any) {
+function hydrateNote(row: Row) {
   return {
-    id: row._row_id,
+    id: row.id,
     submission_id: row.submission_id,
     author_user_id: row.author_user_id,
     author_name: row.author_name,
@@ -102,332 +141,240 @@ function hydrateNote(row: any) {
 const VALID_FIELD_TYPES = new Set(["text", "textarea", "checkbox", "dropdown"]);
 const VALID_STATUSES = new Set(["new", "in_progress", "resolved", "archived"]);
 
-async function listFields(fields: Tbl) {
-  const { rows } = await fields.query({ order_by: [{ col: "sort_order" }, { col: "_created_at" }] });
-  return rows.map(hydrateField);
+async function listFields(ctx: Ctx) {
+  return (await rows(ctx, FIELDS).all()).sort(by("sort_order", "_created_at")).map(hydrateField);
 }
 
-async function listNotes(notes: Tbl, submissionId: string) {
-  const { rows } = await notes.query({
-    where: { submission_id: submissionId },
-    order_by: [{ col: "created_at" }, { col: "_created_at" }],
-  });
-  return rows.map(hydrateNote);
+async function notesOf(ctx: Ctx, submissionId: string): Promise<Row[]> {
+  return (await rows(ctx, NOTES).all())
+    .filter((n) => n.submission_id === submissionId)
+    .sort(by("created_at", "_created_at"));
 }
 
-type Settings = ReturnType<typeof frameSettings>;
-type WritePeer = ReturnType<typeof parsePeerInfo>;
+async function setting<T>(ctx: Ctx, key: string, fallback: T): Promise<T> {
+  const row = await rows(ctx, SETTINGS).get(key);
+  return row?.v == null ? fallback : parsed(row.v, fallback);
+}
+
+const setSetting = (ctx: Ctx, key: string, value: unknown) => keep(ctx, SETTINGS, key, { v: JSON.stringify(value) });
 
 // The default seed field uses a fixed id so a concurrent first-load can't create
 // duplicate "Message" fields. User-added fields keep random ids.
 const DEFAULT_FIELD_ROW = "default_message";
 
-// v1 writes a worker's rows as the person it answers: editors and visitors who are not
-// on the roster write; a listed viewer's role does not.
-function mayWrite(peer: WritePeer): boolean {
-  return peer.is_sfi_editor || !peer.is_sfi_member;
-}
-
-// Seed a default "Message" field the first time the desk is opened by someone who may
-// write. The "seeded" setting is the one-time marker — after the initial seed the admin
-// can delete or replace the field and subsequent requests won't re-seed.
-async function ensureDefaultFields(settings: Settings, fields: Tbl, peer: WritePeer): Promise<void> {
-  if (!mayWrite(peer) || await settings.get("help_desk_seeded")) return;
-  await settings.set("help_desk_seeded", true);
-  await fields.upsert(DEFAULT_FIELD_ROW, { label: "Message", type: "textarea", options_json: "[]", required: 0, sort_order: 0 });
+// Seed a default "Message" field the first time the desk is opened. The "seeded" setting
+// is the one-time marker — after the initial seed the admin can delete or replace the
+// field and subsequent requests won't re-seed.
+async function ensureDefaultFields(ctx: Ctx): Promise<void> {
+  if (await setting(ctx, "help_desk_seeded", false)) return;
+  await setSetting(ctx, "help_desk_seeded", true);
+  await keep(ctx, FIELDS, DEFAULT_FIELD_ROW, {
+    label: "Message", type: "textarea", options_json: "[]", required: 0, sort_order: 0,
+  });
 }
 
 const MAX_DESK_TITLE = 120;
 
-/// The desk's display name ("" = unset; UIs fall back to their defaults).
-async function getTitle(settings: Settings): Promise<string> {
-  return (await settings.get<string>("help_desk_title", "")) || "";
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx, what: "messages" | "notes" | "form") => ctx.push({ help_desk: what });
+
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
+
+// deno-lint-ignore no-explicit-any
+async function body(request: Request): Promise<any> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
-// Route ids are opaque row-id strings (hex); a path segment must not contain '/'.
-// Matched against the op form — the API path with the leading "/api/" stripped — which
-// is also the bus write's `op` string.
+// Route ids are opaque row-id strings; a path segment must not contain '/'.
 const ID_SEG = "([^/]+)";
-const RE_STATUS  = new RegExp(`^admin/messages/${ID_SEG}/status$`);
-const RE_NOTES   = new RegExp(`^admin/messages/${ID_SEG}/notes$`);
-const RE_MESSAGE = new RegExp(`^admin/messages/${ID_SEG}$`);
-const RE_FIELD   = new RegExp(`^admin/fields/${ID_SEG}$`);
+const RE_STATUS  = new RegExp(`^PUT /admin/messages/${ID_SEG}/status$`);
+const RE_NOTES   = new RegExp(`^(GET|POST) /admin/messages/${ID_SEG}/notes$`);
+const RE_MESSAGE = new RegExp(`^DELETE /admin/messages/${ID_SEG}$`);
+const RE_FIELD   = new RegExp(`^(PUT|DELETE) /admin/fields/${ID_SEG}$`);
 
 // ----------------------------------------------------------------------------------------
-// SHARED WRITE LOGIC — one implementation behind both entry points (the HTTP arms and
-// the bus dispatcher below); the role gates live here so the two paths can never drift.
-// `op` is the API path with the leading "/api/" stripped.
+// A VISITOR'S SUBMISSION
 // ----------------------------------------------------------------------------------------
-type WriteResult = { status: number; body: unknown };
+// deno-lint-ignore no-explicit-any
+async function submit(ctx: Ctx, data: any): Promise<Response> {
+  if (!data || typeof data.email !== "string") return refuse(400, "email is required");
+  const email = data.email.trim();
+  if (!email) return refuse(400, "email must not be empty");
+  if (email.length > 320) return refuse(413, "email too long");
+  const rawFields = (data.fields && typeof data.fields === "object") ? data.fields as Record<string, unknown> : {};
 
-async function handleWrite(sfiId: string, op: string, data: any, peer: WritePeer): Promise<WriteResult> {
-  const tables = ensureTables(peer);
-  if (!tables.ready) return { status: 503, body: { error: "table not bound" } };
-  const submissions = table("help_desk_submissions", sfiId);
-  const fieldsTbl   = table("help_desk_fields", sfiId);
-  const notesTbl    = table("help_desk_notes", sfiId);
-  const settings    = frameSettings(sfiId);
-
-  // ----- public: anonymous submission.
-  if (op === "submit") {
-    if (!data || typeof data.email !== "string") {
-      return { status: 400, body: { error: "email is required" } };
-    }
-    const email = data.email.trim();
-    if (!email) return { status: 400, body: { error: "email must not be empty" } };
-    if (email.length > 320) return { status: 413, body: { error: "email too long" } };
-    const rawFields = (data.fields && typeof data.fields === "object") ? data.fields as Record<string, unknown> : {};
-
-    // Validate required custom fields per the current config and clamp textual values.
-    const configured = await listFields(fieldsTbl);
-    const fields: Record<string, unknown> = {};
-    for (const f of configured) {
-      const v = rawFields[String(f.id)];
-      if (f.required) {
-        if (f.type === "checkbox") {
-          if (v !== true) return { status: 400, body: { error: `"${f.label}" is required` } };
-        } else if (v === undefined || v === null || String(v).trim() === "") {
-          return { status: 400, body: { error: `"${f.label}" is required` } };
-        }
-      }
-      if (v === undefined) continue;
-      if (f.type === "checkbox") fields[String(f.id)] = !!v;
-      else {
-        const s = String(v);
-        if (s.length > 10_000) return { status: 413, body: { error: `"${f.label}" too long` } };
-        fields[String(f.id)] = s;
+  // Validate required custom fields per the current config and clamp textual values.
+  const fields: Record<string, unknown> = {};
+  for (const f of await listFields(ctx)) {
+    const v = rawFields[f.id];
+    if (f.required) {
+      if (f.type === "checkbox") {
+        if (v !== true) return refuse(400, `"${f.label}" is required`);
+      } else if (v === undefined || v === null || String(v).trim() === "") {
+        return refuse(400, `"${f.label}" is required`);
       }
     }
-
-    const now = Date.now();
-    const { row_id } = await submissions.upsert(null, {
-      submitted_at: now, email, fields_json: JSON.stringify(fields), status: "new",
-    });
-    // Every viewer of the frame hears a push, the public form included: say only that
-    // something arrived, and let the inbox read it through its gated route.
-    pushToInstance(sfiId, { type: "hd_new_submission", sfi_id: sfiId, id: row_id });
-    log(`Help Desk: submission ${row_id.slice(0, 8)}…`);
-    return { status: 200, body: { ok: true, id: row_id } };
-  }
-
-  // ----- admin writes: require an editor (the admin READ routes stay open to every
-  // member of the space).
-  if (op.startsWith("admin/")) {
-    if (!peer.is_sfi_editor) return { status: 403, body: { error: "forbidden" } };
-    await ensureDefaultFields(settings, fieldsTbl, peer);
-
-    // Set the desk's display name ("" clears it back to the defaults).
-    // Shown as the admin h1 and atop the public view.
-    if (op === "admin/title") {
-      if (!data || typeof data.title !== "string") return { status: 400, body: { error: "title required (string)" } };
-      const title = data.title.trim().slice(0, MAX_DESK_TITLE);
-      await settings.set("help_desk_title", title);
-      pushToInstance(sfiId, { type: "hd_title_changed", sfi_id: sfiId, title });
-      return { status: 200, body: { ok: true, title } };
-    }
-
-    // Status change.
-    const statusMatch = op.match(RE_STATUS);
-    if (statusMatch) {
-      const id = statusMatch[1];
-      if (!data?.status || !VALID_STATUSES.has(data.status)) return { status: 400, body: { error: "invalid status" } };
-      if (!(await submissions.get(id))) return { status: 404, body: { error: "not found" } };
-      await submissions.upsert(id, { status: data.status });
-      pushToInstance(sfiId, { type: "hd_submission_updated", sfi_id: sfiId, id, status: data.status });
-      return { status: 200, body: { ok: true } };
-    }
-
-    // Add note.
-    const notesMatch = op.match(RE_NOTES);
-    if (notesMatch) {
-      const id = notesMatch[1];
-      if (!data?.body || typeof data.body !== "string") return { status: 400, body: { error: "body required" } };
-      if (!(await submissions.get(id))) return { status: 404, body: { error: "not found" } };
-      const authorName = peer.user_name || "admin";
-      await notesTbl.upsert(null, {
-        submission_id: id, author_user_id: peer.user_id, author_name: authorName,
-        body: data.body, created_at: Date.now(),
-      });
-      pushToInstance(sfiId, { type: "hd_note_added", sfi_id: sfiId, submission_id: id });
-      return { status: 200, body: { notes: await listNotes(notesTbl, id) } };
-    }
-
-    // Create field.
-    if (op === "admin/fields") {
-      if (!data?.label || typeof data.label !== "string") return { status: 400, body: { error: "label required" } };
-      if (!data?.type || !VALID_FIELD_TYPES.has(data.type)) return { status: 400, body: { error: "invalid type" } };
-      const options = Array.isArray(data.options) ? data.options.map(String) : [];
-      if (data.type === "dropdown" && options.length === 0) return { status: 400, body: { error: "dropdown requires at least one option" } };
-      const nextOrder = Number(await fieldsTbl.max("sort_order") ?? -1) + 1;
-      const { row_id } = await fieldsTbl.upsert(null, {
-        label: data.label.trim(), type: data.type,
-        options_json: JSON.stringify(options),
-        required: data.required ? 1 : 0, sort_order: nextOrder,
-      });
-      pushToInstance(sfiId, { type: "hd_fields_changed", sfi_id: sfiId });
-      return { status: 200, body: { ok: true, id: row_id } };
-    }
-
-    // Update field.
-    const fieldMatch = op.match(RE_FIELD);
-    if (fieldMatch) {
-      const id = fieldMatch[1];
-      if (!(await fieldsTbl.get(id))) return { status: 404, body: { error: "not found" } };
-      if (!data) return { status: 400, body: { error: "invalid body" } };
-      if (typeof data.label === "string") await fieldsTbl.upsert(id, { label: data.label.trim() });
-      if (typeof data.type === "string") {
-        if (!VALID_FIELD_TYPES.has(data.type)) return { status: 400, body: { error: "invalid type" } };
-        await fieldsTbl.upsert(id, { type: data.type });
-      }
-      if (Array.isArray(data.options)) {
-        await fieldsTbl.upsert(id, { options_json: JSON.stringify(data.options.map(String)) });
-      }
-      if (typeof data.required === "boolean") {
-        await fieldsTbl.upsert(id, { required: data.required ? 1 : 0 });
-      }
-      pushToInstance(sfiId, { type: "hd_fields_changed", sfi_id: sfiId });
-      return { status: 200, body: { ok: true } };
+    if (v === undefined) continue;
+    if (f.type === "checkbox") fields[f.id] = !!v;
+    else {
+      const s = String(v);
+      if (s.length > 10_000) return refuse(413, `"${f.label}" too long`);
+      fields[f.id] = s;
     }
   }
 
-  return { status: 404, body: { error: "unknown op" } };
+  const row = await keep(ctx, SUBMISSIONS, null, {
+    submitted_at: Date.now(), email, fields_json: JSON.stringify(fields), status: "new",
+  });
+  tell(ctx, "messages");
+  ctx.log(`Help Desk: submission ${row.id.slice(0, 8)}…`);
+  return json({ ok: true, id: row.id });
 }
-
-// ----------------------------------------------------------------------------------------
-// BUS DISPATCHER — the frontend's write path (frame.busSend → BusUiToFrame). `peer` is the
-// sender's platform-resolved identity, same shape as parsePeerInfo; the gates live inside
-// handleWrite. Denials are logged, not answered.
-// ----------------------------------------------------------------------------------------
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  const op = typeof d.op === "string" ? d.op : "";
-  const r = await handleWrite(sfiId, op, d, peer);
-  if (r.status !== 200) log(`Help Desk: bus op ${op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
 
 // ----------------------------------------------------------------------------------------
 // NETWORKING
 // ----------------------------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, _headers, query, body, cookies) {
-  const send = (data: unknown, status = 200) => replyPort.postMessage({
-    status, contentType: "application/json", body: JSON.stringify(data),
-  });
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
-  const anon = peer.is_anon || !peer.user_id;  // v1: is_anon = not on the roster
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    if (!pathname.startsWith("/api/")) {
+      if (request.method !== "GET") return refuse(404, "Not found.");
+      return ctx.file(pathname);
+    }
+    const route = `${request.method} ${pathname.slice(4)}`;
+    const editor = ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+    const member = editor || ctx.peer.is_sfi_member;
 
-  // ----- index.html: serve a single bundled response (html + inlined css + per-viewer
-  // window.__peer stamp) so the UI can render without an extra /api/whoami round-trip.
-  // The script is inline in index.html as <script type="module"> so it can import
-  // /lib/js/framelib.js — inlineJs would flatten that to a non-module <script>, which
-  // can't use ES module imports, so it's intentionally omitted here.
-  if (reqPath === "/index.html" && method === "GET") {
-    return serveHtmlShell(replyPort, new URL("./public/index.html", import.meta.url), {
-      peer,
-      inlineCss: ["index.css"],
-    });
-  }
-
-  if (reqPath.startsWith("/api/")) {
-    if (!sfiId) return send({ error: "sfi_id missing" }, 400);
-    const op = reqPath.slice("/api/".length);
-    const tables = ensureTables(peer);
-    if (!tables.ready) return send({ error: "table not bound" }, 503);
-    const submissions = table("help_desk_submissions", sfiId);
-    const fieldsTbl   = table("help_desk_fields", sfiId);
-    const notesTbl    = table("help_desk_notes", sfiId);
-    const settings    = frameSettings(sfiId);
-
-    // ----- public: fetch the form field config (anon or admin), with the desk's title.
-    if (op === "config" && method === "GET") {
-      await ensureDefaultFields(settings, fieldsTbl, peer);
-      return send({ fields: await listFields(fieldsTbl), title: await getTitle(settings) });
+    // ----- anyone: the form's fields and the desk's title, and who the door says is asking.
+    if (route === "GET /config") {
+      await ensureDefaultFields(ctx);
+      return json({
+        fields: await listFields(ctx),
+        title: await setting(ctx, "help_desk_title", ""),
+        color: ctx.peer.space_color,
+        you: { member, editor },
+      });
     }
 
-    // ----- public: anonymous submission endpoint. HTTP arm kept for API compatibility
-    // (older viewers, web viewer fallback); the frame's own UI writes over the bus (see
-    // the dispatcher above). Same logic, same gates, either way.
-    if (op === "submit" && method === "POST") {
-      const r = await handleWrite(sfiId, op, parseJsonBody(body), peer);
-      return send(r.body, r.status);
+    if (route === "POST /submit") return submit(ctx, await body(request));
+
+    if (!route.includes(" /admin/")) return refuse(404, "unknown route");
+
+    // ----- everything below is a member's to read, and an editor's to change.
+    if (!member) return refuse(403, "forbidden");
+    await ensureDefaultFields(ctx);
+
+    if (route === "GET /admin/messages") {
+      const all = (await rows(ctx, SUBMISSIONS).all()).sort(by("-submitted_at", "-_created_at"));
+      return json({ submissions: all.map(hydrateSubmission) });
     }
 
-    // ----- admin: everything past this point requires a member (writes are
-    // additionally editor-gated inside handleWrite / inline below).
-    if (op.startsWith("admin/")) {
-      if (anon) return send({ error: "forbidden" }, 403);
-      await ensureDefaultFields(settings, fieldsTbl, peer);
+    if (route === "GET /admin/fields") return json({ fields: await listFields(ctx) });
 
-      // Heartbeat — kept so the admin UI can ping cheaply; realtime is delivered via pushToInstance.
-      if (op === "admin/register" && method === "POST") {
-        return send({ ok: true });
-      }
-
-      // Bodied admin writes (title, status, add-note, field create/update) — shared
-      // logic with the bus dispatcher.
-      const isAdminWrite =
-        (method === "PUT" && (op === "admin/title" || RE_STATUS.test(op) || RE_FIELD.test(op)))
-        || (method === "POST" && (op === "admin/fields" || RE_NOTES.test(op)));
-      if (isAdminWrite) {
-        const r = await handleWrite(sfiId, op, parseJsonBody(body), peer);
-        return send(r.body, r.status);
-      }
-
-      // Inbox listing.
-      if (op === "admin/messages" && method === "GET") {
-        const { rows } = await submissions.query({
-          order_by: [{ col: "submitted_at", dir: "desc" }, { col: "_created_at", dir: "desc" }],
-        });
-        return send({ submissions: rows.map(hydrateSubmission) });
-      }
-
-      // Notes list.
-      const notesListMatch = op.match(RE_NOTES);
-      if (notesListMatch && method === "GET") {
-        const id = notesListMatch[1];
-        if (!(await submissions.get(id))) return send({ error: "not found" }, 404);
-        return send({ notes: await listNotes(notesTbl, id) });
-      }
-
-      // Delete submission (cascades its notes).
-      const deleteMatch = op.match(RE_MESSAGE);
-      if (deleteMatch && method === "DELETE") {
-        if (!peer.is_sfi_editor) return send({ error: "forbidden" }, 403);
-        const id = deleteMatch[1];
-        if (!(await submissions.get(id))) return send({ error: "not found" }, 404);
-        await notesTbl.deleteWhere({ submission_id: id });
-        await submissions.delete(id);
-        pushToInstance(sfiId, { type: "hd_submission_deleted", sfi_id: sfiId, id });
-        return send({ ok: true });
-      }
-
-      // Field config list.
-      if (op === "admin/fields" && method === "GET") {
-        return send({ fields: await listFields(fieldsTbl) });
-      }
-
-      // Delete field.
-      const fieldIdMatch = op.match(RE_FIELD);
-      if (fieldIdMatch && method === "DELETE") {
-        if (!peer.is_sfi_editor) return send({ error: "forbidden" }, 403);
-        const id = fieldIdMatch[1];
-        if (!(await fieldsTbl.get(id))) return send({ error: "not found" }, 404);
-        await fieldsTbl.delete(id);
-        pushToInstance(sfiId, { type: "hd_fields_changed", sfi_id: sfiId });
-        return send({ ok: true });
-      }
-
-      return send({ error: "unknown admin route" }, 404);
+    const notes = route.match(RE_NOTES);
+    if (notes?.[1] === "GET") {
+      if (!(await rows(ctx, SUBMISSIONS).get(notes[2]))) return refuse(404, "not found");
+      return json({ notes: (await notesOf(ctx, notes[2])).map(hydrateNote) });
     }
-  }
 
-  // ----- static file fallback.
-  if (method === "GET") {
-    serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-  } else {
-    replyPort.postMessage({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Not found.", code: "NOT_FOUND" }) });
-  }
+    if (request.method === "GET") return refuse(404, "unknown admin route");
+    if (!editor) return refuse(403, "forbidden");
+
+    // Set the desk's display name ("" clears it back to the defaults).
+    // Shown as the admin h1 and atop the public view.
+    if (route === "PUT /admin/title") {
+      const data = await body(request);
+      if (!data || typeof data.title !== "string") return refuse(400, "title required (string)");
+      const title = data.title.trim().slice(0, MAX_DESK_TITLE);
+      await setSetting(ctx, "help_desk_title", title);
+      tell(ctx, "form");
+      return json({ ok: true, title });
+    }
+
+    const status = route.match(RE_STATUS);
+    if (status) {
+      const data = await body(request);
+      if (!data?.status || !VALID_STATUSES.has(data.status)) return refuse(400, "invalid status");
+      if (!(await rows(ctx, SUBMISSIONS).get(status[1]))) return refuse(404, "not found");
+      await keep(ctx, SUBMISSIONS, status[1], { status: data.status });
+      tell(ctx, "messages");
+      return json({ ok: true });
+    }
+
+    if (notes?.[1] === "POST") {
+      const id = notes[2];
+      const data = await body(request);
+      if (!data?.body || typeof data.body !== "string") return refuse(400, "body required");
+      if (!(await rows(ctx, SUBMISSIONS).get(id))) return refuse(404, "not found");
+      await keep(ctx, NOTES, null, {
+        submission_id: id, author_user_id: ctx.peer.user_id, author_name: ctx.peer.user_name || "admin",
+        body: data.body, created_at: Date.now(),
+      });
+      tell(ctx, "notes");
+      return json({ notes: (await notesOf(ctx, id)).map(hydrateNote) });
+    }
+
+    // Delete submission (cascades its notes).
+    const message = route.match(RE_MESSAGE);
+    if (message) {
+      const id = message[1];
+      if (!(await rows(ctx, SUBMISSIONS).get(id))) return refuse(404, "not found");
+      for (const n of await notesOf(ctx, id)) await rows(ctx, NOTES).delete(n.id);
+      await rows(ctx, SUBMISSIONS).delete(id);
+      tell(ctx, "messages");
+      return json({ ok: true });
+    }
+
+    if (route === "POST /admin/fields") {
+      const data = await body(request);
+      const label = typeof data?.label === "string" ? data.label.trim() : "";
+      if (!label) return refuse(400, "label required");
+      if (!data?.type || !VALID_FIELD_TYPES.has(data.type)) return refuse(400, "invalid type");
+      const options = Array.isArray(data.options) ? data.options.map(String) : [];
+      if (data.type === "dropdown" && options.length === 0) return refuse(400, "dropdown requires at least one option");
+      const last = (await rows(ctx, FIELDS).all()).reduce((m, f) => Math.max(m, Number(f.sort_order) || 0), -1);
+      const row = await keep(ctx, FIELDS, null, {
+        label, type: data.type,
+        options_json: JSON.stringify(options),
+        required: data.required ? 1 : 0, sort_order: last + 1,
+      });
+      tell(ctx, "form");
+      return json({ ok: true, id: row.id });
+    }
+
+    const field = route.match(RE_FIELD);
+    if (field) {
+      const id = field[2];
+      if (!(await rows(ctx, FIELDS).get(id))) return refuse(404, "not found");
+      if (field[1] === "DELETE") {
+        await rows(ctx, FIELDS).delete(id);
+        tell(ctx, "form");
+        return json({ ok: true });
+      }
+      const data = await body(request);
+      if (!data) return refuse(400, "invalid body");
+      const next: Record<string, unknown> = {};
+      if (typeof data.label === "string") {
+        if (!data.label.trim()) return refuse(400, "label required");
+        next.label = data.label.trim();
+      }
+      if (typeof data.type === "string") {
+        if (!VALID_FIELD_TYPES.has(data.type)) return refuse(400, "invalid type");
+        next.type = data.type;
+      }
+      if (Array.isArray(data.options)) next.options_json = JSON.stringify(data.options.map(String));
+      if (typeof data.required === "boolean") next.required = data.required ? 1 : 0;
+      await keep(ctx, FIELDS, id, next);
+      tell(ctx, "form");
+      return json({ ok: true });
+    }
+
+    return refuse(404, "unknown admin route");
+  },
 };
-
-log("Help Desk frame is up and running!");

@@ -54,7 +54,7 @@ export const mygame = {
 Your `PlayScreen` gets a `ctx` with everything the console knows:
 
 - `ctx.seed` — the round seed. `ctx.seats`, `ctx.turns` (rows with parsed
-  `payload`), `ctx.turnIndex`, `ctx.attempt`, `ctx.isMyTurn`, `ctx.clientId`.
+  `payload`), `ctx.turnIndex`, `ctx.attempt`, `ctx.isMyTurn`, `ctx.playerId` (my public id, as rows carry `player_id`).
 - `ctx.submit(payload)` — send my finished turn to the worker (it re-scores it
   through your sim's `resolve`, so a tampered client can't lie about points).
 
@@ -63,7 +63,7 @@ From `../console-kit.js`:
 - `useInput((name, edge) => ...)` — the hardware: `up/down/left/right/A/B`,
   edges `"down"|"up"`. `A` is the O key (primary), `B` is I (back — the console
   core owns it; don't bind it).
-- `useTurnRunner({ turns, clientId, attempts, replay })` — replays other
+- `useTurnRunner({ turns, playerId, attempts, replay })` — replays other
   players' turns through your `replay(row, isFinal)` so spectators watch every
   turn. Call `beginLive()`/`endLive()` around your own player's live run and
   gate input on `settled()`.

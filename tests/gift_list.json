@@ -1,0 +1,71 @@
+{
+  "tier": "members",
+  "publish": "open",
+  "steps": [
+    { "why": "a wish an installed copy left behind, claimed by someone no longer known", "as": "collaborator", "at": "space", "do": "KV.PUT t/christmas.wishes/old1", "body": { "item": "Kettle", "for_who": "Collaborator", "for_user_id": "{did:collaborator}", "url": "", "notes": "a quiet one", "claimed_by": "", "claimed_by_id": "", "added_ms": 5, "claimed": 1, "_created_at": 5, "_modified_at": 5 }, "status": 200 },
+
+    { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["Gift List"] },
+    { "why": "before a list is chosen there is nothing to show", "do": "GET {api}/list", "status": 200, "is": { "/bound": null, "/can_bind": false, "/wishes": [] }, "lacks": ["Kettle"] },
+    { "why": "a stranger chooses no list", "do": "POST {api}/bind", "body": { "list": "christmas.wishes" }, "status": 403 },
+    { "why": "nor someone signed in and on no roster", "as": "signed", "do": "POST {api}/bind", "body": { "list": "christmas.wishes" }, "status": 403 },
+    { "why": "nor a viewer", "as": "viewer", "do": "POST {api}/bind", "body": { "list": "christmas.wishes" }, "status": 403 },
+    { "why": "no wish is added before a list is chosen", "as": "collaborator", "do": "POST {api}/wish", "body": { "item": "Bike" }, "status": 409, "is": { "/error": "no list chosen yet" } },
+    { "why": "a list has a list's name", "as": "collaborator", "do": "POST {api}/bind", "body": { "list": "Christmas" }, "status": 400 },
+    { "why": "a collaborator chooses the list", "as": "collaborator", "do": "POST {api}/bind", "body": { "list": "christmas.wishes" }, "status": 200, "is": { "/bound": "christmas.wishes" } },
+
+    { "why": "a stranger is nobody", "do": "GET {api}/whoami", "status": 200, "is": { "/is_anon": true, "/is_sfi_member": false, "/is_sfi_editor": false, "/user_id": "" } },
+    { "why": "a viewer is a member who may not edit", "as": "viewer", "do": "GET {api}/whoami", "is": { "/is_sfi_member": true, "/is_sfi_editor": false, "/user_id": "{did:viewer}", "/user_name": "Viewer" } },
+    { "why": "a collaborator edits", "as": "collaborator", "do": "GET {api}/whoami", "is": { "/is_sfi_editor": true } },
+
+    { "why": "a stranger reads the list, the old row with it, and nothing of its claim", "do": "GET {api}/list", "status": 200, "is": { "/bound": "christmas.wishes", "/can_bind": false, "/wishes/0": { "id": "old1", "item": "Kettle", "for_who": "Collaborator", "url": "", "notes": "a quiet one", "added_ms": 5, "for_me": false } }, "lacks": ["claimed", "holder_known"] },
+    { "why": "a stranger adds no wish", "do": "POST {api}/wish", "body": { "item": "Mine" }, "status": 403 },
+    { "why": "claims nothing", "do": "POST {api}/wish/old1/claim", "body": {}, "status": 403 },
+    { "why": "releases nothing", "do": "POST {api}/wish/old1/unclaim", "body": {}, "status": 403 },
+    { "why": "changes nothing", "do": "PUT {api}/wish/old1", "body": { "item": "Mine" }, "status": 403 },
+    { "why": "removes nothing", "do": "POST {api}/wish/old1/delete", "body": {}, "status": 403 },
+    { "why": "a stranger writes no row at the door", "do": "KV.PUT t/christmas.wishes/x", "body": { "item": "x" }, "status": 403 },
+    { "why": "and reads no table there", "do": "KV.LIST t/christmas.wishes/", "lacks": ["Kettle"] },
+    { "why": "someone signed in and on no roster adds nothing", "as": "signed", "do": "POST {api}/wish", "body": { "item": "Mine" }, "status": 403 },
+    { "why": "and claims nothing", "as": "signed", "do": "POST {api}/wish/old1/claim", "body": {}, "status": 403 },
+    { "why": "a viewer adds no wish", "as": "viewer", "do": "POST {api}/wish", "body": { "item": "Mine" }, "status": 403 },
+    { "why": "claims nothing", "as": "viewer", "do": "POST {api}/wish/old1/claim", "body": {}, "status": 403 },
+    { "why": "removes nothing", "as": "viewer", "do": "POST {api}/wish/old1/delete", "body": {}, "status": 403 },
+    { "why": "a viewer sees that the old wish is claimed", "as": "viewer", "do": "GET {api}/list", "is": { "/wishes/0/claimed": true, "/wishes/0/holder_known": false, "/me_name": "Viewer" } },
+
+    { "why": "a wish needs an item", "as": "admin", "do": "POST {api}/wish", "body": { "item": "  " }, "status": 400, "is": { "/error": "item required" } },
+    { "why": "an admin adds a wish for the collaborator", "as": "admin", "do": "POST {api}/wish", "body": { "item": " Bike ", "for_who": "Collaborator", "notes": "blue" }, "status": 200, "is": { "/wishes/1/item": "Bike", "/wishes/1/for_who": "Collaborator", "/wishes/1/claimed": false }, "save": { "bike": "/wishes/1/id" } },
+    { "why": "as a row of the list, in the shape installed copies hold", "table": "christmas.wishes", "has": ["\"item\":\"Bike\"", "\"notes\":\"blue\"", "\"url\":\"\"", "\"claimed_by\":\"\"", "\"claimed_by_id\":\"\"", "\"claimed\":0", "\"added_ms\":", "_created_at", "_modified_at", "Kettle"] },
+    { "why": "the admin claims it", "as": "admin", "do": "POST {api}/wish/{bike}/claim", "body": {}, "status": 200, "is": { "/wishes/1/claimed": true, "/wishes/1/holder_known": true, "/wishes/1/claimed_by": "Admin", "/wishes/1/claimed_by_id": "{did:admin}", "/wishes/1/claimed_by_me": true } },
+    { "why": "the row says claimed and never by whom", "table": "christmas.wishes", "has": ["\"claimed\":1", "\"item\":\"Bike\"", "\"notes\":\"blue\""], "lacks": ["Admin", "{did:admin}"] },
+
+    { "why": "the person the wishes are for is told nothing of a claim", "as": "collaborator", "do": "GET {api}/list", "status": 200, "is": { "/wishes/0": { "id": "old1", "item": "Kettle", "for_who": "Collaborator", "url": "", "notes": "a quiet one", "added_ms": 5, "for_me": true }, "/wishes/1/id": "{bike}", "/wishes/1/item": "Bike", "/wishes/1/for_me": true }, "lacks": ["claimed", "holder_known", "Admin", "{did:admin}"] },
+    { "why": "nor by the table at the door", "as": "collaborator", "do": "KV.LIST t/christmas.wishes/", "lacks": ["Admin", "{did:admin}"] },
+    { "why": "and cannot claim what is for them", "as": "collaborator", "do": "POST {api}/wish/{bike}/claim", "body": {}, "status": 400, "is": { "/error": "that one is for you" }, "lacks": ["claimed", "Admin"] },
+    { "why": "nor release it", "as": "collaborator", "do": "POST {api}/wish/{bike}/unclaim", "body": {}, "status": 400, "is": { "/error": "that one is for you" } },
+    { "why": "their own change to it is answered with nothing of the claim", "as": "collaborator", "do": "PUT {api}/wish/{bike}", "body": { "notes": "red", "url": "https://example.com/bike" }, "status": 200, "is": { "/wishes/1/notes": "red", "/wishes/1/url": "https://example.com/bike", "/wishes/1/item": "Bike" }, "lacks": ["claimed", "holder_known", "Admin", "{did:admin}"] },
+    { "why": "the change landed over the row, which kept its claim", "table": "christmas.wishes", "has": ["\"notes\":\"red\"", "\"item\":\"Bike\"", "\"claimed\":1"], "lacks": ["blue", "Admin"] },
+    { "why": "a viewer the wish is not for sees that it is claimed", "as": "viewer", "do": "GET {api}/list", "is": { "/wishes/1/claimed": true, "/wishes/1/claimed_by_me": false, "/wishes/1/for_me": false } },
+    { "why": "a stranger is told nothing of a claim", "do": "GET {api}/list", "is": { "/wishes/1/item": "Bike", "/wishes/1/for_me": false }, "absent": ["/wishes/1/claimed", "/wishes/1/claimed_by", "/wishes/1/claimed_by_id", "/wishes/1/holder_known", "/wishes/1/claimed_by_me"], "lacks": ["claimed", "Admin", "{did:admin}"] },
+
+    { "why": "a wish is matched to its person by a loosened name", "as": "collaborator", "at": "space", "do": "KV.PUT t/christmas.wishes/old2", "body": { "item": "Scarf", "for_who": "viewer  PERSON", "for_user_id": "", "url": "", "notes": "", "claimed_by": "", "claimed_by_id": "", "added_ms": 7, "_created_at": 7, "_modified_at": 7 }, "status": 200 },
+    { "why": "the collaborator claims it", "as": "collaborator", "do": "POST {api}/wish/old2/claim", "body": {}, "status": 200, "is": { "/wishes/2/id": "old2", "/wishes/2/claimed_by": "Collaborator", "/wishes/2/claimed_by_me": true } },
+    { "why": "and the viewer it is for is told nothing of that", "as": "viewer", "do": "GET {api}/list", "is": { "/wishes/2": { "id": "old2", "item": "Scarf", "for_who": "viewer  PERSON", "url": "", "notes": "", "added_ms": 7, "for_me": true } }, "lacks": ["\"claimed_by\":\"Collaborator\"", "{did:collaborator}\",\"claimed_by_me"] },
+    { "why": "a claim is its holder's to release", "as": "admin", "do": "POST {api}/wish/old2/unclaim", "body": {}, "status": 403, "is": { "/error": "not your claim" } },
+    { "why": "and is not claimed twice", "as": "admin", "do": "POST {api}/wish/old2/claim", "body": {}, "status": 409, "is": { "/error": "already claimed" } },
+    { "why": "the holder lets it go", "as": "collaborator", "do": "POST {api}/wish/old2/unclaim", "body": {}, "status": 200, "is": { "/wishes/2/claimed": false, "/wishes/2/claimed_by": "" } },
+    { "why": "a claim whose holder is not known is any editor's to release", "as": "admin", "do": "POST {api}/wish/old1/unclaim", "body": {}, "status": 200, "is": { "/wishes/0/claimed": false, "/wishes/1/claimed": true } },
+    { "why": "a stranger's rows look the same, claimed or not", "do": "GET {api}/list", "is": { "/wishes/0/id": "old1", "/wishes/1/id": "{bike}", "/wishes/2/id": "old2" }, "absent": ["/wishes/0/claimed", "/wishes/0/claimed_by", "/wishes/0/claimed_by_id", "/wishes/0/holder_known", "/wishes/0/claimed_by_me", "/wishes/1/claimed", "/wishes/1/claimed_by", "/wishes/1/claimed_by_id", "/wishes/1/holder_known", "/wishes/1/claimed_by_me"], "lacks": ["claimed", "holder_known", "Admin", "{did:admin}"] },
+    { "why": "and so do those of someone signed in and on no roster", "as": "signed", "do": "GET {api}/list", "is": { "/wishes/0/id": "old1", "/wishes/0/for_me": false, "/wishes/1/id": "{bike}", "/wishes/1/for_me": false }, "absent": ["/wishes/0/claimed", "/wishes/0/claimed_by", "/wishes/0/claimed_by_id", "/wishes/0/holder_known", "/wishes/0/claimed_by_me", "/wishes/1/claimed", "/wishes/1/claimed_by", "/wishes/1/claimed_by_id", "/wishes/1/holder_known", "/wishes/1/claimed_by_me"], "lacks": ["claimed", "holder_known", "Admin", "{did:admin}"] },
+    { "why": "while a member still sees which is claimed", "as": "viewer", "do": "GET {api}/list", "is": { "/wishes/0/claimed": false, "/wishes/1/claimed": true, "/wishes/1/claimed_by": "Admin" } },
+    { "why": "the old row kept what it held", "table": "christmas.wishes", "has": ["\"item\":\"Kettle\"", "\"notes\":\"a quiet one\"", "\"_created_at\":5"] },
+
+    { "why": "a wish with no name is for whoever adds it", "as": "admin", "do": "POST {api}/wish", "body": { "item": "Socks" }, "status": 200, "is": { "/wishes/0/item": "Socks", "/wishes/0/for_who": "Admin", "/wishes/0/for_me": true } },
+    { "why": "by their ID", "table": "christmas.wishes", "has": ["\"for_user_id\":\"{did:admin}\""] },
+
+    { "why": "there is no such wish", "as": "collaborator", "do": "POST {api}/wish/nope/delete", "body": {}, "status": 400, "is": { "/error": "bad id" } },
+    { "why": "nor such an act", "as": "collaborator", "do": "POST {api}/wish/{bike}/wrap", "body": {}, "status": 404 },
+    { "why": "a wish goes", "as": "collaborator", "do": "POST {api}/wish/{bike}/delete", "body": {}, "status": 200 },
+    { "why": "from the list", "table": "christmas.wishes", "has": ["Kettle", "Scarf", "Socks"], "lacks": ["Bike"] },
+    { "why": "there is no such route", "as": "collaborator", "do": "GET {api}/nothing", "status": 404 }
+  ]
+}

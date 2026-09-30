@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Grocery List</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }   /* follows the space channel at runtime via applyChannel */
     * { box-sizing: border-box; }
@@ -144,7 +144,16 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+    import { html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "/lib/js/framelib.js";
+
+    // Everything comes from this frame's own server half, which decides who may do what.
+    async function api(path, body) {
+      const r = await window.seamside.fetch(`/api/${path}`, body ? { method: "POST", body: JSON.stringify(body) } : {});
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     function App() {
       const [me, setMe]           = useState(null);
@@ -156,28 +165,32 @@
       const clearTimer = useRef(null);
 
       async function refresh() {
-        const r = await frame.api("api/list").catch(() => null);
+        const r = await api("list").catch(() => null);
         if (!r) return;
         if (r.items) setItems(r.items);
       }
-      // Writes go over the tether (frame.busSend) — fire-and-forget; the list refreshes
-      // from the grocery_changed push, sender included. Feature-detect: an older viewer's
-      // framelib has no busSend, so fall back to the HTTP write it was using before.
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // A write answers with the list as it now stands; the push brings every other page
+      // along. A refused write reads the list again, undoing what was drawn ahead of it.
+      const write = (path, body) =>
+        api(path, body).then((r) => { if (r.items) setItems(r.items); }).catch(refresh);
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ grocery_changed: refresh });
+      useFramePush((d) => { if (d.grocery_list === "items") refresh(); });
+
+      // Other frames (a Meal Planner) and other sessions of this one write the table too,
+      // and their pushes never reach this page: a member watches the table itself.
+      const watching = !!me?.is_sfi_member;
+      useEffect(() => {
+        if (!watching || !window.seamside?.kv?.watch) return;
+        let soon = 0;
+        const w = window.seamside.kv.watch("t/grocery/", () => { clearTimeout(soon); soon = setTimeout(refresh, 250); });
+        return () => { clearTimeout(soon); w.close(); };
+      }, [watching]);
 
       if (!me || items === null) return html`<div></div>`;
       const isEditor = !!me.is_sfi_editor;
@@ -187,15 +200,15 @@
       function addItem() {
         const item = draft.item.trim();
         if (!item) return;
-        write("api/item", { item, quantity: draft.quantity.trim(), category: draft.category.trim() }).catch(() => {});
+        write("item", { item, quantity: draft.quantity.trim(), category: draft.category.trim() });
         setDraft({ item: "", quantity: "", category: draft.category });   // keep the aisle for a run of adds
       }
-      // Optimistic: flip locally, reconcile from the push — checking off must feel instant.
+      // Optimistic: flip locally, reconcile from the answer — checking off must feel instant.
       function toggle(it) {
         if (!isEditor) return;
         const checked = Number(it.checked) ? 0 : 1;
         setItems((xs) => xs && xs.map((x) => x.id === it.id ? { ...x, checked } : x));
-        write("api/item/" + it.id, { checked }).catch(() => {});
+        write("item/" + it.id, { checked });
       }
       function trash(id) {
         if (armed !== id) {
@@ -207,7 +220,7 @@
         setArmed(null);
         if (armTimer.current) clearTimeout(armTimer.current);
         setItems((xs) => xs && xs.filter((x) => x.id !== id));
-        write("api/item/" + id + "/delete", {}).catch(() => {});
+        write("item/" + id + "/delete", {});
       }
       function clearBought() {
         if (!clearArmed) {
@@ -219,7 +232,7 @@
         setClearArmed(false);
         if (clearTimer.current) clearTimeout(clearTimer.current);
         setItems((xs) => xs && xs.filter((x) => !Number(x.checked)));
-        write("api/clear_checked", {}).catch(() => {});
+        write("clear_checked", {});
       }
 
       // ---- grouping: aisles A→Z, uncategorized last; checked rows sink per group -------
@@ -320,6 +333,7 @@
       `;
     }
 
+    await window.seamside.ready;
     render(html`<${App}/>`, document.body);
   </script>
 </body>

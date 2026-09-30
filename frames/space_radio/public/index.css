@@ -1,6 +1,6 @@
 /* Space Radio — synced shared player. Intentionally tiny chrome: dropdown, transport,
    local volume. Members can drive transport; everyone hears the same stream. Per-user
-   volume + mute are stored in localStorage and never travel through the backend. */
+   volume + mute are kept in this browser and never travel through the backend. */
 
 [hidden] { display: none !important; }
 

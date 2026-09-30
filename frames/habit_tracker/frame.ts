@@ -8,8 +8,13 @@
 //                                           contract: nothing else acts on these rows
 //                                           (docs/schema-contracts.md, "When NOT to write a
 //                                           contract").
-//   view_realtime:  view-collaborative    — marking pushes, so a shared habit fills in on
+//   view_realtime:  view-collaborative    — every write pushes `{ habit_tracker: "habits" }`,
+//                                           which says what to read again and never what
+//                                           it holds, so a shared habit fills in on
 //                                           everyone's grid at once.
+//
+// The page reads no table: the grid comes from GET /api/list, and every write is a route
+// here, gated on who the door says is asking.
 //
 // A DAY IS A STRING, and that is deliberate. The chore chart learned the hard way that
 // deriving a day number from a timestamp invites timezone bugs: a local-midnight value
@@ -19,10 +24,11 @@
 // per completed day — rather than a field on the habit, so the row can't grow without
 // bound and two devices marking different days never collide.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, declareTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { sanitizeText, declareTables } from "@frame-core";
+
+const HABITS = "habits";
+const MARKS = "habit_marks";
 
 const HABITS_SCHEMA = [
   { name: "name",       col_type: "text"    as const, nullable: false, default_val: "" },
@@ -37,12 +43,39 @@ const MARKS_SCHEMA = [
 ];
 
 declareTables([
-  { key: "habits",      title: "Habits",      description: "Habits tracked in this space.", schema: HABITS_SCHEMA },
-  { key: "habit_marks", title: "Habit marks", description: "One row per habit per completed day.", schema: MARKS_SCHEMA },
+  { key: HABITS, title: "Habits",      description: "Habits tracked in this space.", schema: HABITS_SCHEMA },
+  { key: MARKS,  title: "Habit marks", description: "One row per habit per completed day.", schema: MARKS_SCHEMA },
 ]);
 
-type Peer = ReturnType<typeof parsePeerInfo>;
-type WriteResult = { status: number; body: unknown };
+type Row = Record<string, unknown> & { id: string };
+type Schema = typeof HABITS_SCHEMA;
+
+const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+
+const defaults = (schema: Schema) => Object.fromEntries(
+  schema.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),
+);
+const DEFAULTS: Record<string, Record<string, unknown>> = {
+  [HABITS]: defaults(HABITS_SCHEMA),
+  [MARKS]: defaults(MARKS_SCHEMA),
+};
+
+/** Write a row over what it held (a new one from the schema's defaults), stamped. */
+async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await rows(ctx, name).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx, name).upsert({
+    ...(was ?? { ...DEFAULTS[name], _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+function cmp(a: unknown, b: unknown): number {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a ?? "").localeCompare(String(b ?? ""));
+}
 
 const WINDOW_DAYS = 120;   // how much history the grid can ever show
 
@@ -71,9 +104,9 @@ function validDay(v: unknown, todayStr: string): string | null {
   return s;
 }
 
-async function readAll(sfiId: string) {
-  const { rows: hrows } = await table("habits", sfiId).query({ order_by: [{ col: "sort_order" }] });
-  const { rows: mrows } = await table("habit_marks", sfiId).query({ limit: 5000 });
+async function readAll(ctx: Ctx) {
+  const hrows = (await rows(ctx, HABITS).all()).sort((a, b) => cmp(a.sort_order, b.sort_order));
+  const mrows = (await rows(ctx, MARKS).all()).slice(0, 5000);
   const oldest = new Date();
   oldest.setDate(oldest.getDate() - WINDOW_DAYS);
   const cutoff = dayString(oldest.getTime());
@@ -89,53 +122,63 @@ async function readAll(sfiId: string) {
     today: dayString(Date.now()),
     window_days: WINDOW_DAYS,
     habits: hrows.map((h) => ({
-      id: h._row_id,
+      id: h.id,
       name: h.name,
       sort_order: Number(h.sort_order) || 0,
-      days: (byHabit[String(h._row_id)] || []).sort(),
+      days: (byHabit[h.id] || []).sort(),
     })),
   };
 }
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "habits_changed" });
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+
+// deno-lint-ignore no-explicit-any
+async function body(request: Request): Promise<Record<string, any> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+// `op` is the API path with the leading "/api/" stripped.
+async function handleWrite(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<Response> {
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return json({ error: "editors only" }, 403);
 
-  const habits = table("habits", sfiId);
-  const marks = table("habit_marks", sfiId);
+  const habits = rows(ctx, HABITS);
+  const marks = rows(ctx, MARKS);
   const today = dayString(Date.now());
 
-  const ok = async (): Promise<WriteResult> => {
-    notify(sfiId);
-    return { status: 200, body: await readAll(sfiId) };
+  // What changed, never what it holds: each page reads again as whoever it is.
+  const ok = async (): Promise<Response> => {
+    ctx.push({ habit_tracker: "habits" });
+    return json(await readAll(ctx));
   };
 
   if (op === "habit") {
     const name = sanitizeText(v?.name, 80);
-    if (!name) return { status: 400, body: { error: "name required" } };
-    const { rows } = await habits.query({ order_by: [{ col: "sort_order", dir: "desc" }], limit: 1 });
-    const next = rows.length ? (Number(rows[0].sort_order) || 0) + 1 : 0;
-    await habits.upsert(null, { name, sort_order: next, created_ms: Date.now() });
+    if (!name) return json({ error: "name required" }, 400);
+    const all = await habits.all();
+    const next = all.length ? Math.max(...all.map((h) => Number(h.sort_order) || 0)) + 1 : 0;
+    await keep(ctx, HABITS, null, { name, sort_order: next, created_ms: Date.now() });
     return ok();
   }
 
   if (op.startsWith("habit/")) {
     const [id, action] = op.slice("habit/".length).split("/");
-    if (!id || !(await habits.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!id || !(await habits.get(id))) return json({ error: "bad id" }, 400);
     if (action === "delete") {
       // Take the marks with it: an orphaned mark is invisible and would quietly come back
       // to life if a new habit were ever given the same row id.
-      await marks.deleteWhere({ habit_id: id });
+      for (const m of await marks.all()) if (m.habit_id === id) await marks.delete(m.id);
       await habits.delete(id);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
     if (v?.name !== undefined) {
       const name = sanitizeText(v.name, 80);
-      if (name) await habits.upsert(id, { name });
+      if (name) await keep(ctx, HABITS, id, { name });
     }
     return ok();
   }
@@ -145,61 +188,50 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   // tap the same square at once.
   if (op === "mark") {
     const hid = String(v?.habit_id ?? "");
-    if (!hid || !(await habits.get(hid))) return { status: 400, body: { error: "bad habit" } };
+    if (!hid || !(await habits.get(hid))) return json({ error: "bad habit" }, 400);
     const day = validDay(v?.day, today);
-    if (!day) return { status: 400, body: { error: "bad day" } };
+    if (!day) return json({ error: "bad day" }, 400);
 
-    const { rows } = await marks.query({ where: { habit_id: hid, day }, limit: 2 });
+    const found = (await marks.all()).filter((m) => m.habit_id === hid && m.day === day).slice(0, 2);
     const want = !!v?.done;
-    if (want && rows.length === 0) {
-      await marks.upsert(null, { habit_id: hid, day, made_ms: Date.now() });
+    if (want && found.length === 0) {
+      await keep(ctx, MARKS, null, { habit_id: hid, day, made_ms: Date.now() });
     } else if (!want) {
-      for (const r of rows) await marks.delete(String(r._row_id));
+      for (const r of found) await marks.delete(r.id);
     }
     return ok();
   }
 
-  return { status: 404, body: { error: "not found" } };
+  return json({ error: "not found" }, 404);
 }
 
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`habit_tracker: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
+    const editor = ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+    const member = editor || ctx.peer.is_sfi_member;
 
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
+    if (method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    if (pathname === "/api/whoami" && method === "GET") {
+      return json({
+        is_anon:       ctx.peer.is_anon,
+        is_sfi_member: member,
+        is_sfi_editor: editor,
+        is_owner:      ctx.peer.is_owner,
+        user_id:       ctx.peer.user_id,
+        user_name:     ctx.peer.user_name,
+        space_color:   ctx.peer.space_color,
+      });
+    }
 
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+    if (pathname.startsWith("/api/") && (method === "POST" || method === "PUT")) {
+      return handleWrite(ctx, pathname.slice("/api/".length), await body(request));
+    }
 
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (pathname === "/api/list" && method === "GET") return json(await readAll(ctx));
 
-  if (reqPath === "/api/list" && method === "GET") {
-    return jsonReply(replyPort, 200, await readAll(sfiId));
-  }
-
-  return jsonReply(replyPort, 404, { error: "not found" });
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Habit Tracker frame is up and running!");

@@ -1,0 +1,55 @@
+{
+  "tier": "members",
+  "publish": "open",
+  "steps": [
+    {"why": "an event an installed copy left behind", "as": "collaborator", "at": "space", "do": "KV.PUT t/calendar/oldevent1", "body": {"title": "Market day", "date": "2026-10-03", "time": "09:30", "tz": "America/New_York", "dur": 60, "color": "c3", "url": "https://example.com/market", "note": "Bring bags", "recur": null, "_created_at": 5, "_modified_at": 5}, "status": 200},
+    {"why": "a weekly one, made later", "as": "collaborator", "at": "space", "do": "KV.PUT t/calendar/oldevent2", "body": {"title": "Standup", "date": "", "time": "", "tz": "", "dur": 0, "color": "", "url": "", "note": "", "recur": {"days": [1, 3, 5], "start": "2026-09-01", "until": "", "skip": ["2026-09-03"]}, "_created_at": 9, "_modified_at": 9}, "status": 200},
+    {"why": "a row a table tool left with no title", "as": "collaborator", "at": "space", "do": "KV.PUT t/calendar/oldevent3", "body": {"title": "", "date": "2026-10-04", "_created_at": 1, "_modified_at": 1}, "status": 200},
+
+    {"why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["<title>Calendar</title>", "/lib/js/framelib.js"], "lacks": ["<form", "busSend"]},
+    {"why": "a file that is not there is not", "do": "GET {frame}/nope.js", "status": 404},
+
+    {"why": "a stranger is shown the calendar, oldest first, and is nobody", "do": "GET {api}/state", "status": 200, "is": {"/me/is_anon": true, "/me/is_sfi_member": false, "/me/is_sfi_editor": false, "/me/is_owner": false, "/settings": {}, "/events/0": {"id": "oldevent1", "title": "Market day", "date": "2026-10-03", "time": "09:30", "tz": "America/New_York", "dur": 60, "color": "c3", "url": "https://example.com/market", "note": "Bring bags", "recur": null}, "/events/1/id": "oldevent2", "/events/1/recur": {"days": [1, 3, 5], "start": "2026-09-01", "until": "", "skip": ["2026-09-03"]}}, "absent": ["/events/2"]},
+    {"why": "a stranger adds no event", "do": "POST {api}/event", "body": {"event": {"title": "Mine", "date": "2026-10-05"}}, "status": 403, "is": {"/error": "editors only"}},
+    {"why": "changes none", "do": "POST {api}/event", "body": {"event": {"id": "oldevent1", "title": "Mine", "date": "2026-10-05"}}, "status": 403},
+    {"why": "deletes none", "do": "POST {api}/event_delete", "body": {"id": "oldevent1"}, "status": 403, "is": {"/error": "editors only"}},
+    {"why": "the old write path is gone", "do": "POST {frame}/__ui", "body": {"op": "event_delete", "id": "oldevent1"}, "status": 404},
+    {"why": "a stranger writes no row at the door", "do": "KV.PUT t/calendar/x", "body": {"title": "x"}, "status": 403},
+    {"why": "and reads no table there", "do": "KV.LIST t/calendar/", "lacks": ["Market day"]},
+    {"why": "someone signed in and on no roster is a visitor too", "as": "signed", "do": "GET {api}/state", "status": 200, "is": {"/me/is_anon": true, "/me/is_sfi_editor": false, "/events/0/title": "Market day"}},
+    {"why": "and writes nothing", "as": "signed", "do": "POST {api}/event", "body": {"event": {"title": "Mine", "date": "2026-10-05"}}, "status": 403},
+    {"why": "nor deletes", "as": "signed", "do": "POST {api}/event_delete", "body": {"id": "oldevent1"}, "status": 403},
+
+    {"why": "a viewer is a member who may not edit", "as": "viewer", "do": "GET {api}/state", "status": 200, "is": {"/me/is_anon": false, "/me/is_sfi_member": true, "/me/is_sfi_editor": false, "/me/user_name": "Viewer", "/events/1/title": "Standup"}},
+    {"why": "a viewer adds no event", "as": "viewer", "do": "POST {api}/event", "body": {"event": {"title": "Mine", "date": "2026-10-05"}}, "status": 403, "is": {"/error": "editors only"}},
+    {"why": "deletes none", "as": "viewer", "do": "POST {api}/event_delete", "body": {"id": "oldevent1"}, "status": 403},
+    {"why": "nothing was touched", "table": "calendar", "has": ["Market day", "Standup"], "lacks": ["Mine"]},
+
+    {"why": "a collaborator may edit", "as": "collaborator", "do": "GET {api}/state", "is": {"/me/is_sfi_editor": true, "/me/is_owner": false}},
+    {"why": "an event with no title is refused", "as": "collaborator", "do": "POST {api}/event", "body": {"event": {"title": "  ", "date": "2026-10-05"}}, "status": 400, "is": {"/error": "invalid event"}},
+    {"why": "one with no date and no days too", "as": "collaborator", "do": "POST {api}/event", "body": {"event": {"title": "Lost"}}, "status": 400},
+    {"why": "a body that is no JSON too", "as": "collaborator", "do": "POST {api}/event", "body": "nope", "status": 400},
+    {"why": "a collaborator adds an event, cleaned on the way in", "as": "collaborator", "do": "POST {api}/event", "body": {"event": {"title": " Picnic ", "date": "2026-10-10", "time": "12:00", "tz": "Europe/Berlin", "dur": 5000, "color": "c99", "url": "javascript:alert(1)", "note": "By the lake"}, "by": "abc"}, "status": 200, "is": {"/ok": true}, "save": {"new": "/id"}},
+    {"why": "as a row of the space, in the shape installed copies hold", "table": "calendar", "has": ["\"title\":\"Picnic\"", "\"date\":\"2026-10-10\"", "\"time\":\"12:00\"", "\"tz\":\"Europe/Berlin\"", "\"dur\":1440", "\"color\":\"\"", "\"url\":\"\"", "\"note\":\"By the lake\"", "\"recur\":null", "_created_at", "_modified_at"], "lacks": ["javascript", "c99", "\"by\""]},
+    {"why": "an all-day event floats: no zone, no length", "as": "collaborator", "do": "POST {api}/event", "body": {"event": {"title": "Holiday", "date": "2026-10-12", "tz": "Europe/Berlin", "dur": 60}}, "status": 200, "save": {"holiday": "/id"}},
+    {"why": "a weekly one is kept with its days in order and a backwards end dropped", "as": "collaborator", "do": "POST {api}/event", "body": {"event": {"title": "Choir", "date": "2026-10-12", "recur": {"days": [5, 1, 1, 9], "start": "2026-10-01", "until": "2026-09-01", "skip": ["2026-10-05", "soon"]}}}, "status": 200, "save": {"choir": "/id"}},
+    {"why": "everyone reads them, after the old ones", "do": "GET {api}/state", "is": {"/events/2": {"id": "{new}", "title": "Picnic", "date": "2026-10-10", "time": "12:00", "tz": "Europe/Berlin", "dur": 1440, "color": "", "url": "", "note": "By the lake", "recur": null}, "/events/3": {"id": "{holiday}", "title": "Holiday", "date": "2026-10-12", "time": "", "tz": "", "dur": 0, "color": "", "url": "", "note": "", "recur": null}, "/events/4/date": "", "/events/4/recur": {"days": [1, 5], "start": "2026-10-01", "until": "", "skip": ["2026-10-05"]}}},
+
+    {"why": "an old event is changed over the row it was", "as": "collaborator", "do": "POST {api}/event", "body": {"event": {"id": "oldevent1", "title": "Market morning", "date": "2026-10-03", "time": "10:00", "tz": "America/New_York", "dur": 90, "color": "c4", "url": "mailto:stall@example.com", "note": ""}}, "status": 200, "is": {"/id": "oldevent1"}},
+    {"why": "and keeps the day it was made", "table": "calendar", "has": ["\"_created_at\":5", "Market morning", "mailto:stall@example.com"], "lacks": ["Market day", "Bring bags"]},
+    {"why": "and its place in the list", "as": "viewer", "do": "GET {api}/state", "is": {"/events/0/id": "oldevent1", "/events/0/title": "Market morning", "/events/0/dur": 90, "/events/0/color": "c4"}},
+    {"why": "one day of a series is skipped by saving the series", "as": "collaborator", "do": "POST {api}/event", "body": {"event": {"id": "oldevent2", "title": "Standup", "recur": {"days": [1, 3, 5], "start": "2026-09-01", "until": "2026-12-31", "skip": ["2026-09-03", "2026-09-08"]}}}, "status": 200},
+    {"why": "and read back", "do": "GET {api}/state", "is": {"/events/1/recur": {"days": [1, 3, 5], "start": "2026-09-01", "until": "2026-12-31", "skip": ["2026-09-03", "2026-09-08"]}}},
+
+    {"why": "deleting what is not there is no error", "as": "collaborator", "do": "POST {api}/event_delete", "body": {"id": "nosuchevent"}, "status": 200, "is": {"/ok": true}},
+    {"why": "a collaborator deletes an event", "as": "collaborator", "do": "POST {api}/event_delete", "body": {"id": "{holiday}"}, "status": 200},
+    {"why": "and it is gone", "table": "calendar", "has": ["Picnic", "Choir"], "lacks": ["Holiday"]},
+
+    {"why": "the owner may edit", "as": "owner", "do": "GET {api}/state", "status": 200, "is": {"/me/is_anon": false, "/me/is_sfi_member": true}},
+    {"why": "the owner adds an event", "as": "owner", "do": "POST {api}/event", "body": {"event": {"title": "Open house", "date": "2026-11-01"}}, "status": 200, "save": {"open": "/id"}},
+    {"why": "and deletes one", "as": "owner", "do": "POST {api}/event_delete", "body": {"id": "{choir}"}, "status": 200},
+    {"why": "both landed", "table": "calendar", "has": ["Open house"], "lacks": ["Choir"]},
+    {"why": "an unknown route is not found", "as": "owner", "do": "POST {api}/nope", "body": {}, "status": 404},
+    {"why": "a stranger sees what the editors left", "do": "GET {api}/state", "is": {"/events/0/title": "Market morning", "/events/1/title": "Standup", "/events/2/title": "Picnic", "/events/3/title": "Open house"}, "absent": ["/events/4"]}
+  ]
+}

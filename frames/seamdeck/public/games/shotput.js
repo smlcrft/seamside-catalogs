@@ -1,7 +1,7 @@
 // shotput.js — the Shot Put cartridge: game definition + play screen.
 // Pure game rules live in shotput-sim.js (shared with the worker + tests);
 // this file is everything the player sees. Fork this pair to make your own game.
-import { html, useState, useRef } from "../lib/js/framelib.js";
+import { html, useState, useRef } from "/lib/js/framelib.js";
 import { useInput, useTurnRunner, animator, wait } from "../console-kit.js";
 import { MAX_DISTANCE, ATTEMPTS, targetFor, simulate, score } from "./shotput-sim.js";
 
@@ -51,7 +51,7 @@ function PlayScreen({ ctx }) {
   const charging = useRef(false);
 
   const runner = useTurnRunner({
-    turns: ctx.turns, clientId: ctx.clientId, attempts: ATTEMPTS,
+    turns: ctx.turns, playerId: ctx.playerId, attempts: ATTEMPTS,
     replay: async (row, isFinal) => {
       const c = Math.min(1.5, Math.max(0, Number(row.payload && row.payload.charge) || 0));
       setMode("charging"); setResult(null); setCharge(0);
@@ -108,7 +108,7 @@ function PlayScreen({ ctx }) {
     runner.endLive();
   }
 
-  const myTurns = ctx.turns.filter((t) => t.client_id === ctx.clientId).length;
+  const myTurns = ctx.turns.filter((t) => t.player_id === ctx.playerId).length;
   const canCharge = ctx.isMyTurn && myTurns === ctx.attempt && runner.settled();
 
   useInput((name, edge) => {

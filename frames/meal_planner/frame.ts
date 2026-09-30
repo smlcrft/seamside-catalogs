@@ -4,6 +4,8 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members get a live read-only view;
 //                                           space editors get the interactive planner.
+//                                           The page reads the week from GET /api/week,
+//                                           and every write is a route here.
 //   data_storage:   the space's tables   — `meal_plan.table.jsonl` at the space's root.
 //   contracts:      owns `meal_plan` v1; reads `recipes` v1 (picker + ingredient
 //                                           expansion) and inserts into `grocery` v1
@@ -11,18 +13,17 @@
 //                                           space's by name, so a Recipe Box and a Grocery
 //                                           List in the same space share these rows with no
 //                                           setup. See docs/schema-contracts.md.
-//   view_realtime:  view-collaborative    — every mutation calls pushToInstance(sfi_id, …)
-//                                           so every viewer refreshes live.
+//   view_realtime:  view-collaborative    — every plan write pushes `{ meal_planner: "week" }`,
+//                                           which says what to read again and never what it
+//                                           holds. A push reaches only this session's pages,
+//                                           so a member's page also watches the tables.
 //
 // With no recipes in the space the planner is freeform meal titles; with recipes each
 // meal can point at a recipe row (title snapshotted per the contract), and a week's
 // ingredients can be inserted into the grocery list, idempotently.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText,
-  declareTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText } from "@frame-core";
 
 // ----- Contract schemas (verbatim from docs/schema-contracts.md; never vary these) ------
 const MEAL_PLAN_SCHEMA = [
@@ -53,16 +54,64 @@ const GROCERY_SCHEMA = [
 ];
 
 // ----- The space's tables, by contract name -------------------------------------------
+const MEALS = "meal_plan";
+const RECIPES = "recipes";
+const GROCERY = "grocery";
 declareTables([
-  { key: "meal_plan", title: "Meal Plan", description: "Planned meals of this space's week planner.", schema: MEAL_PLAN_SCHEMA },
-  { key: "recipes", title: "Recipes", description: "The recipe box of this space.", schema: RECIPES_SCHEMA },
-  { key: "grocery", title: "Grocery List", description: "The grocery list of this space.", schema: GROCERY_SCHEMA },
+  { key: MEALS, title: "Meal Plan", description: "Planned meals of this space's week planner.", schema: MEAL_PLAN_SCHEMA },
+  { key: RECIPES, title: "Recipes", description: "The recipe box of this space.", schema: RECIPES_SCHEMA },
+  { key: GROCERY, title: "Grocery List", description: "The grocery list of this space.", schema: GROCERY_SCHEMA },
 ]);
 
-type Peer = ReturnType<typeof parsePeerInfo>;
+// ----- Rows -----------------------------------------------------------------------------
+type Row = Record<string, unknown> & { id: string };
+type Column = { name: string; col_type: "text" | "integer"; default_val: string };
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "plan_changed" });
+const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+
+const defaultsOf = (schema: Column[]): Record<string, unknown> =>
+  Object.fromEntries(schema.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]));
+const DEFAULTS: Record<string, Record<string, unknown>> = {
+  [MEALS]: defaultsOf(MEAL_PLAN_SCHEMA),
+  [GROCERY]: defaultsOf(GROCERY_SCHEMA),
+};
+
+/** Write a row over what it held (a new one from the schema's defaults), stamped. */
+async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await rows(ctx, name).get(id) : null;
+  const now = Date.now();
+  return await rows(ctx, name).upsert({
+    ...(was ?? { ...DEFAULTS[name], _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
+
+function cmp(a: unknown, b: unknown): number {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a ?? "").localeCompare(String(b ?? ""));
+}
+
+async function mealsIn(ctx: Ctx, days: string[]): Promise<Row[]> {
+  const wanted = new Set(days);
+  return (await rows(ctx, MEALS).all())
+    .filter((m) => wanted.has(String(m.day_date)))
+    .sort((a, b) => cmp(a.day_date, b.day_date) || cmp(a._created_at, b._created_at));
+}
+
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx) => ctx.push({ meal_planner: "week" });
+
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 // ----- Dates & slots --------------------------------------------------------------------
@@ -94,24 +143,17 @@ function cleanServings(v: unknown): number {
 }
 
 // ----- Writes ---------------------------------------------------------------------------
-// One shared mutation path for BOTH transports: the bus dispatcher below (frame.busSend →
-// onUiMessage, the primary write path) and the HTTP POST arm in onNetworkRequest (kept for
-// older viewers whose framelib has no busSend). `op` is the API path with "api/" stripped;
-// `v` is the parsed payload. Role gates live here so the two entry points can never drift.
-type WriteResult = { status: number; body: unknown };
-
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  const meals = table("meal_plan", sfiId);
-  const recipes = table("recipes", sfiId);
-
+// `op` is the API path with "/api/" stripped; `v` is the parsed payload.
+async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<Response> {
   // Every op below mutates state and is editor-only. Non-members AND Viewer-role
   // members are rejected with the same gate (never gate writes on is_sfi_member —
   // Viewer-role members would slip through).
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return json({ error: "editors only" }, 403);
+  const recipes = rows(ctx, RECIPES);
 
-  const ok = (): WriteResult => {
-    notify(sfiId);
-    return { status: 200, body: { ok: true } };
+  const ok = () => {
+    tell(ctx);
+    return json({ ok: true });
   };
 
   // --- Send ingredients to the space's grocery list -------------------------------------
@@ -119,39 +161,37 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   // Idempotent per the contract's rule: skip when an unchecked row with the same item and
   // source already exists (a re-buy of a checked-off item still goes through).
   if (op === "send_to_grocery") {
-    const grocery = table("grocery", sfiId);
     const days = typeof v?.day_date === "string" && DATE_RE.test(v.day_date)
       ? [v.day_date]
       : typeof v?.week_start === "string" && DATE_RE.test(v.week_start)
         ? weekDays(v.week_start)
         : null;
-    if (!days) return { status: 400, body: { error: "day_date or week_start required" } };
+    if (!days) return json({ error: "day_date or week_start required" }, 400);
 
-    const { rows } = await meals.query({ where: { day_date: { in: days } } });
-    const recipeCache = new Map<string, Record<string, unknown> | null>();
+    const listed = (item: unknown, source: unknown) => `${item}\u0000${source}`;
+    const unchecked = new Set(
+      (await rows(ctx, GROCERY).all()).filter((g) => Number(g.checked) === 0).map((g) => listed(g.item, g.source)),
+    );
+    const recipeCache = new Map<string, Row | null>();
     let sent = 0;
-    for (const m of rows) {
-      const rid = m.recipe_id as string;
+    for (const m of await mealsIn(ctx, days)) {
+      const rid = String(m.recipe_id ?? "");
       if (!rid) continue; // freeform meals have nothing to expand
       if (!recipeCache.has(rid)) recipeCache.set(rid, await recipes.get(rid));
       const recipe = recipeCache.get(rid);
       if (!recipe) continue; // dangling reference — render-side it reads as broken, here it's skipped
       const lines = String(recipe.ingredients_lines ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
       for (const line of lines) {
-        const dup = await grocery.query({ where: { item: line, source: rid, checked: 0 }, limit: 1 });
-        if (dup.rows.length > 0) continue;
-        await grocery.upsert(null, {
+        if (unchecked.has(listed(line, rid))) continue;
+        await keep(ctx, GROCERY, null, {
           item: line, quantity: "", category: "", checked: 0, source: rid, added_ms: Date.now(),
         });
+        unchecked.add(listed(line, rid));
         sent++;
       }
     }
-    // Fire-and-forget over the bus; the push carries the count so the sender can show a
-    // transient "sent n items" note. Every other viewer just refreshes — a Grocery List
-    // in the space hears its own push type, since a push reaches every frame there.
-    pushToInstance(sfiId, { type: "plan_changed", sent });
-    if (sent) pushToInstance(sfiId, { type: "grocery_changed" });
-    return { status: 200, body: { ok: true, sent } };
+    // The plan is as it was; a Grocery List in the space watches its own table.
+    return json({ ok: true, sent });
   }
 
   // --- Meals ----------------------------------------------------------------------------
@@ -160,17 +200,17 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   // contract (an explicit title in the same payload overrides the snapshot).
   if (op === "meal") {
     const dayDate = typeof v?.day_date === "string" && DATE_RE.test(v.day_date) ? v.day_date : "";
-    if (!dayDate) return { status: 400, body: { error: "day_date required" } };
+    if (!dayDate) return json({ error: "day_date required" }, 400);
     let recipeId = "";
     let title = sanitizeText(v?.title, 200);
     if (typeof v?.recipe_id === "string" && v.recipe_id) {
       const r = await recipes.get(v.recipe_id);
-      if (!r) return { status: 400, body: { error: "bad recipe" } };
+      if (!r) return json({ error: "bad recipe" }, 400);
       recipeId = v.recipe_id;
       if (!title) title = sanitizeText(r.title, 200);
     }
-    if (!title) return { status: 400, body: { error: "title required" } };
-    await meals.upsert(null, {
+    if (!title) return json({ error: "title required" }, 400);
+    await keep(ctx, MEALS, null, {
       day_date: dayDate, slot: cleanSlot(v?.slot ?? "dinner"), title,
       recipe_id: recipeId, servings: cleanServings(v?.servings), notes: sanitizeText(v?.notes, 2000),
     });
@@ -179,12 +219,12 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
 
   if (op.startsWith("meal/")) {
     const [id, action] = op.slice("meal/".length).split("/");
-    if (!id || !(await meals.get(id))) return { status: 400, body: { error: "bad id" } };
+    if (!id || !(await rows(ctx, MEALS).get(id))) return json({ error: "bad id" }, 400);
     if (action === "delete") {
-      await meals.delete(id);
+      await rows(ctx, MEALS).delete(id);
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
 
     const patch: Record<string, unknown> = {};
     if (typeof v?.day_date === "string" && DATE_RE.test(v.day_date)) patch.day_date = v.day_date;
@@ -192,7 +232,7 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     if (v?.recipe_id !== undefined) {
       if (typeof v.recipe_id === "string" && v.recipe_id) {
         const r = await recipes.get(v.recipe_id);
-        if (!r) return { status: 400, body: { error: "bad recipe" } };
+        if (!r) return json({ error: "bad recipe" }, 400);
         patch.recipe_id = v.recipe_id;
         // Changing the recipe re-snapshots its title, unless the same patch sets one.
         if (v?.title === undefined) patch.title = sanitizeText(r.title, 200);
@@ -206,97 +246,85 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     }
     if (v?.servings !== undefined) patch.servings = cleanServings(v.servings);
     if (v?.notes !== undefined) patch.notes = sanitizeText(v.notes, 2000);
-    if (Object.keys(patch).length > 0) await meals.upsert(id, patch);
+    if (Object.keys(patch).length > 0) await keep(ctx, MEALS, id, patch);
     return ok();
   }
 
-  return { status: 404, body: { error: "not found" } };
+  return json({ error: "not found" }, 404);
 }
 
-// ----- Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame) --------
-// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; the
-// role gates live inside handleWrite. Denials are logged, not answered — a legitimate
-// client never sends a write it isn't allowed to make.
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`meal_planner: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+// ----- The week -------------------------------------------------------------------------
+// `start` is any ISO date; the served week is always its Monday. No seeding — an empty
+// week is an honest empty week.
+async function week(ctx: Ctx, member: boolean, startParam: string): Promise<Response> {
+  const start = mondayOf(startParam);
+  const days = weekDays(start);
+  const meals = await mealsIn(ctx, days);
+
+  // The recipe index doubles as the picker source and the recipe_ok resolver: a meal's
+  // link is ok iff the id still resolves (dangling references render their snapshot
+  // title with the link affordance dropped, per the contract). A visitor off the roster
+  // is handed only the recipes this week's meals name, which is all their page draws.
+  const named = new Set(meals.map((m) => String(m.recipe_id ?? "")).filter(Boolean));
+  const photoById = new Map<string, string>();
+  const recipeIndex = (await rows(ctx, RECIPES).all())
+    .filter((r) => member || named.has(r.id))
+    .map((r) => {
+      const photo = typeof r.photo === "string" && r.photo.startsWith("data:image/") ? r.photo : "";
+      if (photo) photoById.set(r.id, photo);
+      return {
+        id: r.id, title: String(r.title ?? ""),
+        servings: Number(r.servings) || 0, tags: String(r.tags ?? ""), photo,
+      };
+    })
+    .sort((a, b) => a.title.localeCompare(b.title));
+  const recipeIds = new Set(recipeIndex.map((r) => r.id));
+
+  return json({
+    start, days,
+    meals: meals.map((m) => ({
+      id: m.id, day_date: m.day_date, slot: m.slot, title: m.title,
+      recipe_id: m.recipe_id,
+      recipe_ok: !!(m.recipe_id && recipeIds.has(m.recipe_id as string)),
+      photo: (m.recipe_id && photoById.get(m.recipe_id as string)) || "",
+      servings: m.servings, notes: m.notes,
+    })),
+    recipes: recipeIndex,
+  });
+}
 
 // ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const url = new URL(request.url);
+    const { pathname } = url;
+    const { method } = request;
+    const editor = ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+    const member = editor || ctx.peer.is_sfi_member;
 
-  // Static assets — open to everyone, including anon read-only viewers.
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    // Static assets — open to everyone, including anon read-only viewers.
+    if (method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  // Identity probe — drives which render mode the frontend shows.
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+    // Identity probe — drives which render mode the frontend shows.
+    if (pathname === "/api/whoami" && method === "GET") {
+      return json({
+        is_anon:       ctx.peer.is_anon,
+        is_sfi_member: member,
+        is_sfi_editor: editor,
+        is_owner:      ctx.peer.is_owner,
+        user_id:       ctx.peer.user_id,
+        user_name:     ctx.peer.user_name,
+        space_color:   ctx.peer.space_color,
+      });
+    }
 
-  // Writes — the HTTP arm of the shared write path (see handleWrite above).
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (pathname.startsWith("/api/") && (method === "POST" || method === "PUT")) {
+      return write(ctx, pathname.slice("/api/".length), await body(request));
+    }
 
-  // Read — open to everyone (non-members get a read-only view of the plan).
-  // `start` is any ISO date; the served week is always its Monday. No seeding — an empty
-  // week is an honest empty week.
-  if (reqPath === "/api/week" && method === "GET") {
-    const start = mondayOf(typeof query.start === "string" ? query.start : "");
-    const days = weekDays(start);
-    const meals = table("meal_plan", sfiId);
+    // Read — open to everyone (non-members get a read-only view of the plan).
+    if (pathname === "/api/week" && method === "GET") return week(ctx, member, url.searchParams.get("start") ?? "");
 
-    const { rows } = await meals.query({
-      where: { day_date: { in: days } },
-      order_by: [{ col: "day_date" }, { col: "_created_at" }],
-    });
-
-    // The recipe index doubles as the picker source and the recipe_ok resolver: a meal's
-    // link is ok iff the id still resolves (dangling references render their snapshot
-    // title with the link affordance dropped, per the contract).
-    const photoById = new Map<string, string>();
-    const recipeIndex = (await table("recipes", sfiId).query({})).rows
-      .map((r) => {
-        const photo = typeof r.photo === "string" && r.photo.startsWith("data:image/") ? r.photo : "";
-        if (photo) photoById.set(r._row_id, photo);
-        return {
-          id: r._row_id, title: String(r.title ?? ""),
-          servings: Number(r.servings) || 0, tags: String(r.tags ?? ""), photo,
-        };
-      })
-      .sort((a, b) => a.title.localeCompare(b.title));
-    const recipeIds = new Set(recipeIndex.map((r) => r.id));
-
-    return jsonReply(replyPort, 200, {
-      start, days,
-      meals: rows.map((m) => ({
-        id: m._row_id, day_date: m.day_date, slot: m.slot, title: m.title,
-        recipe_id: m.recipe_id,
-        recipe_ok: !!(m.recipe_id && recipeIds.has(m.recipe_id as string)),
-        photo: (m.recipe_id && photoById.get(m.recipe_id as string)) || "",
-        servings: m.servings, notes: m.notes,
-      })),
-      recipes: recipeIndex,
-    });
-  }
-
-  return jsonReply(replyPort, 404, { error: "not found" });
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Meal Planner frame is up and running!");

@@ -40,7 +40,7 @@ opens the link, and the frame tells them it's private because its own flag defau
 The rule this frame now follows, and the one to follow in new frames:
 
 - If a request reaches the frame, the viewer is allowed to be here. Reads are open.
-- The `parsePeerInfo` flags shape the *view* and gate *writes* — never read access.
+- The `ctx.peer` flags shape the *view* and gate *writes* — never read access.
 - Gate writes on `is_sfi_editor`, never on `is_sfi_member` (Viewer-role members would slip
   through) and never on `!is_anon`.
 - A reduced projection for non-members (fewer columns, identities withheld) is fine: that is

@@ -1,5 +1,4 @@
 import {
-    frame,
     html,
     render,
     useState,
@@ -8,7 +7,7 @@ import {
     useCallback,
     useFramePush,
     applyChannel,
-} from "./lib/js/framelib.js";
+} from "/lib/js/framelib.js";
 import { GAMES, gameById } from "./games/registry.js";
 // The console core knows NO game rules. Games live in ./games/* as
 // self-contained cartridge modules (see games/README.md); the shared input
@@ -80,41 +79,56 @@ function useKeyboard() {
 }
 
 // ===========================================================================
-// Player identity — per-device client_id sent with every request.
+// Player identity — per-device client_id sent with every request, and never
+// shown: the state names players by public id, the first 16 hex of its SHA-256.
 // ===========================================================================
 let CLIENT_ID = null;
+let PLAYER_ID = null;
+async function publicId(id) {
+    const d = new Uint8Array(
+        await crypto.subtle.digest("SHA-256", new TextEncoder().encode(id)),
+    );
+    return [...d.slice(0, 8)]
+        .map((x) => x.toString(16).padStart(2, "0"))
+        .join("");
+}
 async function ensureClientId() {
     if (CLIENT_ID) return CLIENT_ID;
-    let id = await frame.localStorageGetItem("client_id");
+    let id = await window.seamside.prefs.get("client_id");
     if (!id) {
         id =
             (crypto.randomUUID && crypto.randomUUID()) ||
             Date.now().toString(36) +
                 Math.random().toString(36).slice(2);
-        await frame.localStorageSetItem("client_id", id);
+        await window.seamside.prefs.set("client_id", id);
     }
+    PLAYER_ID = await publicId(id);
     CLIENT_ID = id;
     return id;
 }
 
-// Every mutating call carries the caller's client_id.
-// Writes go over the tether (frame.busSend → BusUiToFrame): HTTP POST bodies
-// are dropped on Android (issue #750), the tether carries them everywhere.
-// Fire-and-forget — resulting state arrives via the state_changed push, which
-// is how every screen already renders. Feature-detect: an older viewer build
-// has no busSend — fall back to the HTTP write it was using before.
+// A request to the worker; a refusal throws the worker's own `error`.
+async function api(method, path, body) {
+    const r = await window.seamside.fetch(path, {
+        method,
+        ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    let v = {};
+    try {
+        v = r.json();
+    } catch {
+        /* the status says it */
+    }
+    if (!r.ok) throw new Error(v.error || `${path}: ${r.status}`);
+    return v;
+}
+
+// Every mutating call carries the caller's client_id and is answered; the
+// push brings every other page along.
 async function act(path, body = {}) {
     const cid = await ensureClientId();
-    if (typeof frame.busSend === "function") {
-        frame.busSend({
-            op: path.replace(/^api\//, ""),
-            ...body,
-            client_id: cid,
-        });
-        return {};
-    }
     try {
-        return await frame.api(path, { ...body, client_id: cid });
+        return await api("POST", `/${path}`, { ...body, client_id: cid });
     } catch (e) {
         // Screens recover by refetching; the warn is for people building forks.
         console.warn(`[seamdeck] ${path} failed:`, e);
@@ -249,7 +263,7 @@ function App() {
     const [view, setView] = useState({ screen: "library" });
     useKeyboard();
 
-    // Coalesce refetches: during a race, position beacons fire state_changed a
+    // Coalesce refetches: during a race, position beacons fire a push a
     // few times a second per racer — collapse bursts into one in-flight fetch
     // plus at most one queued follow-up.
     const fetching = useRef(false);
@@ -261,7 +275,7 @@ function App() {
         }
         fetching.current = true;
         try {
-            const r = await frame.apiSafe("api/state");
+            const r = await api("GET", "/api/state");
             setState(r);
         } finally {
             fetching.current = false;
@@ -275,7 +289,10 @@ function App() {
     useEffect(() => {
         ensureClientId().then(refetch);
     }, [refetch]);
-    useFramePush({ state_changed: refetch });
+    // The worker says only that something changed: read the state again.
+    useFramePush((d) => {
+        if (d.seamdeck === "state") refetch();
+    });
 
     // Accent (--ch) follows the space color; the chrome derives from the theme's
     // ink tone in CSS, so the device inverts light/dark with the space theme.
@@ -325,7 +342,7 @@ function Device({ state, view, setView, refetch }) {
     // Leaving a live game you're seated in asks first, via an in-console
     // dialog (never a system modal).
     const [leaveAsk, setLeaveAsk] = useState(null); // null | {sel}
-    const seated = !!(current && current.seats.some((st) => st.client_id === CLIENT_ID));
+    const seated = !!(current && current.seats.some((st) => st.player_id === PLAYER_ID));
 
     const doLeave = useCallback(async () => {
         setLeaveAsk(null);
@@ -469,21 +486,14 @@ function LibraryScreen({ state, setView, refetch }) {
 
     const newLobby = useCallback(
         async (game) => {
-            // Bus writes have no response, so mint the session_id here and
-            // navigate straight to it; the worker seats us under the same id
-            // (HTTP fallback echoes it back). If the create is refused, the
-            // session never appears and Device bounces home after its grace.
-            const sid =
-                (crypto.randomUUID && crypto.randomUUID()) ||
-                Date.now().toString(36) +
-                    Math.random().toString(36).slice(2);
+            // The answer names the session the worker seated us in; a refused
+            // create stays on the library.
             try {
                 const r = await act("api/create_session", {
                     game_id: game.id,
-                    session_id: sid,
                     display_name: state.me.user_name || "",
                 });
-                enter((r && r.session_id) || sid);
+                enter(r.session_id);
             } catch (e) {}
             refetch();
         },
@@ -664,10 +674,10 @@ function LibraryScreen({ state, setView, refetch }) {
 // ---------------------------------------------------------------------------
 function LobbyScreen({ session, state, refetch }) {
     const seats = session.seats;
-    const meId = CLIENT_ID;
-    const mySeat = seats.find((s) => s.client_id === meId);
+    const meId = PLAYER_ID;
+    const mySeat = seats.find((s) => s.player_id === meId);
     const hostNo = seats.length ? seats[0].seat_no : null;
-    const isHost = seats.length > 0 && seats[0].client_id === meId;
+    const isHost = seats.length > 0 && seats[0].player_id === meId;
     const game = gameById(session.game_id) || GAMES[0];
     const sid = session.session_id;
 
@@ -705,7 +715,7 @@ function LobbyScreen({ session, state, refetch }) {
         <div class="seats">
             ${Array.from({ length: 6 }, (_, i) => {
                 const seat = seats.find((s) => s.seat_no === i + 1);
-                const mine = seat && seat.client_id === meId;
+                const mine = seat && seat.player_id === meId;
                 return html` <div
                     key=${i}
                     class=${`seat ${seat ? "filled" : ""} ${mine ? "mine" : ""}`}
@@ -766,10 +776,10 @@ function PlayingScreen({ session, refetch }) {
         !isRace && game && attempt < game.attempts && seats.length
             ? seats[ti % nSeats]
             : null;
-    const isMyTurn = !!(active && active.client_id === CLIENT_ID);
+    const isMyTurn = !!(active && active.player_id === PLAYER_ID);
     const mySeat =
-        seats.find((s) => s.client_id === CLIENT_ID) || null;
-    const myFinished = turns.some((t) => t.client_id === CLIENT_ID);
+        seats.find((s) => s.player_id === PLAYER_ID) || null;
+    const myFinished = turns.some((t) => t.player_id === PLAYER_ID);
 
     const turnLabel = isRace
         ? !mySeat
@@ -797,7 +807,7 @@ function PlayingScreen({ session, refetch }) {
         return html`<div class="boot">unknown game</div>`;
 
     const ctx = {
-        clientId: CLIENT_ID,
+        playerId: PLAYER_ID,
         seed: session.seed || 0,
         seats,
         turns,
@@ -861,9 +871,9 @@ function ResultsScreen({ session, state, refetch }) {
     const { seats, turns } = session;
     const game = gameById(session.game_id) || GAMES[0];
     const sid = session.session_id;
-    const meId = CLIENT_ID;
-    const isHost = seats.length > 0 && seats[0].client_id === meId;
-    const mySeat = seats.find((s) => s.client_id === meId);
+    const meId = PLAYER_ID;
+    const isHost = seats.length > 0 && seats[0].player_id === meId;
+    const mySeat = seats.find((s) => s.player_id === meId);
 
     // Rank by each player's BEST turn of the round (same rule the worker uses
     // for the leaderboard). Game specifics live in the turn's summary string.
@@ -980,7 +990,7 @@ function InitialsEntry({ gameId, refetch }) {
                 .slice(0, 3);
             if (!initials || submitted.current) return;
             submitted.current = true;
-            await frame.localStorageSetItem("initials", initials);
+            await window.seamside.prefs.set("initials", initials);
             await act("api/initials", {
                 initials,
                 game_id: gameId,
@@ -991,7 +1001,7 @@ function InitialsEntry({ gameId, refetch }) {
     );
 
     useEffect(() => {
-        frame.localStorageGetItem("initials").then((saved) => {
+        window.seamside.prefs.get("initials").then((saved) => {
             if (saved) {
                 setVal(saved);
                 submit(saved);
@@ -1041,4 +1051,5 @@ function Leaderboard({ rows }) {
     </div>`;
 }
 
+await window.seamside.ready;
 render(html`<${App} />`, document.getElementById("root"));

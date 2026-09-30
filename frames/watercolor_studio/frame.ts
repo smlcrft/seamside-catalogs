@@ -3,27 +3,27 @@
 //
 // Storage model (one sheet per session of the frame):
 //   - The painting is files of the space, in a folder of its own under "Watercolor Studio/"
-//     (sessionKv `sheet` names it; made at the first stroke): `strokes.json` is what the
-//     frame keeps editing, `painting.png` the picture a person opens anywhere.
+//     (the session's key `sheet` names it; made at the first stroke): `strokes.json` is what
+//     the frame keeps editing, `painting.png` the picture a person opens anywhere.
 //   - strokes.json holds an ordered `strokes` array. Each stroke is a *vector* record — a
 //     brush, a resolved pigment color, a dilution amount, a list of normalized [x,y,width]
 //     points, and an integer `seed`. Every client replays the strokes through the same
 //     seeded watercolor renderer, so the painting is identical on every peer while the wire
 //     payload stays tiny. The page that made a change renders the PNG and hands it back.
-//   - Prefs (title, paper, guide, sheet aspect) are this session's own key (sessionKv `prefs`).
+//   - Prefs (title, paper, guide, sheet aspect) are this session's own `__fc_settings` row
+//     `prefs`, its value JSON under `v`: owner-only, so never a key a collaborator writes.
 //
-// Auth model:
+// Auth model (decided on ctx.peer, who the door proved is asking):
 //   - Anonymous link visitors and Viewer-role members are read-only — they replay the
-//     painting and receive live updates, but no /api/* mutation reaches them.
-//   - Any sfi editor in the space can paint, lift pigment, and remove their own strokes.
+//     painting and follow along, but no /api/* mutation reaches them.
+//   - Any editor in the space can paint, lift pigment, and remove their own strokes.
 //   - Owner-only: change title/paper/guide/aspect, clear the sheet, remove any stroke.
 //
-// Realtime: every successful mutation broadcasts a push to all viewers via pushToInstance.
+// Realtime: a push says what changed (`strokes` or `prefs`), never what it holds; every
+// open page reads /api/state again as whoever it is.
 // ----------------------------------------------------------------------------------------
-import {
-  log, parsePeerInfo, serveFileAtPath, serveHtmlShell, pushToInstance, onUiMessage,
-  jsonReply, parseJsonBody, sanitizeText, sessionKv, spaceFiles,
-} from "@frame-core";
+import type { Ctx, PeerInfo } from "@frame-core";
+import { log, parseJsonBody, sanitizeText } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
 // Types and constants
@@ -67,9 +67,27 @@ const DEFAULT_PREFS: Prefs = {
 // ----------------------------------------------------------------------------------------
 // This session's prefs and sheet
 // ----------------------------------------------------------------------------------------
-async function getPrefs(): Promise<Prefs> {
-  try { return { ...DEFAULT_PREFS, ...JSON.parse((await sessionKv.get("prefs"))?.value || "{}") }; }
-  catch { return { ...DEFAULT_PREFS }; }
+const SETTINGS = "__fc_settings";
+
+async function setPrefs(ctx: Ctx, prefs: Prefs) {
+  const t = ctx.table<Record<string, unknown>>(SETTINGS);
+  const was = await t.get("prefs"), now = Date.now();
+  await t.upsert({ ...(was ?? { _created_at: now }), id: "prefs", v: JSON.stringify(prefs), _modified_at: now });
+}
+
+// A missing row is written on first read, from the `prefs` key an older copy kept or else
+// the defaults, and the key goes: a key written at the door later is never taken up.
+async function getPrefs(ctx: Ctx): Promise<Prefs> {
+  const row = await ctx.table<Record<string, unknown>>(SETTINGS).get("prefs");
+  if (row?.v != null) {
+    try { return { ...DEFAULT_PREFS, ...JSON.parse(String(row.v)) }; } catch { return { ...DEFAULT_PREFS }; }
+  }
+  const old = await ctx.kv.get("prefs");
+  let prefs = { ...DEFAULT_PREFS };
+  try { prefs = { ...DEFAULT_PREFS, ...JSON.parse(old?.value || "{}") }; } catch { /* defaults */ }
+  await setPrefs(ctx, prefs);
+  if (old) await ctx.kv.del("prefs");
+  return prefs;
 }
 
 const FOLDER = "Watercolor Studio";
@@ -80,24 +98,24 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024 - 1024;
 
 // The sheet's folder, or null before the first stroke. `make` picks a fresh one, named for
 // the title (or "Painting"), beside any other session's.
-async function sheetDir(make = false): Promise<string | null> {
-  const kept = (await sessionKv.get("sheet"))?.value;
+async function sheetDir(ctx: Ctx, make = false): Promise<string | null> {
+  const kept = (await ctx.kv.get("sheet"))?.value;
   if (kept) return kept;
   if (!make) return null;
-  const { title } = await getPrefs();
+  const { title } = await getPrefs(ctx);
   const base = (title !== DEFAULT_PREFS.title ? title : "Painting")
     .replace(/[\/\x00-\x1f]/g, " ").replace(/^[.\s]+/, "").trim().slice(0, 60) || "Painting";
-  const taken = new Set((await spaceFiles.list(FOLDER).catch(() => [])).map((e) => e.name));
+  const taken = new Set((await ctx.files.list(FOLDER).catch(() => [])).map((e) => e.name));
   let name = base;
   for (let i = 2; taken.has(name); i++) name = `${base} ${i}`;
   const dir = `${FOLDER}/${name}`;
-  await sessionKv.put("sheet", dir);
+  await ctx.kv.put("sheet", dir);
   return dir;
 }
 
-async function loadPainting(): Promise<Painting> {
-  const dir = await sheetDir();
-  const raw = dir ? await spaceFiles.read(`${dir}/${STROKES}`).catch(() => null) : null;
+async function loadPainting(ctx: Ctx): Promise<Painting> {
+  const dir = await sheetDir(ctx);
+  const raw = dir ? await ctx.files.read(`${dir}/${STROKES}`).catch(() => null) : null;
   if (!raw) return { strokes: [] };
   try {
     const parsed = JSON.parse(new TextDecoder().decode(raw));
@@ -106,21 +124,24 @@ async function loadPainting(): Promise<Painting> {
 }
 
 // False when the sheet no longer fits in one file.
-async function savePainting(p: Painting): Promise<boolean> {
+async function savePainting(ctx: Ctx, p: Painting): Promise<boolean> {
   const text = JSON.stringify(p);
   if (text.length > MAX_FILE_BYTES) return false;
-  await spaceFiles.write(`${await sheetDir(true)}/${STROKES}`, text);
+  await ctx.files.write(`${await sheetDir(ctx, true)}/${STROKES}`, text);
   return true;
 }
 
-// Read-modify-write of the sheet, one at a time per space, so two strokes landing together
-// both survive.
+// Read-modify-write of the sheet, one at a time per session, so two strokes landing
+// together both survive.
 const locks = new Map<string, Promise<unknown>>();
-function serial<T>(sfiId: string, fn: () => Promise<T>): Promise<T> {
-  const run = (locks.get(sfiId) ?? Promise.resolve()).then(fn, fn);
-  locks.set(sfiId, run.catch(() => {}));
+function serial<T>(ctx: Ctx, fn: () => Promise<T>): Promise<T> {
+  const run = (locks.get(ctx.frame) ?? Promise.resolve()).then(fn, fn);
+  locks.set(ctx.frame, run.catch(() => {}));
   return run;
 }
+
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx, what: "strokes" | "prefs") => ctx.push({ watercolor_studio: what });
 
 // ----------------------------------------------------------------------------------------
 // Validation / stroke construction
@@ -148,6 +169,7 @@ function validatePoints(raw: unknown): Point[] | null {
   return out;
 }
 
+// deno-lint-ignore no-explicit-any
 function buildStroke(input: any, peer: { user_id: string; user_name: string }): Stroke | null {
   const brushRaw = String(input?.brush ?? "");
   if (!(VALID_BRUSHES as Set<string>).has(brushRaw)) return null;
@@ -185,34 +207,36 @@ function buildStroke(input: any, peer: { user_id: string; user_name: string }): 
 }
 
 // ----------------------------------------------------------------------------------------
-// Mutations — shared by the HTTP arms and the bus dispatcher. Role gates live here.
+// Mutations. Role gates live here.
 // ----------------------------------------------------------------------------------------
-type MutPeer = ReturnType<typeof parsePeerInfo>;
 type MutResult = { status: number; body: unknown };
+const isEditor = (peer: PeerInfo) => peer.is_sfi_editor || peer.is_owner;
 
-function mutAddStroke(sfiId: string, v: any, peer: MutPeer): Promise<MutResult> {
-  if (!peer.is_sfi_editor) return Promise.resolve({ status: 403, body: { error: "read-only" } });
+// deno-lint-ignore no-explicit-any
+function mutAddStroke(ctx: Ctx, v: any): Promise<MutResult> {
+  if (!isEditor(ctx.peer)) return Promise.resolve({ status: 403, body: { error: "read-only" } });
   if (!v) return Promise.resolve({ status: 400, body: { error: "invalid JSON" } });
-  const stroke = buildStroke(v, peer);
+  const stroke = buildStroke(v, ctx.peer);
   if (!stroke) return Promise.resolve({ status: 400, body: { error: "invalid stroke" } });
-  return serial(sfiId, async () => {
-    const painting = await loadPainting();
+  return serial(ctx, async () => {
+    const painting = await loadPainting(ctx);
     if (painting.strokes.length >= MAX_STROKES) return { status: 409, body: { error: "sheet full" } };
     painting.strokes.push(stroke);
-    if (!(await savePainting(painting))) return { status: 409, body: { error: "sheet full" } };
-    pushToInstance(sfiId, { type: "ws_add", sfi_id: sfiId, stroke, sheet: await sheetDir() });
+    if (!(await savePainting(ctx, painting))) return { status: 409, body: { error: "sheet full" } };
+    tell(ctx, "strokes");
     return { status: 200, body: { ok: true, stroke } };
   });
 }
 
-function mutDeleteStrokes(sfiId: string, v: { ids?: unknown } | null, peer: MutPeer): Promise<MutResult> {
+function mutDeleteStrokes(ctx: Ctx, v: { ids?: unknown } | null): Promise<MutResult> {
   // Editors may remove their own strokes (undo); the owner may remove any.
-  if (!peer.is_sfi_editor) return Promise.resolve({ status: 403, body: { error: "read-only" } });
+  const peer = ctx.peer;
+  if (!isEditor(peer)) return Promise.resolve({ status: 403, body: { error: "read-only" } });
   if (!v || !Array.isArray(v.ids)) return Promise.resolve({ status: 400, body: { error: "ids required" } });
   const idSet = new Set(v.ids.map(String));
   if (idSet.size === 0) return Promise.resolve({ status: 200, body: { ok: true, deleted: [] } });
-  return serial(sfiId, async () => {
-    const painting = await loadPainting();
+  return serial(ctx, async () => {
+    const painting = await loadPainting(ctx);
     const deleted: string[] = [];
     painting.strokes = painting.strokes.filter((s) => {
       if (idSet.has(s.id) && (peer.is_owner || s.created_by_user_id === (peer.user_id || ""))) {
@@ -222,34 +246,33 @@ function mutDeleteStrokes(sfiId: string, v: { ids?: unknown } | null, peer: MutP
       return true;
     });
     if (deleted.length > 0) {
-      await savePainting(painting);
+      await savePainting(ctx, painting);
       // An emptied sheet has no picture; any other is sent again by the page that undid.
-      if (!painting.strokes.length) await spaceFiles.remove(`${await sheetDir()}/${PICTURE}`).catch(() => {});
-      pushToInstance(sfiId, { type: "ws_delete", sfi_id: sfiId, ids: deleted });
+      if (!painting.strokes.length) await ctx.files.remove(`${await sheetDir(ctx)}/${PICTURE}`).catch(() => {});
+      tell(ctx, "strokes");
     }
     return { status: 200, body: { ok: true, deleted } };
   });
 }
 
 // Clearing the sheet removes its files; the next stroke starts them again in the same folder.
-function mutClear(sfiId: string, peer: MutPeer): Promise<MutResult> {
-  if (!peer.is_owner) return Promise.resolve({ status: 403, body: { error: "owner only" } });
-  return serial(sfiId, async () => {
-    const dir = await sheetDir();
-    if (dir) for (const f of [STROKES, PICTURE]) await spaceFiles.remove(`${dir}/${f}`).catch(() => {});
-    pushToInstance(sfiId, { type: "ws_clear", sfi_id: sfiId });
+function mutClear(ctx: Ctx): Promise<MutResult> {
+  if (!ctx.peer.is_owner) return Promise.resolve({ status: 403, body: { error: "owner only" } });
+  return serial(ctx, async () => {
+    const dir = await sheetDir(ctx);
+    if (dir) for (const f of [STROKES, PICTURE]) await ctx.files.remove(`${dir}/${f}`).catch(() => {});
+    tell(ctx, "strokes");
     return { status: 200, body: { ok: true } };
   });
 }
 
 async function mutSettings(
-  sfiId: string,
+  ctx: Ctx,
   v: { title?: unknown; paper?: unknown; guide?: unknown; aspect?: unknown } | null,
-  peer: MutPeer,
 ): Promise<MutResult> {
-  if (!peer.is_owner) return { status: 403, body: { error: "owner only" } };
+  if (!ctx.peer.is_owner) return { status: 403, body: { error: "owner only" } };
   if (!v) return { status: 400, body: { error: "invalid JSON" } };
-  const cur = await getPrefs();
+  const cur = await getPrefs(ctx);
   const title = sanitizeText(v.title, 80) || cur.title;
   const paperRaw = sanitizeText(v.paper, 16);
   const guideRaw = sanitizeText(v.guide, 16);
@@ -260,113 +283,83 @@ async function mutSettings(
     guide: VALID_GUIDES.has(guideRaw) ? guideRaw : cur.guide,
     aspect: VALID_ASPECTS.has(aspectRaw) ? aspectRaw : cur.aspect,
   };
-  await sessionKv.put("prefs", JSON.stringify(next));
-  pushToInstance(sfiId, { type: "ws_prefs", sfi_id: sfiId, prefs: next });
+  await setPrefs(ctx, next);
+  tell(ctx, "prefs");
   return { status: 200, body: { ok: true, prefs: next } };
 }
 
 // The picture of the sheet, rendered by the page that made the last change. `last` is the
 // id of the newest stroke it drew: a picture of an older sheet is refused.
-function mutPicture(sfiId: string, last: string, bytes: Uint8Array, peer: MutPeer): Promise<MutResult> {
-  if (!peer.is_sfi_editor) return Promise.resolve({ status: 403, body: { error: "read-only" } });
+function mutPicture(ctx: Ctx, last: string, bytes: Uint8Array): Promise<MutResult> {
+  if (!isEditor(ctx.peer)) return Promise.resolve({ status: 403, body: { error: "read-only" } });
   const PNG = [0x89, 0x50, 0x4e, 0x47];
   if (bytes.length < 8 || PNG.some((b, i) => bytes[i] !== b)) return Promise.resolve({ status: 415, body: { error: "not a PNG" } });
-  return serial(sfiId, async () => {
-    const { strokes } = await loadPainting();
+  return serial(ctx, async () => {
+    const { strokes } = await loadPainting(ctx);
     const now = strokes.length ? strokes[strokes.length - 1].id : "";
     if (!now || now !== last) return { status: 409, body: { error: "the sheet has moved on" } };
-    await spaceFiles.write(`${await sheetDir(true)}/${PICTURE}`, bytes);
+    await ctx.files.write(`${await sheetDir(ctx, true)}/${PICTURE}`, bytes);
     return { status: 200, body: { ok: true } };
   });
 }
 
 // ----------------------------------------------------------------------------------------
-// BUS DISPATCHER — the frontend's write path (frame.busSend → BusUiToFrame → here).
-// `peer` is the sender's platform-resolved identity, same shape as parsePeerInfo; the
-// role gates live inside the mutation functions. Denials are logged, not answered.
-// ----------------------------------------------------------------------------------------
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  const r =
-    d.op === "stroke/add"      ? await mutAddStroke(sfiId, d, peer)
-    : d.op === "stroke/delete" ? await mutDeleteStrokes(sfiId, d as { ids?: unknown }, peer)
-    : d.op === "clear"         ? await mutClear(sfiId, peer)
-    : d.op === "settings"      ? await mutSettings(sfiId, d as { title?: unknown }, peer)
-    : null;
-  if (r && r.status !== 200) log(`watercolor: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
-
-// ----------------------------------------------------------------------------------------
 // HANDLER
 // ----------------------------------------------------------------------------------------
-self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cookies) => {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
-  // Painting is a "write" action — Viewer-role members and anonymous viewers can watch
-  // the painting build up but cannot lay down or lift pigment.
-  const canEdit = peer.is_sfi_editor;
+const json = (v: unknown, status = 200) => Response.json(v, { status });
 
-  // UI shell. The script is a separate ES module (`<script type="module">`) so it can
-  // import /lib/js/framelib.js, so it is intentionally NOT inlined. CSS is inlined.
-  if (reqPath === "/index.html" && method === "GET") {
-    return serveHtmlShell(replyPort, new URL("./public/index.html", import.meta.url), {
-      peer,
-      inlineCss: ["index.css"],
-    });
-  }
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const url = new URL(request.url);
+    const { pathname } = url;
+    const method = request.method;
+    const peer = ctx.peer;
+    // Painting is a "write" action — Viewer-role members and anonymous viewers can watch
+    // the painting build up but cannot lay down or lift pigment.
+    const canEdit = isEditor(peer);
 
-  // Static assets (index.js/css) don't need an sfi and their requests don't carry ?sfi=.
-  // Serve them before the sfi guard so anonymous viewers aren't 400'd out of the scripts.
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-  }
+    if (!pathname.startsWith("/api/")) {
+      if (method !== "GET") return json({ error: "Not found.", code: "NOT_FOUND" }, 404);
+      return ctx.file(pathname);
+    }
 
-  if (!sfiId) return jsonReply(replyPort, 400, { error: "sfi_id missing" });
+    if (pathname === "/api/state" && method === "GET") {
+      return json({
+        prefs: await getPrefs(ctx),
+        strokes: (await loadPainting(ctx)).strokes,
+        sheet: await sheetDir(ctx),
+        can_edit: canEdit,
+        is_owner: peer.is_owner,
+        color: peer.space_color,
+        me: { user_id: peer.user_id, user_name: peer.user_name || "anon" },
+      });
+    }
 
-  if (reqPath === "/api/state" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      prefs: await getPrefs(),
-      strokes: (await loadPainting()).strokes,
-      sheet: await sheetDir(),
-      can_edit: canEdit,
-      is_owner: peer.is_owner,
-      me: { user_id: peer.user_id, user_name: peer.user_name || "anon" },
-    });
-  }
+    // The picture, for anyone who can see the painting.
+    if (pathname === "/api/picture" && method === "GET") {
+      const dir = await sheetDir(ctx);
+      const png = dir ? await ctx.files.read(`${dir}/${PICTURE}`).catch(() => null) : null;
+      if (!png) return json({ error: "no picture yet" }, 404);
+      return new Response(png as Uint8Array<ArrayBuffer>, { headers: { "content-type": "image/png" } });
+    }
 
-  // The picture, for anyone who can see the painting.
-  if (reqPath === "/api/picture" && method === "GET") {
-    const dir = await sheetDir();
-    const png = dir ? await spaceFiles.read(`${dir}/${PICTURE}`).catch(() => null) : null;
-    if (!png) return jsonReply(replyPort, 404, { error: "no picture yet" });
-    return replyPort.postMessage({ status: 200, body: png, contentType: "image/png" }, [png.buffer as ArrayBuffer]);
-  }
+    // ------- mutations require canEdit (editor) -------
+    if (!canEdit) return json({ error: "read-only" }, 403);
 
-  // ------- mutations require canEdit (sfi editor) -------
-  if (reqPath.startsWith("/api/") && !canEdit) {
-    return jsonReply(replyPort, 403, { error: "read-only" });
-  }
-
-  // HTTP arms kept for API compatibility (older viewers, scripted clients); the frame's
-  // own UI writes over the bus (see the dispatcher above). Same functions, same gates.
-  const arm =
-    method !== "POST" ? null
-    : reqPath === "/api/stroke/add"    ? () => mutAddStroke(sfiId, parseJsonBody<any>(body), peer)
-    : reqPath === "/api/stroke/delete" ? () => mutDeleteStrokes(sfiId, parseJsonBody<{ ids?: unknown }>(body), peer)
-    : reqPath === "/api/clear"         ? () => mutClear(sfiId, peer)
-    : reqPath === "/api/settings"      ? () => mutSettings(sfiId, parseJsonBody<{ title?: unknown }>(body), peer)
-    : reqPath === "/api/picture"       ? () => mutPicture(sfiId, String(query.last || ""), new Uint8Array(body), peer)
-    : null;
-  if (arm) {
-    const r = await arm();
-    return jsonReply(replyPort, r.status, r.body);
-  }
-
-  if (method === "GET") {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-  }
-  replyPort.postMessage({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Not found.", code: "NOT_FOUND" }) });
+    const arm =
+      method !== "POST" ? null
+      : pathname === "/api/stroke/add"    ? async () => mutAddStroke(ctx, parseJsonBody(await request.arrayBuffer()))
+      : pathname === "/api/stroke/delete" ? async () => mutDeleteStrokes(ctx, parseJsonBody<{ ids?: unknown }>(await request.arrayBuffer()))
+      : pathname === "/api/clear"         ? () => mutClear(ctx)
+      : pathname === "/api/settings"      ? async () => mutSettings(ctx, parseJsonBody<{ title?: unknown }>(await request.arrayBuffer()))
+      : pathname === "/api/picture"       ? async () => mutPicture(ctx, url.searchParams.get("last") || "", new Uint8Array(await request.arrayBuffer()))
+      : null;
+    if (arm) {
+      const r = await arm();
+      return json(r.body, r.status);
+    }
+    return json({ error: "Not found.", code: "NOT_FOUND" }, 404);
+  },
 };
 
 log("watercolor studio frame is up.");

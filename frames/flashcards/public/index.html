@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Flashcards</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }
     * { box-sizing: border-box; }
@@ -211,7 +211,16 @@
 <body>
   <div id="app"></div>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "/lib/js/framelib.js";
+
+    // Everything this page knows comes from its own server half, which says why it refused.
+    async function api(path, body) {
+      const r = await window.seamside.fetch("/" + path, body === undefined ? {} : { method: "POST", body: JSON.stringify(body) });
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     // The four answers, and the SM-2 quality each one means. Words rather than numbers,
     // because nobody rates their own recall on a 0-5 scale honestly.
@@ -238,24 +247,19 @@
       const [busy, setBusy] = useState(false);
 
       async function refresh() {
-        const r = await frame.api("api/list").catch(() => null);
+        const r = await api("api/list").catch(() => null);
         if (r && r.decks) setSt(r);
       }
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // Every write is answered; read again after it, and the push brings everyone else along.
+      const write = (path, body) => api(path, body || {}).then(refresh);
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("api/whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ flashcards_changed: refresh });
+      useFramePush((d) => { if (d.flashcards) refresh(); });
 
       const cur = run && st ? st.cards.find((c) => c.id === run.queue[run.at]) : null;
 
@@ -287,9 +291,9 @@
       async function answer(a) {
         if (!cur || busy) return;
         setBusy(true);
-        // The review is a POST, not a bus send: the reply carries the interval this answer
-        // actually produced, and the schedule is the one thing that must not be guessed at.
-        await frame.api("api/review", { card_id: cur.id, quality: a.q }).catch(() => null);
+        // The reply carries the interval this answer actually produced, and the schedule is
+        // the one thing that must not be guessed at.
+        await api("api/review", { card_id: cur.id, quality: a.q }).catch(() => null);
         setBusy(false);
         setRun((r) => {
           if (!r) return r;
@@ -309,7 +313,7 @@
       }
       async function addDeck() {
         const name = await frame.prompt("What is the deck called?", { title: "New deck", okLabel: "Create" });
-        if (name && name.trim()) write("api/deck", { name: name.trim() });
+        if (name && name.trim()) write("api/deck", { name: name.trim() }).catch(() => {});
       }
       async function editDeck(d) {
         if (!isEditor) return;
@@ -322,10 +326,10 @@
         });
         if (what === "rename") {
           const v = await frame.prompt("Deck name", { title: "Rename", defaultValue: d.name, okLabel: "Save" });
-          if (v && v.trim()) write("api/deck/" + d.id, { name: v.trim() });
+          if (v && v.trim()) write("api/deck/" + d.id, { name: v.trim() }).catch(() => {});
         } else if (what === "remove") {
           if (await frame.confirm(`Remove "${d.name}" and its ${d.total} card${d.total === 1 ? "" : "s"}?`, { title: "Deck", okLabel: "Remove" }))
-            write("api/deck/" + d.id + "/delete");
+            write("api/deck/" + d.id + "/delete").catch(() => {});
         }
       }
 
@@ -440,6 +444,7 @@
         </main>`;
     }
 
+    await window.seamside.ready;
     render(html`<${App} />`, document.getElementById("app"));
   </script>
 </body>

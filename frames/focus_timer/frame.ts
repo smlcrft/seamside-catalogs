@@ -8,9 +8,9 @@
 //                                           state, not a collection of rows: there is
 //                                           nothing to list, nothing another frame would
 //                                           want to share. It is this session's own key
-//                                           (`timer` in sessionKv), so two timers in one
+//                                           (`timer` in ctx.kv), so two timers in one
 //                                           space run apart and it travels with the space.
-//   view_realtime:  view-collaborative    — every change calls pushToInstance(sfi_id, …) so
+//   view_realtime:  view-collaborative    — every change pushes `{ focus_timer: "timer" }` so
 //                                           all viewers re-read at once.
 //   settings_scope: settings-per-session  — one timer per session of the frame.
 //
@@ -21,10 +21,8 @@
 // rather than a running deadline, and a device that slept through the end wakes up showing
 // "done" instead of a stale number.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, sessionKv,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 const MIN_MINUTES = 1;
 const MAX_MINUTES = 60;   // one full turn of the dial — the ring is a clock face
@@ -42,17 +40,16 @@ const DEFAULT_SESSION: Session = {
   duration_s: 25 * 60, ends_at_ms: 0, paused_left_s: 0, label: "", started_by: "",
 };
 
-async function getSession(): Promise<Session> {
-  const op = await sessionKv.get("timer");
+async function getSession(ctx: Ctx): Promise<Session> {
+  const op = await ctx.kv.get("timer");
   let saved: Partial<Session> = {};
   try { if (op?.value) saved = JSON.parse(op.value); } catch { /* a bad value reads as the default */ }
   return { ...DEFAULT_SESSION, ...saved };
 }
-async function saveSession(s: Session): Promise<void> {
-  await sessionKv.put("timer", JSON.stringify(s));
+async function saveSession(ctx: Ctx, s: Session): Promise<void> {
+  await ctx.kv.put("timer", JSON.stringify(s));
 }
 
-type Peer = ReturnType<typeof parsePeerInfo>;
 type WriteResult = { status: number; body: unknown };
 
 function clampMinutes(v: unknown): number {
@@ -67,27 +64,24 @@ function view(s: Session) {
   return { ...s, now_ms: Date.now(), max_minutes: MAX_MINUTES, min_minutes: MIN_MINUTES };
 }
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "timer_changed" });
-}
+// What changed, never what it holds: each page reads again as whoever it is.
+const notify = (ctx: Ctx) => ctx.push({ focus_timer: "timer" });
 
 // ----- Writes ---------------------------------------------------------------------------
-// One shared mutation path for BOTH transports: the bus dispatcher (frame.busSend →
-// onUiMessage, the primary write path) and the HTTP POST arm kept for older viewers whose
-// framelib has no busSend. Role gates live here so the two entry points can never drift.
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
+async function handleWrite(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<WriteResult> {
+  const peer = ctx.peer;
   // Driving the timer is a write like any other: a public viewer watches the countdown,
   // they don't start and stop the room's session. Never gate on is_sfi_member — a
   // Viewer-role member would slip through.
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
+  if (!(peer.is_sfi_editor || peer.is_owner)) return { status: 403, body: { error: "editors only" } };
 
-  const s = await getSession();
+  const s = await getSession(ctx);
   const now = Date.now();
   const running = s.ends_at_ms > now;
 
   const ok = async (): Promise<WriteResult> => {
-    await saveSession(s);
-    notify(sfiId);
+    await saveSession(ctx, s);
+    notify(ctx);
     return { status: 200, body: { session: view(s) } };
   };
 
@@ -136,47 +130,48 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
   return { status: 404, body: { error: "not found" } };
 }
 
-// ----- Bus dispatcher — the frontend's write path (frame.busSend → BusUiToFrame) --------
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`focus_timer: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
-
 // ----- Networking -----------------------------------------------------------------------
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
+const json = (v: unknown, status = 200) => Response.json(v, { status });
 
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
   }
+}
 
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
+    const peer = ctx.peer;
 
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  // Read — open to everyone, including anon viewers watching the room's countdown.
-  if (reqPath === "/api/state" && method === "GET") {
-    return jsonReply(replyPort, 200, { session: view(await getSession()) });
-  }
+    if (pathname === "/api/whoami" && method === "GET") {
+      return json({
+        is_anon:       peer.is_anon,
+        is_sfi_member: peer.is_sfi_member,
+        is_sfi_editor: peer.is_sfi_editor || peer.is_owner,
+        is_owner:      peer.is_owner,
+        user_id:       peer.user_id,
+        user_name:     peer.user_name,
+        space_color:   peer.space_color,
+      });
+    }
 
-  return jsonReply(replyPort, 404, { error: "not found" });
+    if (pathname.startsWith("/api/") && (method === "POST" || method === "PUT")) {
+      const r = await handleWrite(ctx, pathname.slice("/api/".length), await body(request));
+      return json(r.body, r.status);
+    }
+
+    // Read — open to everyone, including anon viewers watching the room's countdown.
+    if (pathname === "/api/state" && method === "GET") {
+      return json({ session: view(await getSession(ctx)) });
+    }
+
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Focus Timer frame is up and running!");

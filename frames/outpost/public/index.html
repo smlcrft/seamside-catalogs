@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Outpost</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c6); }          /* frame accent */
     * { box-sizing: border-box; }
@@ -230,7 +230,7 @@
 </head>
 <body>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useCallback, useFramePush, applyChannel } from "./lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useRef, useCallback, useFramePush, applyChannel } from "/lib/js/framelib.js";
 
     const PAGE = 15;
 
@@ -257,26 +257,21 @@
       try { return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); }
       catch { return new Date(ms).toISOString().slice(0, 10); }
     }
-    function withSfi(p) {
-      try {
-        const sfi = new URLSearchParams(location.search).get("sfi");
-        if (sfi && !/[?&]sfi=/.test(p)) return p + (p.includes("?") ? "&" : "?") + "sfi=" + encodeURIComponent(sfi);
-      } catch (_) {}
-      return p;
+    // The worker: a body makes it a POST. Throws the worker's own error.
+    async function api(path, body) {
+      const r = await window.seamside.fetch("/" + path, body === undefined ? {} : { method: "POST", body: JSON.stringify(body) });
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
     }
 
-    // Writes ride the tether (frame.busSend → BusUiToFrame): HTTP POST bodies are dropped
-    // on Android (issue #750). Fire-and-forget — resulting state arrives via the
-    // outpost_changed push, which is how every viewer (sender included) already renders
-    // changes. Feature-detect: an older host's framelib has no busSend — fall back to the
-    // HTTP write it was using before. Reads stay frame.api GETs; media upload stays HTTP.
-    const write = (path, body) => {
-      if (typeof frame.busSend === "function") {
-        frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-        return Promise.resolve({});
-      }
-      return frame.api(path, body);
-    };
+    // A picture, clip or file the worker serves, as bytes: a sandboxed page has no origin
+    // for <img src> to load from.
+    async function mediaBlob(post, m) {
+      const r = await window.seamside.fetch("/api/media/" + post.id + "/" + m.id);
+      return r.ok ? new Blob([r.bytes()], { type: r.type || m.mime }) : null;
+    }
 
     // Turn bare URLs in post text into clickable links routed through the host's
     // open-in-browser confirm flow (frames can't navigate the top window themselves).
@@ -327,18 +322,16 @@
           const bodyReq = { text, kind };
           if (pollOn && pollOpts.length >= 2) bodyReq.poll_options = pollOpts;
           if (files.length === 0) {
-            // No attachments — bus write; the outpost_changed push refreshes the feed.
-            await write("api/post", bodyReq).catch(() => null);
+            await api("api/post", bodyReq).catch(() => null);
           } else {
-            // Attachments need the new post's id for the (binary, HTTP-only) uploads,
-            // so this flow stays on the HTTP arm.
-            const res = await frame.api("api/post", { ...bodyReq, media_count: files.length }).catch((e) => ({ error: e.message }));
+            // Attachments need the new post's id for their uploads.
+            const res = await api("api/post", { ...bodyReq, media_count: files.length }).catch((e) => ({ error: e.message }));
             if (!res || res.error || !res.post_id) { await frame.alert(res?.error || "Could not post."); return; }
             for (const f of files) {
-              const buf = await f.arrayBuffer();
-              const q = "api/post/" + res.post_id + "/media?name=" + encodeURIComponent(f.name) + "&mime=" + encodeURIComponent(f.type || "application/octet-stream");
-              const r = await frame.fetch(withSfi(q), { method: "POST", body: buf });
-              if (!r.ok) { const m = await r.json().catch(() => ({})); await frame.alert(m.error || "An attachment failed to upload."); }
+              const buf = new Uint8Array(await f.arrayBuffer());
+              const q = "/api/post/" + res.post_id + "/media?name=" + encodeURIComponent(f.name) + "&mime=" + encodeURIComponent(f.type || "application/octet-stream");
+              const r = await window.seamside.fetch(q, { method: "POST", body: buf });
+              if (!r.ok) { let m = {}; try { m = r.json(); } catch { /* no answer */ } await frame.alert(m.error || "An attachment failed to upload."); }
             }
           }
           setText(""); setKind("thought"); setFiles([]); setPollOn(false); setOpts(["", ""]);
@@ -400,6 +393,23 @@
         </div>`;
     }
 
+    // ---- An image, clip or sound, drawn from the bytes the worker hands over ------------
+    function Shown({ post, m }) {
+      const [src, setSrc] = useState(null);
+      useEffect(() => {
+        let gone = false, made = null;
+        mediaBlob(post, m).then((b) => {
+          if (gone || !b) return;
+          made = URL.createObjectURL(b); setSrc(made);
+        }).catch(() => {});
+        return () => { gone = true; if (made) URL.revokeObjectURL(made); };
+      }, [post.id, m.id]);
+      if (!src) return null;
+      if (m.is_image) return html`<img src=${src} alt=${m.name} />`;
+      if (m.is_video) return html`<video src=${src} controls preload="metadata"></video>`;
+      return html`<audio src=${src} controls preload="metadata"></audio>`;
+    }
+
     // ---- A single post ------------------------------------------------------------------
     function PostCard({ post, canVote, onSignIn, onPatch, onRemove }) {
       const [armed, setArmed] = useState(false);
@@ -410,26 +420,28 @@
       async function del() {
         if (!armed) { setArmed(true); if (armRef.current) clearTimeout(armRef.current); armRef.current = setTimeout(() => setArmed(false), 2500); return; }
         setArmed(false); if (armRef.current) clearTimeout(armRef.current);
-        const r = await write("api/delete/" + post.id, {}).catch(() => null);
-        if (r && r.ok) onRemove(post.id);   // HTTP fallback only — the bus path removes via the push
+        const r = await api("api/delete/" + post.id, {}).catch(() => null);
+        if (r && r.ok) onRemove(post.id);
       }
       async function vote(i) {
         if (!canVote) return;
-        // Bus path: the push re-fetches the on-screen range in place, so scroll holds.
-        // HTTP fallback returns just this post — patch it in place.
-        const r = await write("api/vote", { post_id: post.id, option: i }).catch(() => null);
+        // The answer is just this post — patched in place, so scroll holds.
+        const r = await api("api/vote", { post_id: post.id, option: i }).catch(() => null);
         if (r && r.post) onPatch(r.post);
       }
       async function download(m) {
         try {
-          const res = await frame.fetch(withSfi("api/media/" + post.id + "/" + m.id));
-          if (!res.ok) { await frame.alert("Download failed."); return; }
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url; a.download = m.name;
-          document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 4000);
+          const blob = await mediaBlob(post, m);
+          if (!blob) { await frame.alert("Download failed."); return; }
+          // A seated frame cannot start a download itself; the viewer saves it. A page open
+          // at its own address has no viewer, and saves it as any page does.
+          await window.seamside.saveFile(m.name, blob).catch(() => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = m.name;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 4000);
+          });
         } catch (_) { await frame.alert("Download failed."); }
       }
 
@@ -454,10 +466,7 @@
           ${post.media.length ? html`
             <div class="media">
               ${post.media.map((m) => {
-                const src = withSfi("api/media/" + post.id + "/" + m.id);
-                if (m.is_image) return html`<img src=${src} alt=${m.name} loading="lazy" key=${m.id} />`;
-                if (m.is_video) return html`<video src=${src} controls preload="metadata" key=${m.id}></video>`;
-                if (m.is_audio) return html`<audio src=${src} controls preload="metadata" key=${m.id}></audio>`;
+                if (m.is_image || m.is_video || m.is_audio) return html`<${Shown} post=${post} m=${m} key=${m.id} />`;
                 return html`<a class="filelink" key=${m.id} onClick=${() => download(m)}>
                   <i class="ph-light ph-file-arrow-down"></i><span>${m.name}</span> <small style="color:var(--os-text-muted)">${fmtSize(m.size)}</small></a>`;
               })}
@@ -541,7 +550,8 @@
       useEffect(() => {
         let cancelled = false;
         (async () => {
-          const s = await frame.api("api/state?limit=" + PAGE).catch(() => null);
+          await window.seamside.ready;
+          const s = await api("api/state?limit=" + PAGE).catch(() => null);
           if (!cancelled && s) applyFirstPage(s);
         })();
         return () => { cancelled = true; };
@@ -552,7 +562,7 @@
         if (loadingRef.current || !hasMoreRef.current || nextBeforeRef.current == null) return;
         loadingRef.current = true; setLoadingMore(true);
         try {
-          const r = await frame.api("api/posts?before=" + nextBeforeRef.current + "&limit=" + PAGE).catch(() => null);
+          const r = await api("api/posts?before=" + nextBeforeRef.current + "&limit=" + PAGE).catch(() => null);
           if (r) {
             setPosts((prev) => {
               const seen = new Set(prev.map((p) => p.id));
@@ -569,10 +579,11 @@
       // updated vote counts without dropping loaded pages or jumping the reader's scroll.
       const reload = useCallback(async () => {
         const limit = Math.max(PAGE, postsRef.current.length);
-        const s = await frame.api("api/state?limit=" + limit).catch(() => null);
+        const s = await api("api/state?limit=" + limit).catch(() => null);
         if (s) applyFirstPage(s);
       }, []);
-      useFramePush({ outpost_changed: reload });
+      // A push says only that something changed; read the page again as whoever this is.
+      useFramePush((d) => { if (d && d.outpost) reload(); });
 
       // Auto-load older posts as the sentinel scrolls into view (manual button is the fallback).
       useEffect(() => {
@@ -602,8 +613,8 @@
       }
 
       async function savePrefs(next) {
-        setMeta((cur) => (cur ? { ...cur, prefs: next } : cur));   // optimistic; the push confirms
-        const r = await write("api/prefs", next).catch(() => null);
+        setMeta((cur) => (cur ? { ...cur, prefs: next } : cur));   // optimistic; the answer confirms
+        const r = await api("api/prefs", next).catch(() => null);
         if (r && r.prefs) setMeta((cur) => (cur ? { ...cur, prefs: r.prefs } : cur));
       }
 

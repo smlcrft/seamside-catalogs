@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gift List</title>
-  <link rel="stylesheet" href="dyn/frame-prefs.css">
+  <link rel="stylesheet" href="/dyn/frame-prefs.css">
   <style>
     :root { --ch: var(--os-c1); }   /* follows the space channel at runtime via applyChannel */
     * { box-sizing: border-box; }
@@ -186,7 +186,17 @@
 <body>
   <div id="app"></div>
   <script type="module">
-    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "./lib/js/framelib.js";
+    import { frame, html, render, useState, useEffect, useRef, useFramePush, applyChannel } from "/lib/js/framelib.js";
+
+    // Everything drawn here comes from the frame's own server half, which hands each
+    // visitor only what they may see; every act is checked there.
+    async function api(path, body, method = body ? "POST" : "GET") {
+      const r = await window.seamside.fetch("/" + path, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+      let v = {};
+      try { v = r.json(); } catch { /* the status says it */ }
+      if (!r.ok) throw new Error(v.error || "Something went wrong. Try again.");
+      return v;
+    }
 
     // A person's colour must be the SAME on every device, so it is derived from the name
     // rather than handed out in arrival order. 12 channels, the platform's own palette.
@@ -215,7 +225,7 @@
       const asked = useRef(false);
 
       async function refresh() {
-        const r = await frame.api("api/list").catch(() => null);
+        const r = await api("api/list").catch(() => null);
         if (!r) return;
         if (r.me_name != null) setMeName(r.me_name);
         setBound(r.bound || null);
@@ -223,7 +233,7 @@
         if (!asked.current && r.can_bind) { asked.current = true; offerBinding(r.bound || null); }
       }
       async function bind(list) {
-        await frame.api("api/bind", { list }).catch((e) => frame.alert(String(e.message || e), { title: "Could not use that list" }));
+        await api("api/bind", { list }).catch((e) => frame.alert(String(e.message || e), { title: "Could not use that list" }));
         refresh();
       }
       // On first load, for an editor: a table the session was opened on, else a choice.
@@ -259,21 +269,17 @@
         if (!s && names.includes("wishes")) return frame.alert("This space already has its plain wish list. Give the new one a name.", { title: "New list" });
         bind(s ? s + ".wishes" : "wishes");
       }
-      const write = (path, body) => {
-        if (typeof frame.busSend === "function") {
-          frame.busSend({ op: path.replace(/^api\//, ""), ...(body || {}) });
-          return Promise.resolve({});
-        }
-        return frame.api(path, body);
-      };
+      // The answer is the list as it now stands for this person; the push brings everyone else along.
+      const write = (path, body) => api(path, body).then((r) => { if (r.wishes) setWishes(r.wishes); })
+        .catch(() => refresh());
       useEffect(() => {
-        frame.api("api/whoami").then((m) => {
+        api("api/whoami").then((m) => {
           if (m && m.space_color) applyChannel(document.documentElement, m.space_color);
           setMe(m);
         }).catch(() => setMe({}));
         refresh();
       }, []);
-      useFramePush({ wishes_changed: refresh });
+      useFramePush((d) => { if (d.gift_list === "wishes") refresh(); });
 
       if (!me || wishes === null) return html`<div></div>`;
       const isEditor = !!me.is_sfi_editor;
@@ -282,16 +288,16 @@
       function addWish() {
         const item = draft.item.trim();
         if (!item) return;
-        write("api/wish", { item, for_who: draft.for_who.trim() }).catch(() => {});
+        write("api/wish", { item, for_who: draft.for_who.trim() });
         setDraft({ item: "", for_who: draft.for_who });   // keep "for" for a run of adds
       }
       function claim(w) {
-        write("api/wish/" + w.id + (w.claimed_by_me ? "/unclaim" : "/claim"), {}).catch(() => {});
+        write("api/wish/" + w.id + (w.claimed_by_me ? "/unclaim" : "/claim"), {});
       }
       // The list says claimed but who was lost: nobody can prove it is theirs, so an editor may let it go.
       async function release(w) {
         if (await frame.confirm("Someone claimed this, but who is no longer known here. Let it go so it can be claimed again?",
-          { title: "Release claim", okLabel: "Let it go" })) write("api/wish/" + w.id + "/unclaim", {}).catch(() => {});
+          { title: "Release claim", okLabel: "Let it go" })) write("api/wish/" + w.id + "/unclaim", {});
       }
       function trash(w) {
         if (armed !== w.id) {
@@ -303,7 +309,7 @@
         setArmed(null);
         if (armTimer.current) clearTimeout(armTimer.current);
         setWishes((xs) => xs && xs.filter((x) => x.id !== w.id));
-        write("api/wish/" + w.id + "/delete", {}).catch(() => {});
+        write("api/wish/" + w.id + "/delete", {});
       }
       function openLink(url) {
         // The host asks the user before anything leaves the sandbox; if this build has no
@@ -415,6 +421,7 @@
         </main>`;
     }
 
+    await window.seamside.ready;
     render(html`<${App} />`, document.getElementById("app"));
   </script>
 </body>

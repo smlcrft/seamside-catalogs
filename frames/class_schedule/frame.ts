@@ -3,10 +3,13 @@
 //
 // Design axes:
 //   privacy:        privacy-public-view  — a roommate or study group reads the same week;
-//                                           space editors set it.
+//                                           space editors set it. The page reads no table:
+//                                           the week comes from GET /api/list, and every
+//                                           write is a route here, decided on ctx.peer.
 //   data_storage:   the space's table   — `class_schedule.table.jsonl` at the space's root,
 //                                           synced with it; no contract (docs/schema-contracts.md).
-//   view_realtime:  view-collaborative    — every change pushes.
+//   view_realtime:  view-collaborative    — every change pushes `{ class_schedule: "classes" }`,
+//                                           which says what to read again, never what it holds.
 //   settings_scope: settings-per-sfi
 //
 // A TIMETABLE IS ONE ROW PER MEETING, not one row per class with a list of days. "Maths,
@@ -19,10 +22,8 @@
 // timezone conversion happens anywhere: a 9am class is at 9am on the wall, and converting
 // it through UTC would move it for the very roommate the frame is shared with.
 // ----------------------------------------------------------------------------------------
-import {
-  log, serveFileAtPath, jsonReply, parseJsonBody, parsePeerInfo, onUiMessage,
-  pushToInstance, sanitizeText, declareTables, ensureTables, table,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { declareTables, sanitizeText } from "@frame-core";
 
 const TABLE = "class_schedule";
 
@@ -39,8 +40,25 @@ declareTables([
   { key: TABLE, title: "Classes", description: "Weekly class meetings for this space.", local: true, schema: CLASSES_SCHEMA },
 ]);
 
-type Peer = ReturnType<typeof parsePeerInfo>;
-type WriteResult = { status: number; body: unknown };
+type Row = Record<string, unknown> & { id: string };
+
+const classes = (ctx: Ctx) => ctx.table<Record<string, unknown>>(TABLE);
+
+const DEFAULTS: Record<string, unknown> = Object.fromEntries(
+  CLASSES_SCHEMA.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),
+);
+
+/** Write a row over what it held (a new one from the schema's defaults), stamped. */
+async function keep(ctx: Ctx, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await classes(ctx).get(id) : null;
+  const now = Date.now();
+  return await classes(ctx).upsert({
+    ...(was ?? { ...DEFAULTS, _created_at: now }),
+    ...values,
+    ...(id ? { id } : {}),
+    _modified_at: now,
+  });
+}
 
 const clampInt = (v: unknown, lo: number, hi: number, dflt: number) => {
   const n = Math.round(Number(v));
@@ -56,20 +74,9 @@ function normalizeTimes(startRaw: unknown, endRaw: unknown): { start: number; en
   return { start, end };
 }
 
-async function readyTables(peer: Peer): Promise<boolean> {
-  const quiet = { ...peer, is_owner: false } as Peer;
-  let r = ensureTables(quiet);
-  if (!r.byKey[TABLE]) {
-    try { await table(TABLE, peer.sfi_id).query({ limit: 1 }); } catch (e) { log(`class_schedule: ensure failed: ${e}`); }
-    r = ensureTables(quiet);
-  }
-  return !!r.byKey[TABLE];
-}
-
-async function listRows(sfiId: string) {
-  const { rows } = await table(TABLE, sfiId).query({ limit: 1000 });
-  return rows.map((r) => ({
-    id: r._row_id,
+async function listRows(ctx: Ctx) {
+  return (await classes(ctx).all()).map((r) => ({
+    id: r.id,
     title: r.title,
     day: clampInt(r.day, 0, 6, 0),
     start_min: clampInt(r.start_min, 0, 1439, 540),
@@ -79,28 +86,37 @@ async function listRows(sfiId: string) {
   })).sort((a, b) => a.day - b.day || a.start_min - b.start_min);
 }
 
-function notify(sfiId: string) {
-  pushToInstance(sfiId, { type: "schedule_changed" });
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx) => ctx.push({ class_schedule: "classes" });
+
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+
+async function body(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const v = JSON.parse(await request.text());
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
-async function handleWrite(sfiId: string, op: string, v: Record<string, unknown> | null, peer: Peer): Promise<WriteResult> {
-  if (!(await readyTables(peer))) return { status: 503, body: { error: "table not ready" } };
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  const t = table(TABLE, sfiId);
-  const ok = async (): Promise<WriteResult> => { notify(sfiId); return { status: 200, body: { ok: true } }; };
+// `op` is the API path with the leading "/api/" stripped.
+async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<Response> {
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return json({ error: "editors only" }, 403);
+  const ok = () => { tell(ctx); return json({ ok: true }); };
 
   if (op === "class") {
     const title = sanitizeText(v?.title, 120);
-    if (!title) return { status: 400, body: { error: "name it" } };
+    if (!title) return json({ error: "name it" }, 400);
     // One call, several days: the frontend lets you tick Mon/Wed/Fri and we write the
     // three meetings, so the tidy-looking model never has to exist.
     const daysIn = Array.isArray(v?.days) ? v!.days as unknown[] : [v?.day];
     const days = [...new Set(daysIn.map((d) => clampInt(d, 0, 6, 0)))];
-    if (!days.length) return { status: 400, body: { error: "pick at least one day" } };
+    if (!days.length) return json({ error: "pick at least one day" }, 400);
     const { start, end } = normalizeTimes(v?.start_min, v?.end_min);
     const place = sanitizeText(v?.place, 80);
     for (const day of days) {
-      await t.upsert(null, { title, day, start_min: start, end_min: end, place, note: "" });
+      await keep(ctx, null, { title, day, start_min: start, end_min: end, place, note: "" });
     }
     return ok();
   }
@@ -109,16 +125,18 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     const [id, action] = op.slice("class/".length).split("/");
     // Fetch once and keep it: the row is read three more times below, and re-fetching it
     // each time is both a round trip and three more places to forget the null check.
-    const row = id ? await t.get(id) : null;
-    if (!id || !row) return { status: 400, body: { error: "bad id" } };
-    if (action === "delete") { await t.delete(id); return ok(); }
+    const row = id ? await classes(ctx).get(id) : null;
+    if (!id || !row) return json({ error: "bad id" }, 400);
+    if (action === "delete") { await classes(ctx).delete(id); return ok(); }
     if (action === "delete_all") {
       // Drop every meeting of the same class — "I dropped this course" is one action, not
       // three deletions with the same name.
-      await t.deleteWhere({ title: String(row.title) });
+      for (const r of await classes(ctx).all()) {
+        if (String(r.title) === String(row.title)) await classes(ctx).delete(r.id);
+      }
       return ok();
     }
-    if (action) return { status: 404, body: { error: "not found" } };
+    if (action) return json({ error: "not found" }, 404);
 
     const patch: Record<string, unknown> = {};
     if (v?.title !== undefined) { const s = sanitizeText(v.title, 120); if (s) patch.title = s; }
@@ -137,59 +155,45 @@ async function handleWrite(sfiId: string, op: string, v: Record<string, unknown>
     if (v?.apply_all && typeof patch.title === "string") {
       const was = String(row.title);
       if (was && was !== patch.title) {
-        const { rows } = await t.query({ limit: 1000 });
-        for (const r of rows) {
-          if (r._row_id !== id && String(r.title) === was) await t.upsert(r._row_id, { title: patch.title });
+        for (const r of await classes(ctx).all()) {
+          if (r.id !== id && String(r.title) === was) await keep(ctx, r.id, { title: patch.title });
         }
       }
     }
-    if (Object.keys(patch).length) await t.upsert(id, patch);
+    if (Object.keys(patch).length) await keep(ctx, id, patch);
     return ok();
   }
 
-  return { status: 404, body: { error: "not found" } };
+  return json({ error: "not found" }, 404);
 }
 
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (typeof d.op !== "string") return;
-  const r = await handleWrite(sfiId, d.op, d, peer);
-  if (r.status !== 200) log(`class_schedule: bus op ${d.op} → ${r.status} (${JSON.stringify(r.body)})`);
-});
+export default {
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const editor = ctx.peer.is_sfi_editor || ctx.peer.is_owner;
+    const member = editor || ctx.peer.is_sfi_member;
 
-self.onNetworkRequest = async function (replyPort, reqPath, method, headers, query, body, cookies) {
-  const peer = parsePeerInfo(query, cookies);
-  const sfiId = peer.sfi_id;
+    if (request.method === "GET" && !pathname.startsWith("/api/")) return ctx.file(pathname);
 
-  if (method === "GET" && !reqPath.startsWith("/api/")) {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url), headers);
-  }
+    if (pathname === "/api/whoami" && request.method === "GET") {
+      return json({
+        is_anon:       ctx.peer.is_anon,
+        is_sfi_member: member,
+        is_sfi_editor: editor,
+        is_owner:      ctx.peer.is_owner,
+        user_id:       ctx.peer.user_id,
+        user_name:     ctx.peer.user_name,
+        space_color:   ctx.peer.space_color,
+      });
+    }
 
-  if (reqPath === "/api/whoami" && method === "GET") {
-    return jsonReply(replyPort, 200, {
-      is_anon:       peer.is_anon,
-      is_sfi_member: peer.is_sfi_member,
-      is_sfi_editor: peer.is_sfi_editor,
-      is_owner:      peer.is_owner,
-      user_id:       peer.user_id,
-      user_name:     peer.user_name,
-      space_color:   peer.space_color,
-    });
-  }
+    if (pathname.startsWith("/api/") && (request.method === "POST" || request.method === "PUT")) {
+      return write(ctx, pathname.slice("/api/".length), await body(request));
+    }
 
-  if (reqPath.startsWith("/api/") && (method === "POST" || method === "PUT")) {
-    const r = await handleWrite(sfiId, reqPath.slice("/api/".length), parseJsonBody<Record<string, unknown>>(body), peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    // Read — open to everyone who reaches the frame.
+    if (pathname === "/api/list" && request.method === "GET") return json({ classes: await listRows(ctx) });
 
-  if (!(await readyTables(peer))) return jsonReply(replyPort, 503, { error: "table not ready" });
-
-  if (reqPath === "/api/list" && method === "GET") {
-    return jsonReply(replyPort, 200, { classes: await listRows(sfiId) });
-  }
-
-  return jsonReply(replyPort, 404, { error: "not found" });
+    return json({ error: "not found" }, 404);
+  },
 };
-
-log("Class Schedule frame is up and running!");

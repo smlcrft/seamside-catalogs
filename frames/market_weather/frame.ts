@@ -1,8 +1,11 @@
 // ----------------------------------------------------------------------------------------
 // Market Weather — a turnout forecaster for outdoor commerce. Each session's location and
-// events are its own `prefs` key (sessionKv), so two markets in one space keep their own.
+// events are its own `__fc_settings` row `prefs`, so two markets in one space keep their own.
 // Open-Meteo is hit at most once every 15 minutes per location, shared by every space
-// pointing at the same place.
+// pointing at the same place; `start` keeps each session's forecast fresh on that clock
+// with nobody looking at the page.
+//
+// Private: every /api route refuses whoever is not on the space's roster.
 //
 // For each of the next 72 hours we compute a composite "expected turnout" score in
 // [0..100] from independent factors that each return a score in [-1..+1]:
@@ -28,13 +31,10 @@
 // the bold composite line on top of faint per-factor strips so a vendor can read at a
 // glance both "what should I expect" and "why is the curve dipping there".
 // ----------------------------------------------------------------------------------------
-import {
-  log, parsePeerInfo, serveFileAtPath, serveHtmlShell,
-  jsonReply, parseJsonBody, sanitizeText, pushToInstance, onUiMessage,
-  sessionKv,
-} from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
-// ----- Per-session preferences (the session's `prefs` key) ------------------------------
+// ----- Per-session preferences (the session's `__fc_settings` row `prefs`) ---------------
 // A WeeklyEvent is a recurring window (one day-of-week + a start→end time) for which
 // View A computes turnout stats whenever the next occurrence falls inside the 72-hour
 // forecast horizon. Names are user-given (e.g., "Baking Day").
@@ -71,9 +71,30 @@ function sanitizeEvent(v: unknown): WeeklyEvent | null {
   return { id, name, day_of_week, start_hh, start_mm, end_hh, end_mm };
 }
 
-async function getPrefs(): Promise<Prefs> {
+// The prefs are the `__fc_settings` row `prefs`, JSON under `v`: no wire serves it. An older
+// copy kept them in the session's `prefs` key, which anyone reaching the frame reads at the
+// door; a read that finds no row moves that key into it and deletes the key.
+const SETTINGS = "__fc_settings";
+
+async function keepPrefs(ctx: Ctx, v: string): Promise<void> {
+  const was = await ctx.table(SETTINGS).get("prefs");
+  const now = Date.now();
+  await ctx.table(SETTINGS).upsert({ ...(was ?? { _created_at: now }), v, id: "prefs", _modified_at: now });
+}
+
+async function storedPrefs(ctx: Ctx): Promise<string> {
+  const row = await ctx.table(SETTINGS).get("prefs");
+  if (row) return String(row.v ?? "");
+  const old = await ctx.kv.get("prefs");
+  if (old?.value == null) return "";
+  await keepPrefs(ctx, old.value);
+  await ctx.kv.del("prefs");
+  return old.value;
+}
+
+async function getPrefs(ctx: Ctx): Promise<Prefs> {
   let stored: Partial<Prefs> = {};
-  try { const op = await sessionKv.get("prefs"); if (op?.value) stored = JSON.parse(op.value); } catch { /* unreadable → defaults */ }
+  try { stored = JSON.parse(await storedPrefs(ctx)) ?? {}; } catch { /* unreadable → defaults */ }
   const events = Array.isArray(stored.events)
     ? (stored.events.map(sanitizeEvent).filter((e): e is WeeklyEvent => e !== null))
     : [];
@@ -83,8 +104,8 @@ async function getPrefs(): Promise<Prefs> {
   };
 }
 
-async function setPrefs(next: Prefs): Promise<void> {
-  await sessionKv.put("prefs", JSON.stringify(next));
+async function setPrefs(ctx: Ctx, next: Prefs): Promise<void> {
+  await keepPrefs(ctx, JSON.stringify(next));
 }
 
 // ----- Weather: shared 15-minute cache keyed by location string -------------------------
@@ -124,7 +145,7 @@ function strArr(v: unknown): string[] {
   return Array.isArray(v) ? v.map(String) : [];
 }
 
-async function fetchWeatherImpl(location: string): Promise<WeatherData | null> {
+async function fetchWeatherImpl(ctx: Ctx, location: string): Promise<WeatherData | null> {
   try {
     const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`;
     const geoRes = await fetch(geoUrl);
@@ -222,22 +243,24 @@ async function fetchWeatherImpl(location: string): Promise<WeatherData | null> {
       daily_summary,
       fetched_at: Date.now(),
     };
-    log(`weather fetched | ${resolved_name} | past=${past_hours.length}h forecast=${forecast_hours.length}h mean30d=${past_30d_mean_temp_f.toFixed(1)}F`);
+    ctx.log(`weather fetched | ${resolved_name} | past=${past_hours.length}h forecast=${forecast_hours.length}h mean30d=${past_30d_mean_temp_f.toFixed(1)}F`);
     return data;
   } catch (e) {
-    log(`weather fetch error: ${e instanceof Error ? e.message : String(e)}`);
+    ctx.log(`weather fetch error: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
 }
 
-async function fetchWeather(location: string): Promise<WeatherData | null> {
-  const key = location.trim().toLowerCase();
+const cacheKey = (location: string) => location.trim().toLowerCase();
+
+async function fetchWeather(ctx: Ctx, location: string, maxAgeMs = WEATHER_TTL_MS): Promise<WeatherData | null> {
+  const key = cacheKey(location);
   if (!key) return null;
   const cached = weatherCache.get(key);
-  if (cached && Date.now() - cached.fetched_at < WEATHER_TTL_MS) return cached;
+  if (cached && Date.now() - cached.fetched_at < maxAgeMs) return cached;
   const inflight = weatherInflight.get(key);
   if (inflight) return inflight;
-  const p = fetchWeatherImpl(location).finally(() => weatherInflight.delete(key));
+  const p = fetchWeatherImpl(ctx, location).finally(() => weatherInflight.delete(key));
   weatherInflight.set(key, p);
   const data = await p;
   if (data) weatherCache.set(key, data);
@@ -407,15 +430,26 @@ function scoreForecast(w: WeatherData): HourReading[] {
   return w.forecast_hours.map((h) => ({ ...h, ...scoreHour(h, w.past_30d_mean_temp_f) }));
 }
 
-// ----- Save mutation (shared by the HTTP arm and the bus dispatcher) --------------------
-type MutPeer = ReturnType<typeof parsePeerInfo>;
-type MutResult = { status: number; body: Record<string, unknown> };
+// What changed, never what it holds: each page reads again as whoever it is.
+const tell = (ctx: Ctx, what: "settings" | "forecast") => ctx.push({ market_weather: what });
 
+const json = (v: unknown, status = 200) => Response.json(v, { status });
+const refuse = (status: number, error: string) => json({ error }, status);
+
+async function body<T>(request: Request): Promise<T | null> {
+  try {
+    return JSON.parse(await request.text()) as T;
+  } catch {
+    return null;
+  }
+}
+
+// ----- Save -----------------------------------------------------------------------------
 // Editor-only. Never gate on is_sfi_member — a Viewer-role member would slip through and
 // be able to rewrite the market.
-async function mutSave(sfi_id: string, v: { location?: unknown; events?: unknown } | null, peer: MutPeer): Promise<MutResult> {
-  if (!peer.is_sfi_editor) return { status: 403, body: { error: "editors only" } };
-  if (!v) return { status: 400, body: { error: "invalid JSON" } };
+async function save(ctx: Ctx, v: { location?: unknown; events?: unknown } | null): Promise<Response> {
+  if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return refuse(403, "editors only");
+  if (!v) return refuse(400, "invalid JSON");
   // Events: drop anything that doesn't sanitize cleanly, cap the list at 32 so a
   // misbehaving / pasted-in payload can't blow up the prefs JSON.
   const events: WeeklyEvent[] = Array.isArray(v.events)
@@ -425,65 +459,69 @@ async function mutSave(sfi_id: string, v: { location?: unknown; events?: unknown
     location: sanitizeText(v.location, 120),
     events,
   };
-  await setPrefs(next);
-  pushToInstance(sfi_id, { type: "settings_changed" });
-  return { status: 200, body: { prefs: next } };
+  await setPrefs(ctx, next);
+  tell(ctx, "settings");
+  return json({ prefs: next });
 }
 
-onUiMessage(async (sfiId, data, peer) => {
-  if (!sfiId || typeof data !== "object" || data === null) return;
-  const d = data as Record<string, unknown>;
-  if (d.op !== "save") return;
-  const r = await mutSave(sfiId, d, peer);
-  if (r.status !== 200) log(`market weather: bus op save → ${r.status} (${JSON.stringify(r.body)})`);
-});
+// ----- With nobody visiting -------------------------------------------------------------
+// One timer per session, on the cache's own clock. A tick lands a moment before the
+// forecast it fetched last comes of age, so it takes nothing older than half that.
+const timers = new Map<string, ReturnType<typeof setInterval>>();
+
+async function refresh(ctx: Ctx): Promise<void> {
+  const { location } = await getPrefs(ctx);
+  if (!location) return;
+  const had = weatherCache.get(cacheKey(location));
+  const now = await fetchWeather(ctx, location, WEATHER_TTL_MS / 2);
+  if (now && now.fetched_at !== had?.fetched_at) tell(ctx, "forecast");
+}
 
 // ----- HTTP handler ---------------------------------------------------------------------
-self.onNetworkRequest = async (replyPort, reqPath, method, _h, query, body, cookies) => {
-  const peer = parsePeerInfo(query, cookies);
-  const isAnon  = peer.is_anon || !peer.user_id;
-  const isOwner = peer.is_owner;
+export default {
+  start(ctx: Ctx) {
+    clearInterval(timers.get(ctx.frame));
+    const tick = () => refresh(ctx).catch((e) => ctx.log(`refreshing the forecast: ${(e as Error).message}`));
+    timers.set(ctx.frame, setInterval(tick, WEATHER_TTL_MS));
+    tick();
+  },
 
-  if (reqPath === "/index.html" && method === "GET") {
-    // The script is a separate ES module file so it can import /lib/js/framelib.js —
-    // inlineJs would flatten the <script type="module"> to a non-module <script>,
-    // which can't use ES module imports, so it's intentionally omitted here.
-    return serveHtmlShell(replyPort, new URL("./public/index.html", import.meta.url), {
-      peer,
-      inlineCss: ["index.css"],
-    });
-  }
+  stop(ctx: Ctx) {
+    clearInterval(timers.get(ctx.frame));
+    timers.delete(ctx.frame);
+  },
 
-  // Market Weather is a vendor-planning tool — anonymous FAT visitors aren't the
-  // audience and the location string could be sensitive. Fail closed on every API call.
-  if (isAnon && reqPath.startsWith("/api/")) {
-    return jsonReply(replyPort, 403, { error: "private frame" });
-  }
+  async fetch(request: Request, ctx: Ctx): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    const method = request.method;
+    const peer = ctx.peer;
+    const isAnon = peer.is_anon || !peer.user_id;
 
-  if (reqPath === "/api/state" && method === "GET") {
-    const prefs = await getPrefs();
-    const weather = prefs.location ? await fetchWeather(prefs.location) : null;
-    const readings = weather ? scoreForecast(weather) : [];
-    return jsonReply(replyPort, 200, {
-      prefs,
-      weather,
-      readings,
-      weights: W,
-      is_owner: isOwner,
-      now: Date.now(),
-    });
-  }
+    // Market Weather is a vendor-planning tool — a visitor who is not on the roster isn't
+    // the audience and the location string could be sensitive. Fail closed on every API call.
+    if (isAnon && pathname.startsWith("/api/")) return refuse(403, "private frame");
 
-  if (reqPath === "/api/save" && method === "POST") {
-    const v = parseJsonBody<{ location?: unknown; events?: unknown }>(body);
-    const r = await mutSave(peer.sfi_id, v, peer);
-    return jsonReply(replyPort, r.status, r.body);
-  }
+    if (pathname === "/api/state" && method === "GET") {
+      const prefs = await getPrefs(ctx);
+      const weather = prefs.location ? await fetchWeather(ctx, prefs.location) : null;
+      const readings = weather ? scoreForecast(weather) : [];
+      const editor = peer.is_sfi_editor || peer.is_owner;
+      return json({
+        prefs,
+        weather,
+        readings,
+        weights: W,
+        is_owner: peer.is_owner,
+        you: { member: editor || peer.is_sfi_member, editor },
+        now: Date.now(),
+      });
+    }
 
-  if (method === "GET") {
-    return serveFileAtPath(replyPort, new URL("./public" + reqPath, import.meta.url));
-  }
-  replyPort.postMessage({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Not found.", code: "NOT_FOUND" }) });
+    if (pathname === "/api/save" && method === "POST") {
+      return save(ctx, await body<{ location?: unknown; events?: unknown }>(request));
+    }
+
+    if (method === "GET") return ctx.file(pathname);
+    return json({ error: "Not found.", code: "NOT_FOUND" }, 404);
+  },
 };
-
-log("Market Weather frame is up.");

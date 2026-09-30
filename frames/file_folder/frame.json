@@ -3,14 +3,11 @@
     "description": "A shared file drop over one folder of the space (\"File Folder/\" unless an editor points it elsewhere, or the space opens it on a folder). The owner, or the owner and the space's editors (the owner chooses), add files by clicking 'Add file' or dragging them in, up to 8 MB each and a file count the owner sets; anyone who can open the frame can list and download them, so publishing the frame shares that folder. The files are ordinary files of the space: they show in the space page, sync to members' copies and open in other tools. Which folder, and the sharing settings, belong to each session of the frame.",
     "frame_type": "Tandem",
     "tags": ["everyday", "files"],
-    "permissions": {
-        "net": []
-    },
     "data": "write",
     "opens_folders": ["file folder", "files", "uploads", "shared"],
     "created_at": "2026-06-03T00:24:55Z",
-    "modified_at": "2026-09-23T14:03:23Z",
-    "app_version_min": "1.0.0",
+    "modified_at": "2026-09-30T02:00:00Z",
+    "app_version_min": "1.0.11",
     "default_width_px": 420,
     "default_height_px": 560,
     "licensed_under_cc0": true,

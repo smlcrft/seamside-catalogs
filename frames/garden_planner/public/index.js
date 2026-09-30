@@ -1,8 +1,6 @@
-import { frame, html, render } from "./lib/js/framelib.js";
+import { frame, html, render } from "/lib/js/framelib.js";
 import { ListLine, chooseList, settleList } from "./members_list.js";
 
-const urlSfi = new URLSearchParams(location.search).get('sfi') || '';
-const withSfi = (url) => urlSfi ? url + (url.includes('?') ? '&' : '?') + 'sfi=' + encodeURIComponent(urlSfi) : url;
 const escapeHTML = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // ----- Color mapping ---------------------------------------------------------------
@@ -46,36 +44,33 @@ let editingPlotId = null;
 const canvasEl = document.getElementById('canvas');
 const emptyEl = document.getElementById('empty');
 
-// ----- Fetching ---------------------------------------------------------------------
-// A raw-Response wrapper (frame.fetch) rather than frame.api, which throws on non-2xx:
-// a 503 comes back as a {__waiting: true} sentinel and the page says so.
-async function fetchJSON(url, opts) {
-  const r = await frame.fetch(withSfi(url), opts);
-  if (r.status === 503) return { __waiting: true };
-  if (r.status === 204) return null;
-  try { return await r.json(); } catch { return null; }
+// ----- Asking the worker ------------------------------------------------------------
+// Everything the page shows comes from its own server half, which decides what this
+// visitor may see and do. A refusal is thrown in the worker's own words.
+async function api(method, path, body) {
+  const r = await window.seamside.fetch(`/api/${path}`, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+  let v = {};
+  try { v = r.json(); } catch { /* the status says it */ }
+  if (!r.ok) throw new Error(v?.error || 'failed');
+  return v;
 }
 
-// Writes go over the tether (frame.busSend), not HTTP: Android's webview drops HTTP
-// request bodies, so a POST silently becomes an empty write there (see #750 /
-// docs/tether-writes.md). Fire-and-forget — the canvas redraws from the matching push,
-// sender included, and a refused write is logged by the backend rather than answered.
-// Feature-detect: an older viewer's framelib has no busSend, so fall back to the POST
-// this frame used before.
-function write(op, payload) {
-  if (typeof frame.busSend === 'function') {
-    frame.busSend({ op, ...(payload || {}) });
-    return Promise.resolve({});
+// A write is answered; a refused one is said. The page reads again after its own write
+// and the push brings every other open page along.
+async function write(op, payload) {
+  try {
+    await api('POST', op, payload || {});
+    return true;
+  } catch (e) {
+    await frame.alert(e.message || 'failed');
+    return false;
   }
-  return fetchJSON('./api/' + op, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload || {}),
-  });
 }
 
 async function loadState() {
-  const s = await fetchJSON('./api/state');
-  if (!s || s.__waiting) return false;
+  let s = null;
+  try { s = await api('GET', 'state'); } catch { /* said by the caller */ }
+  if (!s) return false;
   state = s;
   document.getElementById('org-name').textContent = state.prefs.org_name || 'Garden Plotter';
   document.title = state.prefs.org_name || 'Garden Plotter';
@@ -111,10 +106,7 @@ async function loadState() {
 
 // ----- Which members list (the roster plots are assigned from) ---------------------------
 async function bind(list) {
-  const r = await frame.fetch(withSfi('./api/bind'), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ list }),
-  });
-  if (!r.ok) await frame.alert((await r.json().catch(() => null))?.error || 'failed');
+  await write('bind', { list });
   await loadState(); await loadMembers(); await loadPlots();
 }
 
@@ -151,18 +143,13 @@ function applyCanvasSize() {
 
 async function loadMembers() {
   if (state.viewer.is_anon) { memberRoster = []; return; }
-  const r = await fetchJSON('./api/members');
+  const r = await api('GET', 'members').catch(() => null);
   memberRoster = (r && r.rows) || [];
 }
 
 async function loadPlots() {
-  const r = await fetchJSON('./api/plots');
-  if (!r || r.__waiting) {
-    canvasEl.querySelectorAll('.plot').forEach((el) => el.remove());
-    emptyEl.classList.remove('hidden');
-    document.getElementById('empty-text').textContent = 'Waiting for setup…';
-    return;
-  }
+  const r = await api('GET', 'plots').catch(() => null);
+  if (!r) return;
   publicDisabled = !!r.public_disabled;
   plots = r.rows || [];
   document.getElementById('count-badge').textContent = publicDisabled ? '—' : String(plots.length);
@@ -349,6 +336,7 @@ canvasEl.addEventListener('pointerup', async (e) => {
       const p = plots.find((x) => x._row_id === finished.rowId);
       if (p) Object.assign(p, finished.next);
       await write('plot/move', { row_id: finished.rowId, ...finished.next });
+      await loadPlots();
     }
     return;
   }
@@ -657,16 +645,18 @@ document.getElementById('edit-save').addEventListener('click', async () => {
     plants: readPlantRows(),
     notes: editNotes.value,
   };
-  await write('plot', payload);
+  if (!(await write('plot', payload))) return;
   editOverlay.classList.add('hidden');
+  await loadPlots();
 });
 
 editDelete.addEventListener('click', async () => {
   if (!editingPlotId) return;
   const p = plots.find((x) => x._row_id === editingPlotId);
   if (!(await frame.confirm(`Delete "${p ? p.name : 'this plot'}"?`, { danger: true }))) return;
-  await write('plot/delete', { row_id: editingPlotId });
+  if (!(await write('plot/delete', { row_id: editingPlotId }))) return;
   editOverlay.classList.add('hidden');
+  await loadPlots();
 });
 
 // ----- Settings dialog --------------------------------------------------------------
@@ -705,14 +695,16 @@ document.getElementById('settings-save').addEventListener('click', async () => {
     owner_only_edit: cfgOwnerOnly.checked,
     allow_public_viewing: cfgAllowPublic.checked,
   };
-  await write('settings', payload);
-  settingsOverlay.classList.add('hidden');   // the settings_changed push reloads everything
+  if (!(await write('settings', payload))) return;
+  settingsOverlay.classList.add('hidden');
+  await loadState(); await loadMembers(); await loadPlots();
 });
 
 // ----- Live updates -----------------------------------------------------------------
+// The worker says what changed and never what it holds: read it again, as whoever this is.
 window.addEventListener('message', async (e) => {
-  if (e.data?.type === 'plots_changed') loadPlots();
-  else if (e.data?.type === 'settings_changed') { await loadState(); await loadMembers(); await loadPlots(); }
+  if (e.data?.garden_planner === 'plots') loadPlots();
+  else if (e.data?.garden_planner === 'settings') { await loadState(); await loadMembers(); await loadPlots(); }
 });
 
 // Periodic refresh — weather summary updates and stress can shift over the day.
@@ -720,6 +712,7 @@ setInterval(() => { if (!document.hidden) { loadState().then(() => loadPlots());
 
 // ----- Boot -------------------------------------------------------------------------
 (async () => {
+  await window.seamside.ready;
   const ok = await loadState();
   if (!ok) {
     emptyEl.classList.remove('hidden');

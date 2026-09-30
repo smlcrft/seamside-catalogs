@@ -7,7 +7,7 @@
 // Alternate O/I to pedal (two thumbs, real cadence); UP (road) / DOWN (kerb)
 // to switch lanes; run over pizzas, not cones. Rivals appear live ahead of/
 // behind you.
-import { html } from "../lib/js/framelib.js";
+import { html } from "/lib/js/framelib.js";
 import { useRaceRunner } from "../console-kit.js";
 import { DURATION, VMAX, courseFor, integrate, resolve } from "./hotslice-sim.js";
 
@@ -60,7 +60,7 @@ function PlayScreen({ ctx }) {
   const secondsLeft = active ? Math.max(0, Math.ceil((DURATION - elapsed) / 1000)) : 0;
 
   // Camera: my ride when racing; otherwise chase the leading ghost.
-  const ghosts = (ctx.racers || []).filter((r) => r.client_id !== ctx.clientId);
+  const ghosts = (ctx.racers || []).filter((r) => r.player_id !== ctx.playerId);
   const camera = active ? dist : ghosts.reduce((m, g) => Math.max(m, g.x || 0), 0);
   const nameOf = (seat_no) => {
     const s = ctx.seats.find((x) => x.seat_no === seat_no);
@@ -88,7 +88,7 @@ function PlayScreen({ ctx }) {
       ${ghosts.map((g) => {
         const x = RIDER_X + ((g.x || 0) - camera) * PX_PER_M;
         if (x < -6 || x > 106) return "";
-        return html`<div key=${g.client_id}>
+        return html`<div key=${g.player_id}>
           <div class="hs-ghost" style=${`left:${x}%; bottom:${LANE_Y[g.y === 1 ? 1 : 0]}%;`}>
             <i class="ph-light ph-person-simple-bike"></i>
           </div>

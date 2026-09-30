@@ -1,0 +1,28 @@
+{
+  "tier": "members",
+  "publish": "open",
+  "steps": [
+    { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["Dice Roller", "/api/state", "game_dice_roller"], "lacks": ["busSend", "frame.api"] },
+    { "why": "and at the root", "do": "GET {frame}/", "status": 200, "has": ["roll-btn"] },
+    { "why": "the worker's own code is not a page", "do": "GET {frame}/frame.ts", "status": 404, "lacks": ["lastRoll"] },
+
+    { "why": "a stranger watches a die nobody has rolled", "do": "GET {api}/state", "status": 200, "is": { "/value": 0, "/sides": 6, "/can_roll": false, "/roll_time_ms": 1000, "/n": 0 } },
+    { "why": "a stranger rolls nothing", "do": "POST {api}/roll", "status": 403, "is": { "/error": "editor only" } },
+    { "why": "a stranger writes no key at the door", "do": "KV.PUT roll f:{id}", "body": "6", "status": 403 },
+    { "why": "someone signed in and on no roster watches too", "as": "signed", "do": "GET {api}/state", "is": { "/can_roll": false } },
+    { "why": "and rolls nothing", "as": "signed", "do": "POST {api}/roll", "status": 403 },
+    { "why": "a viewer watches", "as": "viewer", "do": "GET {api}/state", "is": { "/can_roll": false } },
+    { "why": "and rolls nothing", "as": "viewer", "do": "POST {api}/roll", "status": 403 },
+    { "why": "nothing was rolled by any of that", "do": "GET {api}/state", "is": { "/value": 0, "/n": 0 } },
+
+    { "why": "a collaborator may roll", "as": "collaborator", "do": "GET {api}/state", "is": { "/can_roll": true } },
+    { "why": "and rolls", "as": "collaborator", "do": "POST {api}/roll", "status": 204 },
+    { "why": "a stranger sees the roll land", "do": "GET {api}/state", "status": 200, "is": { "/n": 1, "/can_roll": false }, "lacks": ["\"value\":0"] },
+    { "why": "the owner may roll", "as": "owner", "do": "GET {api}/state", "is": { "/can_roll": true } },
+    { "why": "and rolls again", "as": "owner", "do": "POST {api}/roll", "status": 204 },
+    { "why": "which a viewer sees as the next roll", "as": "viewer", "do": "GET {api}/state", "is": { "/n": 2, "/sides": 6 }, "lacks": ["\"value\":0"] },
+    { "why": "a roll is a POST", "as": "collaborator", "do": "GET {api}/roll", "status": 404 },
+    { "why": "a route there is none of", "as": "collaborator", "do": "POST {api}/nope", "status": 404, "is": { "/code": "NOT_FOUND" } },
+    { "why": "nothing is kept in the session's keys", "as": "collaborator", "at": "space", "do": "KV.GET roll f:{id}", "lacks": ["6"] }
+  ]
+}

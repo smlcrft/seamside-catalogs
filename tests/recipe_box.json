@@ -1,0 +1,55 @@
+{
+  "tier": "members",
+  "publish": "open",
+  "steps": [
+    { "why": "a recipe an installed copy left behind, with its photo", "as": "collaborator", "at": "space", "do": "KV.PUT t/recipes/old1", "body": { "title": "Nonna's ragù", "ingredients_lines": "1 onion\n500 g beef", "steps_lines": "Brown the beef\nSimmer for hours", "servings": 4, "tags": "pasta,sunday", "notes": "From Nonna.", "created_ms": 5, "photo": "data:image/png;base64,iVBORw0KGgo=", "_created_at": 5, "_modified_at": 5 }, "status": 200 },
+    { "why": "and a row in the contract's shape from before it had a photo, never stamped", "as": "collaborator", "at": "space", "do": "KV.PUT t/recipes/old2", "body": { "title": "apple pie", "ingredients_lines": "6 apples", "steps_lines": "Bake", "servings": 0, "tags": "", "notes": "", "created_ms": 6 }, "status": 200 },
+
+    { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["<title>Recipe Box</title>", "/lib/js/framelib.js", "/dyn/frame-prefs.css"] },
+    { "why": "a stranger is told they are nobody here", "do": "GET {api}/whoami", "status": 200, "is": { "/is_anon": true, "/is_sfi_member": false, "/is_sfi_editor": false, "/is_owner": false, "/user_id": "" } },
+    { "why": "a stranger reads the box, both shapes, by title", "do": "GET {api}/recipes", "status": 200, "is": { "/recipes/0/id": "old2", "/recipes/0/title": "apple pie", "/recipes/0/photo": "", "/recipes/0/created_ms": 6, "/recipes/1/id": "old1", "/recipes/1/title": "Nonna's ragù", "/recipes/1/ingredients_lines": "1 onion\n500 g beef", "/recipes/1/steps_lines": "Brown the beef\nSimmer for hours", "/recipes/1/servings": 4, "/recipes/1/tags": "pasta,sunday", "/recipes/1/notes": "From Nonna.", "/recipes/1/photo": "data:image/png;base64,iVBORw0KGgo=" }, "absent": ["/recipes/2", "/recipes/1/_created_at", "/recipes/1/_modified_at"] },
+    { "why": "a stranger adds nothing", "do": "POST {api}/recipe", "body": { "title": "sneak" }, "status": 403, "is": { "/error": "editors only" } },
+    { "why": "changes nothing", "do": "POST {api}/recipe/old1", "body": { "title": "sneak" }, "status": 403 },
+    { "why": "deletes nothing", "do": "POST {api}/recipe/old1/delete", "body": {}, "status": 403 },
+    { "why": "a stranger writes no row at the door", "do": "KV.PUT t/recipes/x", "body": { "title": "x" }, "status": 403 },
+    { "why": "the box is as it was", "table": "recipes", "has": ["Nonna's ragù", "apple pie"], "lacks": ["sneak", "\"x\""] },
+
+    { "why": "someone signed in and on no roster is a visitor too", "as": "signed", "do": "GET {api}/whoami", "is": { "/is_anon": true, "/is_sfi_member": false, "/is_sfi_editor": false, "/user_id": "{did:signed}" } },
+    { "why": "who reads the box", "as": "signed", "do": "GET {api}/recipes", "status": 200, "is": { "/recipes/1/id": "old1" } },
+    { "why": "and writes nothing", "as": "signed", "do": "POST {api}/recipe", "body": { "title": "sneak" }, "status": 403 },
+
+    { "why": "a viewer is a member who may not edit", "as": "viewer", "do": "GET {api}/whoami", "is": { "/is_anon": false, "/is_sfi_member": true, "/is_sfi_editor": false, "/user_name": "Viewer" } },
+    { "why": "a viewer reads the box", "as": "viewer", "do": "GET {api}/recipes", "status": 200, "is": { "/recipes/0/title": "apple pie" } },
+    { "why": "a viewer adds nothing", "as": "viewer", "do": "POST {api}/recipe", "body": { "title": "mine" }, "status": 403, "is": { "/error": "editors only" } },
+    { "why": "changes nothing", "as": "viewer", "do": "POST {api}/recipe/old1", "body": { "servings": 9 }, "status": 403 },
+    { "why": "clears no photo", "as": "viewer", "do": "POST {api}/recipe/old1", "body": { "photo": "" }, "status": 403 },
+    { "why": "deletes nothing", "as": "viewer", "do": "POST {api}/recipe/old2/delete", "body": {}, "status": 403 },
+    { "why": "and writes no row at the door", "as": "viewer", "at": "space", "do": "KV.PUT t/recipes/x", "body": { "title": "x" }, "status": 403 },
+    { "why": "the box is still as it was", "table": "recipes", "has": ["\"servings\":4", "iVBORw0KGgo="], "lacks": ["mine", "\"servings\":9"] },
+
+    { "why": "a collaborator may edit", "as": "collaborator", "do": "GET {api}/whoami", "is": { "/is_sfi_member": true, "/is_sfi_editor": true, "/user_id": "{did:collaborator}" } },
+    { "why": "a recipe with no title is refused", "as": "collaborator", "do": "POST {api}/recipe", "body": { "title": "   " }, "status": 400, "is": { "/error": "title required" } },
+    { "why": "a collaborator adds a recipe, its fields tidied, and is answered with the box", "as": "collaborator", "do": "POST {api}/recipe", "body": { "title": "  Pancakes ", "ingredients_lines": "2 eggs\nflour", "steps_lines": "Whisk\nFry", "servings": "4", "tags": " Breakfast, sweet,breakfast,, ", "photo": "data:image/jpeg;base64,/9j/4AAQSkZJRg==" }, "status": 200, "is": { "/recipes/2/title": "Pancakes", "/recipes/2/servings": 4, "/recipes/2/tags": "breakfast,sweet", "/recipes/2/notes": "", "/recipes/2/photo": "data:image/jpeg;base64,/9j/4AAQSkZJRg==" }, "save": { "pancakes": "/recipes/2/id" } },
+    { "why": "as a row of the space, in the contract's shape, stamped", "table": "recipes", "has": ["\"title\":\"Pancakes\"", "\"ingredients_lines\":\"2 eggs\\nflour\"", "\"steps_lines\":\"Whisk\\nFry\"", "\"servings\":4", "\"tags\":\"breakfast,sweet\"", "\"notes\":\"\"", "\"created_ms\":", "\"photo\":\"data:image/jpeg;base64,/9j/4AAQSkZJRg==\"", "_created_at", "_modified_at"] },
+    { "why": "a photo that is not a small image is dropped, and servings that are not a count read as unspecified", "as": "collaborator", "do": "POST {api}/recipe", "body": { "title": "Toast", "servings": -2, "photo": "https://example.com/toast.jpg" }, "status": 200, "is": { "/recipes/3/title": "Toast", "/recipes/3/servings": 0, "/recipes/3/photo": "", "/recipes/3/ingredients_lines": "" }, "save": { "toast": "/recipes/3/id" } },
+    { "why": "and a new row starts from the schema's defaults", "table": "recipes", "has": ["\"photo\":\"\",\"servings\":0,\"steps_lines\":\"\",\"tags\":\"\",\"title\":\"Toast\""] },
+    { "why": "an old recipe is edited", "as": "collaborator", "do": "POST {api}/recipe/old1", "body": { "servings": 6, "title": "  " }, "status": 200, "is": { "/recipes/1/servings": 6, "/recipes/1/title": "Nonna's ragù", "/recipes/1/photo": "data:image/png;base64,iVBORw0KGgo=", "/recipes/1/notes": "From Nonna." } },
+    { "why": "over the row, which kept what it held and when it was made", "table": "recipes", "has": ["\"servings\":6,\"steps_lines\":\"Brown the beef", "\"created_ms\":5,", "\"_created_at\":5,", "From Nonna."] },
+    { "why": "a photo is replaced", "as": "collaborator", "do": "POST {api}/recipe/old1", "body": { "photo": "data:image/webp;base64,UklGRg==" }, "status": 200, "is": { "/recipes/1/photo": "data:image/webp;base64,UklGRg==" } },
+    { "why": "and removed", "as": "collaborator", "do": "POST {api}/recipe/old1", "body": { "photo": "" }, "status": 200, "is": { "/recipes/1/photo": "" } },
+    { "why": "the contract row takes notes and keeps its shape", "as": "collaborator", "do": "POST {api}/recipe/old2", "body": { "notes": "Serve warm.", "tags": "Dessert" }, "status": 200, "is": { "/recipes/0/notes": "Serve warm.", "/recipes/0/tags": "dessert", "/recipes/0/title": "apple pie", "/recipes/0/created_ms": 6 } },
+    { "why": "a recipe there is no such thing as is refused, never made", "as": "collaborator", "do": "POST {api}/recipe/ghost", "body": { "title": "Ghost" }, "status": 400, "is": { "/error": "bad id" } },
+    { "why": "nor deleted", "as": "collaborator", "do": "POST {api}/recipe/ghost/delete", "body": {}, "status": 400 },
+    { "why": "and nothing was made for it", "table": "recipes", "lacks": ["ghost", "Ghost"] },
+    { "why": "an act there is none of", "as": "collaborator", "do": "POST {api}/recipe/old1/nope", "body": {}, "status": 404 },
+    { "why": "a route there is none of", "as": "collaborator", "do": "POST {api}/nope", "body": {}, "status": 404 },
+    { "why": "nor a read", "as": "collaborator", "do": "GET {api}/nope", "status": 404 },
+
+    { "why": "an admin edits too", "as": "admin", "do": "POST {api}/recipe/{pancakes}", "body": { "notes": "Double for guests." }, "status": 200, "is": { "/recipes/2/notes": "Double for guests.", "/recipes/2/tags": "breakfast,sweet" } },
+    { "why": "the owner may edit", "as": "owner", "do": "GET {api}/whoami", "is": { "/is_anon": false, "/is_sfi_editor": true, "/user_id": "{did:owner}" } },
+    { "why": "the owner adds a recipe", "as": "owner", "do": "POST {api}/recipe", "body": { "title": "Soup" }, "status": 200, "is": { "/recipes/3/title": "Soup" } },
+    { "why": "and deletes one", "as": "owner", "do": "POST {api}/recipe/{toast}/delete", "body": {}, "status": 200, "lacks": ["Toast"] },
+    { "why": "gone from the table", "table": "recipes", "lacks": ["Toast"] },
+    { "why": "a stranger sees every change", "do": "GET {api}/recipes", "is": { "/recipes/0/title": "apple pie", "/recipes/1/title": "Nonna's ragù", "/recipes/1/servings": 6, "/recipes/2/title": "Pancakes", "/recipes/3/title": "Soup" }, "absent": ["/recipes/4"] }
+  ]
+}
