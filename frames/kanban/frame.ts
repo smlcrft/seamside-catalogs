@@ -17,7 +17,7 @@
 // an optional description, and an optional short label.
 // ----------------------------------------------------------------------------------------
 import type { Ctx, PeerInfo } from "@frame-core";
-import { declareTables, parseJsonBody, sanitizeText } from "@frame-core";
+import { parseJsonBody, sanitizeText } from "@frame-core";
 
 // ----- Schemas ----------------------------------------------------------------------------
 const COLUMNS_SCHEMA = [
@@ -37,10 +37,6 @@ const CARDS_SCHEMA = [
 // ----- The space's frame data tables, named for this frame (`cards` alone is also Flashcards') ------
 const COLUMNS = "kanban_columns";
 const CARDS = "kanban_cards";
-declareTables([
-  { key: COLUMNS, title: "Kanban Columns", description: "Columns of this space's kanban board.", schema: COLUMNS_SCHEMA },
-  { key: CARDS,   title: "Kanban Cards",   description: "Cards of this space's kanban board.",   schema: CARDS_SCHEMA },
-]);
 const SCHEMAS: Record<string, Array<{ name: string; col_type: string; default_val: string }>> = {
   [COLUMNS]: COLUMNS_SCHEMA, [CARDS]: CARDS_SCHEMA,
 };

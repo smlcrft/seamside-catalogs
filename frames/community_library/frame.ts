@@ -13,27 +13,9 @@
 // the page reads no item itself, and every route decides on ctx.peer.
 // ----------------------------------------------------------------------------------------
 import type { Ctx, Table } from "@frame-core";
-import { declareTables, sanitizeText, toIntOrNull } from "@frame-core";
+import { sanitizeText, toIntOrNull } from "@frame-core";
 
 const ASSETS = "library_assets";
-
-declareTables([
-  {
-    key: ASSETS,
-    title: "Library Assets",
-    description: "Items the community shares, with current checkout status.",
-    schema: [
-      { name: "name",                    col_type: "text",    nullable: false },
-      { name: "item_type",               col_type: "text",    nullable: false },
-      { name: "checked_out_member_id",   col_type: "text",    nullable: true  },
-      { name: "checked_out_manual_name", col_type: "text",    nullable: true  },
-      { name: "checked_out_at",          col_type: "integer", nullable: true  },
-      { name: "borrow_days",             col_type: "integer", nullable: true  },
-      { name: "needs_attention",         col_type: "integer", nullable: false, default_val: "0" },
-      { name: "notes",                   col_type: "text",    nullable: true  },
-    ],
-  },
-]);
 
 // What a new item starts from: the schema's defaults.
 const NEW_ASSET = { needs_attention: 0 };

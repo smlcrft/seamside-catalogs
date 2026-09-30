@@ -22,7 +22,7 @@
 // that needed one would silently rot on a sleeping device.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 // ----- Schema (the `chores` v1 contract — declared verbatim, one source of truth) -------
 const CHORES_SCHEMA = [
@@ -39,9 +39,6 @@ const CHORES_SCHEMA = [
 
 // ----- The space's `chores` table (the contract name) ---------------------------------
 const CHORES = "chores";
-declareTables([
-  { key: CHORES, title: "Chore Chart", description: "The chores of this space.", schema: CHORES_SCHEMA },
-]);
 
 type Row = Record<string, unknown> & { id: string };
 

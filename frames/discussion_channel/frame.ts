@@ -19,8 +19,8 @@
 // Realtime: a push says what changed and never what it holds. Every open page of the
 // frame hears it and reads the channel again as whoever it is.
 // ----------------------------------------------------------------------------------------
-import type { Ctx, FrameTableDecl } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 const MESSAGES = "discussion_messages";
 const REACTIONS = "discussion_reactions";
@@ -32,7 +32,7 @@ const SETTINGS = "settings";
 // ----------------------------------------------------------------------------------------
 // THE SPACE'S TABLES, in its frame data folder
 // ----------------------------------------------------------------------------------------
-const TABLES: FrameTableDecl[] = [
+const TABLES = [
   {
     key: MESSAGES,
     title: "Channel Messages",
@@ -57,7 +57,6 @@ const TABLES: FrameTableDecl[] = [
     ],
   },
 ];
-declareTables(TABLES);
 
 // ----------------------------------------------------------------------------------------
 // HELPERS

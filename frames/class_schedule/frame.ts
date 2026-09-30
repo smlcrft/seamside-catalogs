@@ -23,7 +23,7 @@
 // it through UTC would move it for the very roommate the frame is shared with.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 const TABLE = "class_schedule";
 
@@ -35,10 +35,6 @@ const CLASSES_SCHEMA = [
   { name: "place",     col_type: "text"    as const, nullable: false, default_val: "" },
   { name: "note",      col_type: "text"    as const, nullable: false, default_val: "" },
 ];
-
-declareTables([
-  { key: TABLE, title: "Classes", description: "Weekly class meetings for this space.", local: true, schema: CLASSES_SCHEMA },
-]);
 
 type Row = Record<string, unknown> & { id: string };
 

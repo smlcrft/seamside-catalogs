@@ -23,7 +23,7 @@
 // ingredients can be inserted into the grocery list, idempotently.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 // ----- Contract schemas (verbatim from docs/schema-contracts.md; never vary these) ------
 const MEAL_PLAN_SCHEMA = [
@@ -57,11 +57,6 @@ const GROCERY_SCHEMA = [
 const MEALS = "meal_plan";
 const RECIPES = "recipes";
 const GROCERY = "grocery";
-declareTables([
-  { key: MEALS, title: "Meal Plan", description: "Planned meals of this space's week planner.", schema: MEAL_PLAN_SCHEMA },
-  { key: RECIPES, title: "Recipes", description: "The recipe box of this space.", schema: RECIPES_SCHEMA },
-  { key: GROCERY, title: "Grocery List", description: "The grocery list of this space.", schema: GROCERY_SCHEMA },
-]);
 
 // ----- Rows -----------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };

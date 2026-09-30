@@ -28,7 +28,7 @@
 // the wrong time, and you would not notice for weeks.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 const DECKS = "flashcards_decks";
 const CARDS = "flashcards";
@@ -56,12 +56,6 @@ const REVIEWS_SCHEMA = [
   { name: "due",     col_type: "text"    as const, nullable: false, default_val: "" },   // yyyy-mm-dd
   { name: "seen_ms", col_type: "integer" as const, nullable: false, default_val: "0" },
 ];
-
-declareTables([
-  { key: DECKS,   title: "Decks",   description: "Card decks in this space.", local: true, schema: DECKS_SCHEMA },
-  { key: CARDS,   title: "Cards",   description: "Cards belonging to this space's decks.", local: true, schema: CARDS_SCHEMA },
-  { key: REVIEWS, title: "Review progress", description: "Each person's spaced-repetition state, one row per card per person.", local: true, schema: REVIEWS_SCHEMA },
-]);
 
 type Row = Record<string, unknown> & { id: string };
 type Schema = ReadonlyArray<{ name: string; col_type: "text" | "integer" | "real"; default_val: string }>;

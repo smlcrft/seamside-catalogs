@@ -25,7 +25,7 @@
 // bound and two devices marking different days never collide.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { sanitizeText, declareTables } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 const HABITS = "habits";
 const MARKS = "habit_marks";
@@ -41,11 +41,6 @@ const MARKS_SCHEMA = [
   { name: "day",      col_type: "text"    as const, nullable: false, default_val: "" },
   { name: "made_ms",  col_type: "integer" as const, nullable: false, default_val: "0" },
 ];
-
-declareTables([
-  { key: HABITS, title: "Habits",      description: "Habits tracked in this space.", schema: HABITS_SCHEMA },
-  { key: MARKS,  title: "Habit marks", description: "One row per habit per completed day.", schema: MARKS_SCHEMA },
-]);
 
 type Row = Record<string, unknown> & { id: string };
 type Schema = typeof HABITS_SCHEMA;

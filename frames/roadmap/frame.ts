@@ -30,7 +30,7 @@
 //   - The two buckets can't be renamed away, deleted, dated, or completed.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText, toIntOrNull, clampInt } from "@frame-core";
+import { sanitizeText, toIntOrNull, clampInt } from "@frame-core";
 
 // ----- The space's tables, in its frame data folder -------------------------------------
 const MILESTONES = "roadmap_milestones";
@@ -59,23 +59,6 @@ const SCHEMAS: Record<string, Column[]> = {
     { name: "completed_ms", col_type: "integer", nullable: false, default_val: "0" }, // when it last entered state 2 (burn rate)
   ],
 };
-
-declareTables([
-  {
-    key: MILESTONES,
-    title: "Roadmap Milestones",
-    description: "Milestones and parking buckets for this roadmap.",
-    local: true,
-    schema: SCHEMAS[MILESTONES],
-  },
-  {
-    key: TASKS,
-    title: "Roadmap Tasks",
-    description: "Tasks, each belonging to one milestone or bucket.",
-    local: true,
-    schema: SCHEMAS[TASKS],
-  },
-]);
 
 // ----- Constants ------------------------------------------------------------------------
 const MAX_NAME = 160;

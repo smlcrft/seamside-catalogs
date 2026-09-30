@@ -19,7 +19,7 @@
 // it is.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText, toIntOrNull, clampInt } from "@frame-core";
+import { sanitizeText, toIntOrNull, clampInt } from "@frame-core";
 
 // ----- The space's tables -----------------------------------------------------------------
 // PLOTS are rows of the frame data folder. The members list is Member Manager's roster (name, role
@@ -37,14 +37,6 @@ const PLOTS_SCHEMA = [
   { name: "shade_pct",            col_type: "integer" as const, nullable: false, default_val: "100" },
   { name: "notes",                col_type: "text"    as const, nullable: true  },
 ];
-
-declareTables([
-  {
-    key: "garden_plots", title: "Garden Plots",
-    description: "Plots of this space's garden, with grid position/size, assignment, plant entries and sun exposure.",
-    schema: PLOTS_SCHEMA,
-  },
-]);
 
 // ----- Which members list: `members` or a subtype `<name>.members`, bound per session -----
 const LIST_NAME = /^([a-z0-9][a-z0-9_-]*\.)*members$/;

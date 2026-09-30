@@ -21,8 +21,8 @@
 // Realtime: a push says what changed and never what it holds. Every open page of the
 // frame hears it, a stranger's included, and each reads again as whoever it is.
 // ----------------------------------------------------------------------------------------
-import type { Ctx, FrameTableDecl } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import type { Ctx } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
 // PREFS — owner-editable, one row per key, each value JSON under `v`. Only the owner changes
@@ -75,7 +75,7 @@ const MESSAGES = "roundtable_messages";
 const ITEMS = "roundtable_items";
 const VOTES = "roundtable_votes";
 
-const TABLES: FrameTableDecl[] = [
+const TABLES = [
   {
     key: MESSAGES,
     title: "Roundtable Messages",
@@ -111,7 +111,6 @@ const TABLES: FrameTableDecl[] = [
     ],
   },
 ];
-declareTables(TABLES);
 
 type Row = Record<string, unknown> & { id: string };
 

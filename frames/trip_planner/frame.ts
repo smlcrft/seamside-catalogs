@@ -20,7 +20,7 @@
 // through this worker from tiles.openfreemap.org (see /tiles/ below).
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 // ----- The space's frame data tables (named for the trip, so no other frame's rows land in them) -----
 const TRIPS = "trips";
@@ -80,8 +80,6 @@ const TABLES: Array<{ key: string; title: string; description: string; schema: C
     ],
   },
 ];
-
-declareTables(TABLES);
 
 // A new row starts from the defaults its schema declares.
 const DEFAULTS: Record<string, Record<string, unknown>> = Object.fromEntries(TABLES.map((t) => [

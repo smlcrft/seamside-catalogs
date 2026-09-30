@@ -2,7 +2,6 @@
 // is shown, and every change, is a route here, decided on ctx.peer, who the door proved
 // is asking. Feeds are fetched here too, on a visit and, by `start`, with nobody looking.
 import type { Ctx } from "@frame-core";
-import { declareTables } from "@frame-core";
 import { parseFeed } from "./lib/parser.ts";
 import { discoverFeedUrl, looksLikeFeed } from "./lib/discovery.ts";
 import { sanitizeHtml } from "./lib/sanitize.ts";
@@ -69,7 +68,6 @@ const TABLES: Array<{ key: string; title: string; description: string; schema: C
     col("read_at", "integer", false),
   ]},
 ];
-declareTables(TABLES);
 
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any> & { id: string };

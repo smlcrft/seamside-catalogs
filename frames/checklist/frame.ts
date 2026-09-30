@@ -17,7 +17,7 @@
 // Each item has a 3-state status: 0 = unstarted, 1 = in-progress, 2 = complete.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText, toIntOrNull, clampInt } from "@frame-core";
+import { sanitizeText, toIntOrNull, clampInt } from "@frame-core";
 
 // ----- The space's table (named for this frame, so no other frame's rows land in it) ------
 const ITEMS = "checklist";
@@ -29,14 +29,6 @@ const SCHEMA = [
   { name: "actor_id",   col_type: "text",    nullable: true,  default_val: "" },
   { name: "actor_name", col_type: "text",    nullable: true,  default_val: "" },
 ] as const;
-
-declareTables([{
-  key: ITEMS,
-  title: "Checklist Items",
-  description: "Tasks on this space's checklist.",
-  local: true,
-  schema: [...SCHEMA],
-}]);
 
 // ----- Helpers --------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };

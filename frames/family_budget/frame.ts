@@ -23,7 +23,7 @@
 // and a plain ISO date (yyyy-mm-dd) — month filtering is a string-prefix compare.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 // ----- Schemas ----------------------------------------------------------------------------
 const CATEGORIES = "budget_categories";
@@ -44,10 +44,6 @@ const TRANSACTIONS_SCHEMA = [
 ];
 
 // ----- The space's tables, in its frame data folder -------------------------------------
-declareTables([
-  { key: CATEGORIES,   title: "Budget Categories",   description: "Income and expense categories of this space's budget.", schema: CATEGORIES_SCHEMA },
-  { key: TRANSACTIONS, title: "Budget Transactions", description: "Transactions of this space's budget.",                  schema: TRANSACTIONS_SCHEMA },
-]);
 
 type Row = Record<string, unknown> & { id: string };
 type Schema = typeof CATEGORIES_SCHEMA | typeof TRANSACTIONS_SCHEMA;

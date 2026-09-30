@@ -17,7 +17,7 @@ the record in [table-graduation.md](table-graduation.md)).
 `members.table.jsonl`, `club.members.table.jsonl` and `choir.members.table.jsonl`
 all speak `members`. A frame that speaks a contract with more than one natural list
 (`members`, `wishes`) binds **one per session**: the table name, kept in the
-session's own keys (`sessionKv` `bound/<contract>`), chosen by an editor from the
+session's own keys (`ctx.kv` `bound/<contract>`), chosen by an editor from the
 space's matching tables (or a new one) and always confirmed, never guessed. It
 declares `"opens": ["<contract>.table.jsonl"]` so the space offers it on those files.
 Companions agree by the person choosing the same list in each. Worked example:
@@ -239,7 +239,7 @@ const WISHES_SCHEMA = [
 - **Names (subtypes).** A `wishes` table is `wishes.table.jsonl` or any
   `<name>.wishes.table.jsonl` (`christmas.wishes`, `birthday-2026.wishes`): the name
   matches `/^([a-z0-9][a-z0-9_-]*\.)*wishes$/`. A space may hold several; each
-  session of a frame speaking `wishes` binds one (Gift List: `sessionKv`
+  session of a frame speaking `wishes` binds one (Gift List: `ctx.kv`
   `bound/wishes`, chosen and confirmed by an editor), so two sessions can hold two
   lists, and companions agree by the person choosing the same list in each.
 - **Who claimed never enters the table; that something is claimed does (append-only addition, 2026-09-23).** A

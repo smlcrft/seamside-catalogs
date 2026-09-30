@@ -25,8 +25,8 @@
 // a shared table would let a collaborator rewrite them at the door, around the owner check.
 // Every write pushes what to read again; each open page reads again as whoever it is.
 // ----------------------------------------------------------------------------------------
-import type { Ctx, FrameTableDecl, PeerInfo } from "@frame-core";
-import { clampInt, declareTables, sanitizeText, toIntOrNull } from "@frame-core";
+import type { Ctx, PeerInfo } from "@frame-core";
+import { clampInt, sanitizeText, toIntOrNull } from "@frame-core";
 
 // ----- Shapes ---------------------------------------------------------------------------
 type Kind = "thought" | "question" | "status" | "announcement";
@@ -72,7 +72,7 @@ const MEDIA = "post_media";
 const VOTES = "post_votes";
 const SETTINGS = "settings";      // the session's own: title, tagline, who_can_post
 
-const TABLES: FrameTableDecl[] = [
+const TABLES = [
   {
     key: POSTS,
     title: "Posts",
@@ -110,7 +110,6 @@ const TABLES: FrameTableDecl[] = [
     ],
   },
 ];
-declareTables(TABLES);
 
 // ----- Rows -----------------------------------------------------------------------------
 const rows = (ctx: Ctx, name: string) =>

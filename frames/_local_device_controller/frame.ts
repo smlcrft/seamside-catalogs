@@ -15,7 +15,7 @@
 //   5. localDevice(key, frame).onEvent() — live records, host-throttled.
 //   6. .set() / .run() / .read()         — write, execute, and request a value.
 //
-// v1 has no local-device bus yet: `ensureLocalDevices` reports the key missing, so every
+// v1 has no local-device bus yet: the stand-ins below report the key missing, so every
 // visitor is shown "no device connected", and `localDevice()` throws.
 //
 // Grants are PER PLACEMENT: place this frame twice and each copy can watch a different
@@ -32,7 +32,13 @@
 // A push says only what to read again: { local_device_controller: "values" | "settings" }.
 // ----------------------------------------------------------------------------------------
 import type { Ctx, PeerInfo } from "@frame-core";
-import { declareLocalDevices, ensureLocalDevices, localDevice } from "@frame-core";
+
+const declared: string[] = [];
+const declareLocalDevices = (keys: string[]) => void declared.splice(0, declared.length, ...keys);
+const ensureLocalDevices = (_peer: PeerInfo) => ({ ready: declared.length === 0, missingKeys: [...declared] });
+const localDevice = (key: string, _frame: string): never => {
+  throw new Error(`localDevice("${key}"): v1 has no local-device bus yet`);
+};
 
 // Settings: rows of the session's own `settings` table, one per key, the value as JSON
 // under `v`. Only this worker reads them.

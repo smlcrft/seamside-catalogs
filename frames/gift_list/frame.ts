@@ -40,7 +40,7 @@
 // again through /api/list, as whoever it is.
 // ----------------------------------------------------------------------------------------
 import type { Ctx, PeerInfo } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 // ----- Schema (the `wishes` v1 contract — declared verbatim, one source of truth) -------
 const WISHES_SCHEMA = [
@@ -54,10 +54,6 @@ const WISHES_SCHEMA = [
   { name: "added_ms",      col_type: "integer" as const, nullable: false, default_val: "0" },
   { name: "claimed",       col_type: "integer" as const, nullable: false, default_val: "0" },
 ];
-
-declareTables([
-  { key: "wishes", title: "Gift List", description: "Wishes on this space's gift list.", schema: WISHES_SCHEMA },
-]);
 
 type Row = Record<string, unknown> & { id: string };
 

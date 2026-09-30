@@ -20,7 +20,7 @@
 // briefly show a number that was never true.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 const COURSES = "assignments_courses";
 const WORK = "assignments";
@@ -45,11 +45,6 @@ const WORK_SCHEMA = [
   { name: "done",      col_type: "integer" as const, nullable: false, default_val: "0" },
   { name: "added_ms",  col_type: "integer" as const, nullable: false, default_val: "0" },
 ];
-
-declareTables([
-  { key: COURSES, title: "Courses", description: "Courses tracked in this space.", local: true, schema: COURSES_SCHEMA },
-  { key: WORK,    title: "Assignments", description: "Assignments for this space's courses.", local: true, schema: WORK_SCHEMA },
-]);
 
 type Row = Record<string, unknown> & { id: string };
 

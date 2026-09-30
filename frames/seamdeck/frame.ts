@@ -21,8 +21,8 @@
 // `player_id`, the first 16 hex of its SHA-256, which the page computes too.
 // A visitor writes no row at the door, so every act is a route here.
 // ============================================================================
-import type { Ctx, FrameTableDecl, PeerInfo } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import type { Ctx, PeerInfo } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 import { SIMS } from "./frame.sim.ts";
 
 // The round seed is drawn ONCE here and stored per session, so every client
@@ -52,7 +52,7 @@ type Session = {
 const sessionsByFrame: Record<string, Session[]> = {};
 // Durable: the arcade high-score board is a table of the space's frame data.
 const SCORES = "seamdeck_scores";
-const SCORES_TABLE: FrameTableDecl & { schema: { name: string; col_type?: string; default_val?: string }[] } = {
+const SCORES_TABLE: { key: string; title?: string; description?: string; local?: boolean; schema: { name: string; col_type?: string; nullable?: boolean; default_val?: string }[] } = {
   key: SCORES,
   title: "Seamdeck high scores",
   description: "The arcade board: each finished run's best, by game.",
@@ -66,7 +66,6 @@ const SCORES_TABLE: FrameTableDecl & { schema: { name: string; col_type?: string
     { name: "client_id", col_type: "text",    nullable: false, default_val: "" },
   ],
 };
-declareTables([SCORES_TABLE]);
 
 type Score = {
   initials: string; game_id: string; points: number; scored_at: number; client_id: string;

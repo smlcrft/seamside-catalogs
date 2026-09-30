@@ -21,7 +21,7 @@
 // stays here, per the contract's role lines).
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 // ----- Schema (the `grocery` v1 contract — declared verbatim, one source of truth) ------
 const GROCERY_SCHEMA = [
@@ -35,9 +35,6 @@ const GROCERY_SCHEMA = [
 
 // ----- The space's `grocery` table (the contract name) --------------------------------
 const GROCERY = "grocery";
-declareTables([
-  { key: GROCERY, title: "Grocery List", description: "The grocery list of this space.", schema: GROCERY_SCHEMA },
-]);
 
 // ----- Helpers --------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };

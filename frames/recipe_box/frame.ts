@@ -16,7 +16,7 @@
 // has full CRUD.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 // ----- Schema (contract `recipes` v1, verbatim) -----------------------------------------
 const RECIPES_SCHEMA = [
@@ -32,9 +32,6 @@ const RECIPES_SCHEMA = [
 
 // ----- The space's `recipes` table (the contract name: every kitchen frame in the space reads it)
 const RECIPES = "recipes";
-declareTables([
-  { key: RECIPES, title: "Recipes", description: "The recipe box of this space.", schema: RECIPES_SCHEMA },
-]);
 
 type Row = Record<string, unknown> & { id: string };
 

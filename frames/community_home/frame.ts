@@ -15,7 +15,6 @@
 // the frame hears it and reads again as whoever it is.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
 // THE SPACE'S TABLE, in its frame data folder, named for what it holds.
@@ -36,15 +35,6 @@ const BLOCK_SCHEMA = [
   { name: "height",     col_type: "integer", nullable: false, default_val: "320" },
   { name: "sort_order", col_type: "integer", nullable: false, default_val: "0" },
 ] as const;
-
-declareTables([
-  {
-    key: BLOCKS,
-    title: "Community Home Blocks",
-    description: "Sections, links, and public-frame links, in display order.",
-    schema: BLOCK_SCHEMA.map((c) => ({ ...c })),
-  },
-]);
 
 // What a new block holds before its own values are laid over it.
 const BLOCK_DEFAULTS: Record<string, unknown> = Object.fromEntries(

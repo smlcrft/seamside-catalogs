@@ -39,7 +39,7 @@
 // position to a stored one.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { clampInt, declareTables, sanitizeText, toIntOrNull } from "@frame-core";
+import { clampInt, sanitizeText, toIntOrNull } from "@frame-core";
 
 // ----- The shared photos table, in the frame data folder --------------------------------
 const PHOTOS = "photos";
@@ -55,14 +55,6 @@ const SCHEMA: Array<{ name: string; col_type: "text" | "integer"; nullable: bool
   { name: "path",       col_type: "text",    nullable: false, default_val: "" },          // photos/<id>/<name>, within _fdata
   { name: "thumb_path", col_type: "text",    nullable: false, default_val: "" },          // its grid thumbnail, if any
 ];
-declareTables([
-  {
-    key: PHOTOS,
-    title: "Photos",
-    description: "Photos on a picture frame; `path` and `thumb_path` are files in the frame data folder.",
-    schema: SCHEMA,
-  },
-]);
 
 // A new row starts from the schema's defaults, as rows written before always did.
 const DEFAULTS: Record<string, unknown> = Object.fromEntries(

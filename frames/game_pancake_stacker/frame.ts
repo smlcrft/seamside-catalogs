@@ -6,7 +6,7 @@
 // again ({ game_pancake_stacker: "score" }).
 // ----------------------------------------------------------------------------------------
 import type { Ctx, PeerInfo } from "@frame-core";
-import { declareTables, parseJsonBody, sanitizeText } from "@frame-core";
+import { parseJsonBody, sanitizeText } from "@frame-core";
 
 type HighScore = { high: number; updated_at: number; holder: string };
 type Row = Record<string, unknown> & { id: string };
@@ -23,7 +23,6 @@ const SCHEMA = [{
     { name: "at",    col_type: "integer" as const, nullable: false, default_val: "0" },
   ],
 }];
-declareTables(SCHEMA);
 
 /** A new row starts from the schema's defaults. */
 const DEFAULTS: Record<string, unknown> = Object.fromEntries(

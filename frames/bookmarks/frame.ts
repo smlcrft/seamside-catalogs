@@ -20,7 +20,7 @@
 // makes on the frame's behalf and the platform enforces.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 const BOOKMARKS = "bookmarks";
 const BOOKMARKS_SCHEMA = [
@@ -32,10 +32,6 @@ const BOOKMARKS_SCHEMA = [
   { name: "added_ms", col_type: "integer" as const, nullable: false, default_val: "0" },
   { name: "added_by", col_type: "text"    as const, nullable: false, default_val: "" },
 ];
-
-declareTables([
-  { key: BOOKMARKS, title: "Bookmarks", description: "Saved links for this space.", local: true, schema: BOOKMARKS_SCHEMA },
-]);
 
 type Row = Record<string, unknown> & { id: string };
 

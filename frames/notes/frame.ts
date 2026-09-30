@@ -19,7 +19,7 @@
 // in is exactly the friction this frame exists to remove.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables, sanitizeText } from "@frame-core";
+import { sanitizeText } from "@frame-core";
 
 const NOTES = "notes";
 const NOTES_SCHEMA = [
@@ -31,10 +31,6 @@ const NOTES_SCHEMA = [
   { name: "edited_ms",   col_type: "integer" as const, nullable: false, default_val: "0" },
   { name: "pinned",      col_type: "integer" as const, nullable: false, default_val: "0" },
 ];
-
-declareTables([
-  { key: NOTES, title: "Notes", description: "Notes captured in this space's stream.", local: true, schema: NOTES_SCHEMA },
-]);
 
 type Row = Record<string, unknown> & { id: string };
 

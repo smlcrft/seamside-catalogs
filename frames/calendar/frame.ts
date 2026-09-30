@@ -19,21 +19,6 @@
 // e.g. Mon/Wed/Fri). Recurrence is expanded for display on the frontend; the backend only stores.
 // ----------------------------------------------------------------------------------------
 import type { Ctx } from "@frame-core";
-import { declareTables } from "@frame-core";
-
-declareTables([{
-  key: "calendar",
-  title: "Calendar",
-  description: "This space's calendar: one row per event (a date or a weekly recurrence).",
-  local: true,
-  schema: [
-    { name: "title", col_type: "text" }, { name: "date", col_type: "text" },
-    { name: "time", col_type: "text" }, { name: "tz", col_type: "text" },
-    { name: "dur", col_type: "integer" }, { name: "color", col_type: "text" },
-    { name: "url", col_type: "text" }, { name: "note", col_type: "text" },
-    { name: "recur", col_type: "text" },
-  ],
-}]);
 
 // ----- Calendar shape -------------------------------------------------------------------
 // A recurring event never extends back before `start` (its creation day) and runs until `until`
