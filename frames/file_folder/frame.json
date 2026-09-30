@@ -6,7 +6,7 @@
     "data": "write",
     "opens_folders": ["file folder", "files", "uploads", "shared"],
     "created_at": "2026-06-03T00:24:55Z",
-    "modified_at": "2026-09-30T22:00:00Z",
+    "modified_at": "2026-09-30T19:01:05Z",
     "app_version_min": "1.0.12",
     "default_width_px": 420,
     "default_height_px": 560,
