@@ -25,7 +25,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.clear('.fh-title');
   await keeper.fill('.fh-title', 'Workbench');
   await keeper.press('Enter');
-  expect(await untilRows('the title', '__fc_settings', (r) => r.find((x) => x.id === 'camjam.title' && x.cells.v === '"Workbench"' && x.cells._created_at)), 'the title is kept where installed copies keep it');
+  expect(await untilRows('the title', '_fdata/camjam_settings', (r) => r.find((x) => x.id === 'camjam.title' && x.cells.v === '"Workbench"' && x.cells._created_at)), 'the title is kept in the space\'s frame data');
 
   // the rung, from the owner's sheet
   await keeper.click('.fh-gear');
@@ -33,7 +33,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   expect(await keeper.inFrame(`return document.querySelectorAll('.sheet select option').length === 9 && document.querySelector('.sheet select').value === '2000'`), 'the sheet offers the nine rungs, on the default');
   await keeper.shot('2-sheet');
   await keeper.inFrame(`const s = document.querySelector('.sheet select'); s.value = '500'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
-  expect(await untilRows('the rung', '__fc_settings', (r) => r.find((x) => x.id === 'camjam.interval_ms' && x.cells.v === '500')), 'the rung is kept, on the ladder');
+  expect(await untilRows('the rung', '_settings', (r) => r.find((x) => x.id === 'camjam.interval_ms' && x.cells.v === '500')), 'the rung is kept, on the ladder');
   await keeper.inFrame(`[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Done')?.setAttribute('data-done', ''); return true;`);
   await keeper.click('[data-done]');
   expect(await keeper.until('the note to follow', `!document.querySelector('.sheet') && /A 100px still, every 0\\.5s\\. No audio\\./.test(${text})`), 'the sheet closes and the note says the new rung');
@@ -70,7 +70,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   expect(await keeper.until('the feed to end', `!document.querySelector('.cap') && /share my camera/.test(${text})`), 'the keeper stops sharing');
   expect(await visitor.until('the stranger to be told', `!document.querySelector('.cap') && /Nobody is sharing right now\\./.test(${text})`), 'and the stranger sees nobody sharing');
   await visitor.shot('6-stranger-idle');
-  const kept = await rows('__fc_settings');
+  const kept = [...await rows('_settings'), ...await rows('_fdata/camjam_settings')];
   expect(!kept.some((x) => /base64|jpeg/.test(JSON.stringify(x.cells))), 'no still was kept anywhere');
   await sleep(100);
 };

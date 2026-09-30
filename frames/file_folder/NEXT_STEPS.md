@@ -4,7 +4,7 @@ Where this frame could grow:
 
 - **File-type icons & thumbnails.** Map common extensions to Phosphor icons (image / pdf / zip / audio) and render small image previews inline.
 - **Total-size cap.** Alongside per-file size and file-count limits, add an optional per-space total-bytes budget.
-- **Uploader attribution.** If desired, record who uploaded each file (a row of a `file_folder` table naming the path). Today the list is read straight from the folder of the space.
+- **Uploader attribution.** If desired, record who uploaded each file (a row of a shared table in the frame data folder, `_fdata/uploads`, naming the path). Today the list is read straight from the folder of the space.
 - **Sort / search.** Sort by name/size/date and a filter box once lists get long.
 - **Per-file expiry.** Optional auto-delete after N days.
 

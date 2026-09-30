@@ -8,4 +8,4 @@ Where this frame could grow:
 - **Task notes / subtasks.** A collapsible note or a shallow subtask list per task, for milestones where a one-line title isn't enough.
 - **Archive completed milestones.** Completed milestones are hidden behind a toggle; a true archive (excluded from all queries, restorable) would keep very long-running roadmaps snappy.
 - **CSV / markdown export.** A read-only `/api/export` that streams the roadmap as markdown or CSV for status write-ups.
-- **Several roadmaps in one space.** Every roadmap session in a space shows the one pair of `roadmap_*` tables; a `roadmap` column (or tables per roadmap) would let a space hold more than one.
+- **Several roadmaps in one space.** Every roadmap session in a space shows the one pair of `_fdata/roadmap_*` tables; a `roadmap` column (or tables per roadmap) would let a space hold more than one.

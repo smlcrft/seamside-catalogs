@@ -2,35 +2,35 @@
   "tier": "members",
   "publish": "open",
   "steps": [
-    { "why": "a best an installed copy left behind", "as": "collaborator", "at": "space", "do": "KV.PUT t/pancake_scores/old_player", "body": { "name": "Ana", "score": 7, "at": 5, "_created_at": 5, "_modified_at": 5 }, "status": 200 },
+    { "why": "a best already in the table", "as": "collaborator", "at": "space", "do": "KV.PUT t/_fdata%2Fpancake_scores/old_player", "body": { "name": "Ana", "score": 7, "at": 5, "_created_at": 5, "_modified_at": 5 }, "status": 200 },
 
     { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["Pancake Stacker", "/lib/js/framelib.js", "/api/submit", "game_pancake_stacker"], "lacks": ["busSend", "frame.api"] },
     { "why": "and at the root", "do": "GET {frame}/", "status": 200, "has": ["startBtn"] },
     { "why": "the worker's own code is not a page", "do": "GET {frame}/frame.ts", "status": 404, "lacks": ["pancake_scores"] },
 
-    { "why": "a stranger sees the space's best, the one left behind", "do": "GET {api}/state", "status": 200, "is": { "/score": { "high": 7, "updated_at": 5, "holder": "Ana" }, "/viewer": "anon", "/can_record": false } },
+    { "why": "a stranger sees the space's best, the one already there", "do": "GET {api}/state", "status": 200, "is": { "/score": { "high": 7, "updated_at": 5, "holder": "Ana" }, "/viewer": "anon", "/can_record": false } },
     { "why": "a stranger's game is not recorded", "do": "POST {api}/submit", "body": { "score": 99 }, "status": 403, "is": { "/error": "editor only" } },
-    { "why": "a stranger writes no row at the door", "do": "KV.PUT t/pancake_scores/x", "body": { "name": "x", "score": 99, "at": 1 }, "status": 403 },
-    { "why": "and reads no table there", "do": "KV.LIST t/pancake_scores/", "lacks": ["Ana"] },
+    { "why": "a stranger writes no row at the door", "do": "KV.PUT t/_fdata%2Fpancake_scores/x", "body": { "name": "x", "score": 99, "at": 1 }, "status": 403 },
+    { "why": "and reads no table there", "do": "KV.LIST t/_fdata%2Fpancake_scores/", "lacks": ["Ana"] },
     { "why": "someone signed in and on no roster plays unrecorded", "as": "signed", "do": "GET {api}/state", "is": { "/can_record": false, "/score/high": 7 } },
     { "why": "and records nothing", "as": "signed", "do": "POST {api}/submit", "body": { "score": 99 }, "status": 403 },
     { "why": "a viewer plays unrecorded", "as": "viewer", "do": "GET {api}/state", "is": { "/can_record": false, "/viewer": "Viewer" } },
     { "why": "and records nothing", "as": "viewer", "do": "POST {api}/submit", "body": { "score": 99 }, "status": 403 },
-    { "why": "nothing was written by any of that", "table": "pancake_scores", "has": ["Ana"], "lacks": ["99"] },
+    { "why": "nothing was written by any of that", "table": "_fdata/pancake_scores", "has": ["Ana"], "lacks": ["99"] },
 
     { "why": "a collaborator's game is recorded", "as": "collaborator", "do": "GET {api}/state", "is": { "/can_record": true, "/viewer": "Collaborator" } },
     { "why": "a game under the best is theirs, and no record", "as": "collaborator", "do": "POST {api}/submit", "body": { "score": 3 }, "status": 200, "is": { "/new_record": false, "/score/high": 7, "/score/holder": "Ana" } },
-    { "why": "kept as their row, in the shape installed copies hold", "table": "pancake_scores", "has": ["did_dht_", "\"name\":\"Collaborator\"", "\"score\":3", "_created_at", "_modified_at"] },
+    { "why": "kept as their row, in the table's shape", "table": "_fdata/pancake_scores", "has": ["did_dht_", "\"name\":\"Collaborator\"", "\"score\":3", "_created_at", "_modified_at"] },
     { "why": "a game over the best is the space's best", "as": "collaborator", "do": "POST {api}/submit", "body": { "score": 10.8 }, "status": 200, "is": { "/new_record": true, "/score/high": 10, "/score/holder": "Collaborator" } },
     { "why": "a worse game leaves their best alone", "as": "collaborator", "do": "POST {api}/submit", "body": { "score": 5 }, "status": 200, "is": { "/new_record": false, "/score/high": 10 } },
-    { "why": "one row for them, holding their best, the old one kept as it was", "table": "pancake_scores", "has": ["\"score\":10", "\"_created_at\":5", "\"name\":\"Ana\""], "lacks": ["\"score\":3", "\"score\":5"] },
+    { "why": "one row for them, holding their best, the old one kept as it was", "table": "_fdata/pancake_scores", "has": ["\"score\":10", "\"_created_at\":5", "\"name\":\"Ana\""], "lacks": ["\"score\":3", "\"score\":5"] },
     { "why": "a score that is no number is nothing", "as": "collaborator", "do": "POST {api}/submit", "body": { "score": "lots" }, "status": 200, "is": { "/new_record": false, "/score/high": 10 } },
     { "why": "nor is no body", "as": "collaborator", "do": "POST {api}/submit", "status": 200, "is": { "/new_record": false } },
 
     { "why": "the owner's game is recorded, under the name the frame gives them", "as": "owner", "do": "POST {api}/submit", "body": { "score": 12 }, "status": 200, "is": { "/new_record": true, "/score/high": 12, "/score/holder": "the owner" } },
     { "why": "a tie is no record, and the first to reach it holds it", "as": "collaborator", "do": "POST {api}/submit", "body": { "score": 12 }, "status": 200, "is": { "/new_record": false, "/score/high": 12, "/score/holder": "the owner" } },
     { "why": "a stranger sees the new best", "do": "GET {api}/state", "is": { "/score/high": 12, "/score/holder": "the owner" } },
-    { "why": "three players, three rows", "table": "pancake_scores", "has": ["\"name\":\"the owner\"", "\"name\":\"Collaborator\",\"score\":12", "\"name\":\"Ana\""] },
+    { "why": "three players, three rows", "table": "_fdata/pancake_scores", "has": ["\"name\":\"the owner\"", "\"name\":\"Collaborator\",\"score\":12", "\"name\":\"Ana\""] },
     { "why": "a route there is none of", "do": "GET {api}/nope", "status": 404, "is": { "/error": "not found" } },
     { "why": "and a write to a page is none either", "as": "collaborator", "do": "POST {frame}/index.html", "body": {}, "status": 404 }
   ]

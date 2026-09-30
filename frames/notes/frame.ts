@@ -4,7 +4,7 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members read the stream live, through
 //                                           GET /api/list; space editors write.
-//   data_storage:   the space's table    — `notes.table.jsonl` at the space's root, synced
+//   data_storage:   the space's frame data — `_fdata/notes.table.jsonl`, synced
 //                                           with the space to every member and openable in any
 //                                           table tool. No contract: nobody else acts on these
 //                                           rows (docs/schema-contracts.md, "When NOT to write a
@@ -47,7 +47,7 @@ const DEFAULTS: Record<string, unknown> = Object.fromEntries(
 /** Write a note over what it held (a new one over the schema's defaults), stamped when
  * it was made and when it changed. */
 async function keep(ctx: Ctx, id: string | null, values: Record<string, unknown>): Promise<Row> {
-  const t = ctx.table<Record<string, unknown>>(NOTES);
+  const t = ctx.shared.table<Record<string, unknown>>(NOTES);
   const was = id ? await t.get(id) : null;
   const now = Date.now();
   return await t.upsert({
@@ -76,7 +76,7 @@ function extractTags(body: string): string {
 async function listNotes(ctx: Ctx) {
   // Newest first. Pinned notes are lifted client-side rather than sorted here, so the
   // stream's underlying order stays purely chronological.
-  const rows = (await ctx.table<Record<string, unknown>>(NOTES).all())
+  const rows = (await ctx.shared.table<Record<string, unknown>>(NOTES).all())
     .sort((a, b) => (Number(b.created_ms) || 0) - (Number(a.created_ms) || 0))
     .slice(0, 500);
   return rows.map((r) => ({
@@ -120,10 +120,10 @@ async function handleWrite(ctx: Ctx, op: string, v: Record<string, unknown> | nu
 
   if (op.startsWith("note/")) {
     const [id, action] = op.slice("note/".length).split("/");
-    const row = id ? await ctx.table(NOTES).get(id) : null;
+    const row = id ? await ctx.shared.table(NOTES).get(id) : null;
     if (!row) return json({ error: "bad id" }, 400);
 
-    if (action === "delete") { await ctx.table(NOTES).delete(id); return ok(); }
+    if (action === "delete") { await ctx.shared.table(NOTES).delete(id); return ok(); }
     if (action === "pin") {
       await keep(ctx, id, { pinned: Number(v?.pinned) ? 1 : 0 });
       return ok();

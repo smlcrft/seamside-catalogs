@@ -6,11 +6,12 @@
 // Manager keeps. Each session is bound to one (ctx.kv `bound/members`), chosen by an
 // editor; this frame only READS it.
 //
-// Every send is a row of the space's `reachout_sent` table, saying which list it went to,
+// Every send is a row of the `reachout_sent` table in the space's frame data folder
+// (`_fdata/reachout_sent.table.jsonl`), saying which list it went to,
 // who sent it, when, to which role(s) (or everyone) and how (email or text); a session
 // shows the sends to its own list. Settings (board title, which roles' messages outsiders
-// may read) are this session's own: the `settings` row of `__fc_settings`, which no wire
-// serves. The actual sending happens OS-side: the frontend builds a `mailto:` (all
+// may read) are this session's own: the `settings` row of its own `settings` table
+// (`ctx.own`), which no wire serves. The actual sending happens OS-side: the frontend builds a `mailto:` (all
 // recipients bcc'd) or a per-person `sms:` link and asks the viewer to open it.
 //
 // The page reads the log and the roster's shape from the routes here, which decide on
@@ -38,32 +39,17 @@ const DEFAULT_SETTINGS: Settings = {
   public_roles: [],
 };
 
-const SETTINGS = "__fc_settings";
-
 /** The row stamped when it was made and when it changed. */
 async function keepSettings(ctx: Ctx, v: string): Promise<void> {
-  const table = ctx.table<Row>(SETTINGS);
+  const table = ctx.own.table<Row>("settings");
   const was = await table.get("settings");
   const now = Date.now();
   await table.upsert({ ...(was ?? { _created_at: now }), v, id: "settings", _modified_at: now });
 }
 
-/** The stored JSON: the settings row, else what an older copy kept in the session key,
- *  which a stranger could read and a collaborator write, moved into the row once. The row
- *  is written on the first read either way, so a key written at the door later is ignored. */
-async function storedSettings(ctx: Ctx): Promise<string> {
-  const row = await ctx.table<Row>(SETTINGS).get("settings");
-  if (row?.v != null) return String(row.v);
-  const old = (await ctx.kv.get("settings"))?.value;
-  const v = old ?? JSON.stringify(DEFAULT_SETTINGS);
-  await keepSettings(ctx, v);
-  if (old != null) await ctx.kv.del("settings");
-  return v;
-}
-
 async function getSettings(ctx: Ctx): Promise<Settings> {
   let v: Partial<Settings> = {};
-  try { v = JSON.parse(await storedSettings(ctx)) ?? {}; } catch { /* defaults */ }
+  try { v = JSON.parse(String((await ctx.own.table<Row>("settings").get("settings"))?.v ?? "{}")) ?? {}; } catch { /* defaults */ }
   return {
     title: typeof v.title === "string" && v.title.trim() ? v.title : DEFAULT_SETTINGS.title,
     public_roles: Array.isArray(v.public_roles) ? v.public_roles.map(String) : [],
@@ -74,7 +60,7 @@ async function setSettings(ctx: Ctx, next: Settings): Promise<void> {
   await keepSettings(ctx, JSON.stringify(next));
 }
 
-// ----- Sent-message log (the space's reachout_sent table) ---------------------------------
+// ----- Sent-message log (the shared reachout_sent table) ----------------------------------
 const SENT = "reachout_sent";
 type SentEntry = {
   id: string;
@@ -94,7 +80,7 @@ type SentEntry = {
 type Row = Record<string, unknown>;
 
 async function sentTo(ctx: Ctx, list: string): Promise<SentEntry[]> {
-  const rows = (await ctx.table<Row>(SENT).all()).filter((r) => r.list === list).slice(0, 5000);
+  const rows = (await ctx.shared.table<Row>(SENT).all()).filter((r) => r.list === list).slice(0, 5000);
   return rows.map((r) => ({
     id: r.id,
     list: String(r.list ?? ""),
@@ -316,7 +302,7 @@ export default {
         attempted_count,
       };
       const now = Date.now();
-      const row = await ctx.table<Row>(SENT).upsert({ _created_at: now, ...entry, _modified_at: now });
+      const row = await ctx.shared.table<Row>(SENT).upsert({ _created_at: now, ...entry, _modified_at: now });
       tell(ctx, "log");
       return json({ entry: { id: row.id, ...entry } });
     }
@@ -326,7 +312,7 @@ export default {
       if (!isEditor) return refuse(403, "editors only");
       const id = String((await body(request))?.id ?? "");
       if (!id) return refuse(400, "id required");
-      const sent = ctx.table<Row>(SENT);
+      const sent = ctx.shared.table<Row>(SENT);
       const row = await sent.get(id);
       if (!row || row.list !== (await boundList(ctx))) return refuse(404, "no such message");
       await sent.delete(id);

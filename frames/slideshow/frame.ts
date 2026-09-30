@@ -4,15 +4,16 @@
 // Design axes:
 //   privacy:        privacy-public-view  — editors build/edit the deck; viewers and anonymous
 //                                           link visitors get a read-only, browseable presentation.
-//   data_storage:   storage-simple-files — the whole deck is one file of the space,
-//                                           Slideshow/slides.json, its uploaded images beside it
-//                                           in Slideshow/images/; the live present position is
-//                                           the `slideshow_present` row of __fc_settings.
+//   data_storage:   storage-simple-files — the whole deck is one file in the space's frame data
+//                                           folder, _fdata/slideshow/slides.json, its uploaded
+//                                           images beside it in _fdata/slideshow/images/; the live
+//                                           present position is the `slideshow_present` row of the
+//                                           session's own settings table.
 //   view_realtime:  view-collaborative   — every save pushes what changed and every open page
 //                                           reads again as whoever it is; when "keep viewers in
 //                                           sync" is on, each slide advance pushes too, so every
 //                                           viewer's presentation tracks the editor's current slide.
-//   settings_scope: settings-per-session — everything is this session's.
+//   settings_scope: deck per space, present position per session.
 //
 // The page reads no table and no file: every read and write is a route here, decided on
 // ctx.peer, and images are served as bytes by /api/image.
@@ -53,10 +54,10 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const IMG_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 const KEEP_RECENT_IMG_MS = 5 * 60 * 1000; // don't GC images uploaded in the last 5 min
 
-// ----- Files of the space ---------------------------------------------------------------
-// Slideshow/slides.json          the deck
-// Slideshow/images/<uuid>.<ext>  its uploaded images, named by the elements' imageId
-const FOLDER = "Slideshow";
+// ----- Files, in the frame data folder (_fdata) ------------------------------------------
+// slideshow/slides.json          the deck
+// slideshow/images/<uuid>.<ext>  its uploaded images, named by the elements' imageId
+const FOLDER = "slideshow";
 const SHOW_FILE = `${FOLDER}/slides.json`;
 const IMAGES = `${FOLDER}/images`;
 
@@ -64,29 +65,29 @@ const ID_RE = /^[0-9a-fA-F-]{8,64}$/;
 
 async function loadShow(ctx: Ctx): Promise<Show> {
   try {
-    const raw = await ctx.files.read(SHOW_FILE);
+    const raw = await ctx.shared.files.read(SHOW_FILE);
     return raw ? sanitizeShow(JSON.parse(new TextDecoder().decode(raw))) : structuredClone(DEFAULT_SHOW);
   } catch { return structuredClone(DEFAULT_SHOW); }
 }
 async function saveShow(ctx: Ctx, show: Show): Promise<void> {
-  await ctx.files.write(SHOW_FILE, JSON.stringify(show, null, 2));
+  await ctx.shared.files.write(SHOW_FILE, JSON.stringify(show, null, 2));
 }
 
 // The live shared present position. Kept apart from the deck so that frequent slide-advance
 // writes never collide with editor deck saves or fire deck refreshes. Late joiners read it
 // via /api/state so they land on the slide the presenter is currently on. A setting is a row
-// of __fc_settings, its value JSON under `v`, stamped like every row.
-const SETTINGS = "__fc_settings";
+// of the session's own settings table, its value JSON under `v`, stamped like every row.
+const settingsOf = (ctx: Ctx) => ctx.own.table<Record<string, unknown>>("settings");
 const PRESENT_KEY = "slideshow_present";
 type Present = { index: number };
 async function loadPresent(ctx: Ctx): Promise<Present> {
-  const row = await ctx.table<{ v?: string }>(SETTINGS).get(PRESENT_KEY);
+  const row = await settingsOf(ctx).get(PRESENT_KEY);
   let v: unknown = null;
   try { v = row?.v == null ? null : JSON.parse(String(row.v)); } catch { /* unreadable: from 0 */ }
   return { index: num(v, 0, 0, MAX_SLIDES) };
 }
 async function savePresent(ctx: Ctx, index: number): Promise<void> {
-  const t = ctx.table<Record<string, unknown>>(SETTINGS);
+  const t = settingsOf(ctx);
   const was = await t.get(PRESENT_KEY);
   const now = Date.now();
   await t.upsert({ ...(was ?? { _created_at: now }), v: JSON.stringify(index), id: PRESENT_KEY, _modified_at: now });
@@ -196,16 +197,16 @@ async function gcImages(ctx: Ctx, show: Show): Promise<void> {
   for (const id of referenced) recentUploads.delete(id);
   const now = Date.now();
   for (const [id, at] of recentUploads) if (now - at > KEEP_RECENT_IMG_MS) recentUploads.delete(id);
-  for (const e of await ctx.files.list(IMAGES).catch(() => [])) {
+  for (const e of await ctx.shared.files.list(IMAGES).catch(() => [])) {
     const id = e.name.replace(/\.[^.]+$/, "");
     if (e.dir || referenced.has(id) || recentUploads.has(id)) continue;
-    await ctx.files.remove(`${IMAGES}/${e.name}`).catch(() => { /* already gone */ });
+    await ctx.shared.files.remove(`${IMAGES}/${e.name}`).catch(() => { /* already gone */ });
   }
 }
 
 async function imageFile(ctx: Ctx, id: string): Promise<string | null> {
   if (!ID_RE.test(id)) return null;
-  const kid = (await ctx.files.list(IMAGES).catch(() => []))
+  const kid = (await ctx.shared.files.list(IMAGES).catch(() => []))
     .find((k) => !k.dir && k.name.replace(/\.[^.]+$/, "") === id);
   return kid ? kid.name : null;
 }
@@ -297,14 +298,14 @@ async function upload(ctx: Ctx, query: URLSearchParams, bytes: Uint8Array): Prom
   if (!looksLikeImage(bytes)) return refuse(415, "file is not an image");
   const id = crypto.randomUUID();
   recentUploads.set(id, Date.now());
-  await ctx.files.write(`${IMAGES}/${id}.${ext}`, bytes);
+  await ctx.shared.files.write(`${IMAGES}/${id}.${ext}`, bytes);
   return json({ imageId: id });
 }
 
 // Image fetch — readable by everyone who can see the deck.
 async function image(ctx: Ctx, id: string): Promise<Response> {
   const name = await imageFile(ctx, id);
-  const buf = name ? await ctx.files.read(`${IMAGES}/${name}`).catch(() => null) : null;
+  const buf = name ? await ctx.shared.files.read(`${IMAGES}/${name}`).catch(() => null) : null;
   if (!name || !buf) return refuse(404, "not found");
   return new Response(buf as Uint8Array<ArrayBuffer>, {
     headers: {

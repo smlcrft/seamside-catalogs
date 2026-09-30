@@ -36,7 +36,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   if (!await keeper.until('the question', `!!document.querySelector('.framelib-prompt-input')`)) return;
   await keeper.fill('.framelib-prompt-input', 'Spanish');
   await keeper.click('.framelib-btn-primary');
-  const spanish = await untilRows('the deck', 'flashcards_decks', (r) => r.find((x) => x.cells.name === 'Spanish'));
+  const spanish = await untilRows('the deck', '_fdata/flashcards_decks', (r) => r.find((x) => x.cells.name === 'Spanish'));
   expect(spanish?.cells.sort_order === 0 && spanish?.cells._created_at > 0 && spanish?.cells._modified_at > 0, 'a deck is a row of the space, first in order, stamped');
   if (!await keeper.until('the deck and the card strip', `!!${deck('Spanish')} && !!document.querySelector('.add .f-front')`)) return;
 
@@ -44,16 +44,16 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.fill('.add .f-front', 'hola');
   await keeper.fill('.add .f-back', 'hello');
   await keeper.press('Enter');
-  const hola = await untilRows('the card', 'flashcards', (r) => r.find((x) => x.cells.front === 'hola'));
+  const hola = await untilRows('the card', '_fdata/flashcards', (r) => r.find((x) => x.cells.front === 'hola'));
   expect(hola?.cells.back === 'hello' && hola?.cells.deck_id === spanish?.id && hola?.cells.added_ms > 0 && hola?.cells._created_at > 0, 'Enter adds a card to the deck, a row of the space');
   expect(await keeper.inFrame(`return document.querySelector('.add .f-front').value === '' && document.querySelector('.add .f-back').value === ''`), 'the strip is emptied for the next card');
   await keeper.fill('.add .f-front', 'gato');
   await keeper.press('Enter');
   await sleep(400);
-  expect((await rows('flashcards')).length === 1, 'a card with one side is not added');
+  expect((await rows('_fdata/flashcards')).length === 1, 'a card with one side is not added');
   await keeper.fill('.add .f-back', 'cat');
   await keeper.press('Enter');
-  const gato = await untilRows('the second card', 'flashcards', (r) => r.find((x) => x.cells.front === 'gato'));
+  const gato = await untilRows('the second card', '_fdata/flashcards', (r) => r.find((x) => x.cells.front === 'gato'));
   expect(await keeper.until('the deck to count them', `${deck('Spanish')}?.querySelector('.d-fig .n').textContent === '2' && ${deck('Spanish')}.querySelector('.d-meta').textContent === '2 cards · 2 never seen' && /2 cards ready\\./.test(document.querySelector('.verdict').textContent)`), 'the deck says two are due, never seen');
   await keeper.shot('2-deck');
 
@@ -73,7 +73,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   expect(await keeper.inFrame(`return [...document.querySelectorAll('.ans')].map((a) => a.querySelector('.w').textContent + ' ' + a.querySelector('.n').textContent).join(' | ') === 'again tomorrow | hard tomorrow | good tomorrow | easy 4d'`), 'a new card offers tomorrow, tomorrow, tomorrow and four days');
   await keeper.shot('4-turned');
   await keeper.click('.ans.good');
-  const first = await untilRows('the review', 'flashcards_reviews', (r) => r.find((x) => x.cells.card_id === hola?.id));
+  const first = await untilRows('the review', '_fdata/flashcards_reviews', (r) => r.find((x) => x.cells.card_id === hola?.id));
   expect(first?.cells.reps === 1 && first?.cells.ivl === 1 && first?.cells.ef === 2.5 && first?.cells.due === day(1) && !!first?.cells.user_id && first?.cells.seen_ms > 0 && first?.cells._created_at > 0, 'good on a new card is a review row of the keeper\'s own, due tomorrow');
 
   // the next by the button and the keys: again sends it round once more
@@ -81,14 +81,14 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('.flipbtn');
   await keeper.until('the card to turn', `!!document.querySelector('.answers')`);
   await keeper.press('1', 49);
-  const again = await untilRows('the again', 'flashcards_reviews', (r) => r.find((x) => x.cells.card_id === gato?.id));
+  const again = await untilRows('the again', '_fdata/flashcards_reviews', (r) => r.find((x) => x.cells.card_id === gato?.id));
   expect(again?.cells.reps === 0 && again?.cells.ivl === 1 && again?.cells.ef === 1.96, 'the key 1 answers again: reps reset, easiness down');
   if (!await keeper.until('the card to come round again', `${front} === 'gato' && /3 of 3/.test(document.querySelector('.runbar').textContent)`)) return;
   await keeper.press('Enter');
   await keeper.until('the card to turn', `!!document.querySelector('.answers')`);
   await keeper.click('.ans.easy');
-  expect(await untilRows('the easy', 'flashcards_reviews', (r) => r.find((x) => x.cells.card_id === gato?.id && x.cells.reps === 1 && x.cells.ivl === 4 && x.cells.due === day(4))), 'easy graduates it to four days, over the same row');
-  expect((await rows('flashcards_reviews')).length === 2, 'one row per card for the keeper, never a second');
+  expect(await untilRows('the easy', '_fdata/flashcards_reviews', (r) => r.find((x) => x.cells.card_id === gato?.id && x.cells.reps === 1 && x.cells.ivl === 4 && x.cells.due === day(4))), 'easy graduates it to four days, over the same row');
+  expect((await rows('_fdata/flashcards_reviews')).length === 2, 'one row per card for the keeper, never a second');
   expect(await keeper.until('the session to end', `!document.querySelector('.runbar') && /Nothing due — back tomorrow\\./.test(document.querySelector('.verdict')?.textContent ?? '') && ${deck('Spanish')}?.querySelector('.d-fig .n').textContent === '0'`), 'the session ends and says when the next is due');
   expect(await keeper.inFrame(`return ${deck('Spanish')}.querySelector('.btn-primary').disabled && ${deck('Spanish')}.querySelector('.d-meta').textContent === '2 cards'`), 'with nothing to study and nothing unseen');
   await keeper.shot('5-studied');
@@ -103,20 +103,20 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   if (!await keeper.until('the rename', `document.querySelector('.framelib-prompt-input')?.value === 'Spanish'`)) return;
   await keeper.fill('.framelib-prompt-input', 'Español');
   await keeper.click('.framelib-btn-primary');
-  expect(await untilRows('the new name', 'flashcards_decks', (r) => r.find((x) => x.id === spanish?.id && x.cells.name === 'Español' && x.cells.sort_order === 0 && x.cells._created_at === spanish?.cells._created_at)), 'a deck is renamed over its row');
+  expect(await untilRows('the new name', '_fdata/flashcards_decks', (r) => r.find((x) => x.id === spanish?.id && x.cells.name === 'Español' && x.cells.sort_order === 0 && x.cells._created_at === spanish?.cells._created_at)), 'a deck is renamed over its row');
   expect(await keeper.until('the new name to draw', `!!${deck('Español')}`), 'and the keeper sees it');
   expect(await visitor.until('the new name for the stranger', `!!${deck('Español')}`), "and the stranger's page is told to read again");
 
   // a deck and card another device wrote, read on the next visit
-  await seed('flashcards_decks', 'old', { name: 'French', sort_order: 1, _created_at: 5, _modified_at: 5 });
-  await seed('flashcards', 'oldc', { deck_id: 'old', front: 'chat', back: 'cat', added_ms: 5, _created_at: 5, _modified_at: 5 });
+  await seed('_fdata/flashcards_decks', 'old', { name: 'French', sort_order: 1, _created_at: 5, _modified_at: 5 });
+  await seed('_fdata/flashcards', 'oldc', { deck_id: 'old', front: 'chat', back: 'cat', added_ms: 5, _created_at: 5, _modified_at: 5 });
   await reload(keeper);
   expect(await keeper.until('the old deck', `${deck('French')}?.querySelector('.d-fig .n').textContent === '1' && document.querySelectorAll('.deck')[1] === ${deck('French')} && /1 card ready\\./.test(document.querySelector('.verdict').textContent)`), 'a deck another device wrote is drawn after the first, its card due');
   await keeper.inFrame(`const s = document.querySelector('.add .f-deck'); s.value = 'old'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
   await keeper.fill('.add .f-front', 'chien');
   await keeper.fill('.add .f-back', 'dog');
   await keeper.press('Enter');
-  expect(await untilRows('the card in the old deck', 'flashcards', (r) => r.find((x) => x.cells.front === 'chien' && x.cells.deck_id === 'old')), 'a card goes into the deck chosen');
+  expect(await untilRows('the card in the old deck', '_fdata/flashcards', (r) => r.find((x) => x.cells.front === 'chien' && x.cells.deck_id === 'old')), 'a card goes into the deck chosen');
   expect(await visitor.until('the card for the stranger', `${deck('French')}?.querySelector('.d-meta').textContent === '2 cards · 2 never seen'`), "and reaches the stranger's open page");
   await keeper.shot('6-two-decks');
 
@@ -127,14 +127,14 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.shot('7-remove');
   await keeper.click('.framelib-btn-ghost');
   await sleep(400);
-  expect((await rows('flashcards_decks')).length === 2 && await keeper.inFrame(`return !!${deck('Español')}`), 'Cancel removes nothing');
+  expect((await rows('_fdata/flashcards_decks')).length === 2 && await keeper.inFrame(`return !!${deck('Español')}`), 'Cancel removes nothing');
   await clickIn(keeper, 'Español', '.d-name');
   await choose(keeper, 'Remove');
   await keeper.until('the confirm again', `!!document.querySelector('.framelib-btn-primary')`);
   await keeper.click('.framelib-btn-primary');
-  expect(await untilRows('the removal', 'flashcards_decks', (r) => r.length === 1 && r[0].id === 'old'), 'Remove takes the deck out');
-  expect(await untilRows('its cards', 'flashcards', (r) => r.length === 2 && r.every((x) => x.cells.deck_id === 'old')), 'with its cards');
-  expect(await untilRows('its progress', 'flashcards_reviews', (r) => r.length === 0), 'and the progress on them');
+  expect(await untilRows('the removal', '_fdata/flashcards_decks', (r) => r.length === 1 && r[0].id === 'old'), 'Remove takes the deck out');
+  expect(await untilRows('its cards', '_fdata/flashcards', (r) => r.length === 2 && r.every((x) => x.cells.deck_id === 'old')), 'with its cards');
+  expect(await untilRows('its progress', '_fdata/flashcards_reviews', (r) => r.length === 0), 'and the progress on them');
   expect(await keeper.until('it to go', `document.querySelectorAll('.deck').length === 1 && !${deck('Español')}`), 'it is gone from the page');
   expect(await visitor.until('it to go for the stranger', `document.querySelectorAll('.deck').length === 1`), "and from the stranger's");
   await keeper.shot('8-after');

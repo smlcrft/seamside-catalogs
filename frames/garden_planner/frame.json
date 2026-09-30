@@ -1,9 +1,10 @@
 {
     "name": "Garden Planner",
-    "description": "Lay out a garden as snap-to-grid plots on a soil-toned canvas. Each plot is given a name, assigned to a person, tagged with the plant families growing in it, and stamped with when and at what stage it was planted. The frame's server half pulls the last seven days of weather from Open-Meteo for the garden's location and tints every plot with a stress gradient \u2014 green when the plants are comfortable, red when the recent heat, rain or sun has been hard on what is planted there, worked out per plant family and softened by how much shade the bed gets. Plots are the space's garden_plots table; they can be assigned to the people on a members list an editor picks for each copy of the frame (the roster Member Manager keeps), or to typed-in names. Editors of the space lay out plots (the owner can keep that to themselves) and only the owner changes the garden's settings, which belong to each copy of the frame; members see it live and read-only, and when the owner allows public viewing so does anyone the frame is published to, without names or notes.",
+    "description": "Lay out a garden as snap-to-grid plots on a soil-toned canvas. Each plot is given a name, assigned to a person, tagged with the plant families growing in it, and stamped with when and at what stage it was planted. The frame's server half pulls the last seven days of weather from Open-Meteo for the garden's location and tints every plot with a stress gradient \u2014 green when the plants are comfortable, red when the recent heat, rain or sun has been hard on what is planted there, worked out per plant family and softened by how much shade the bed gets. Plots are the garden_plots table in the space's frame data folder (_fdata/garden_plots.table.jsonl); they can be assigned to the people on a members list an editor picks for each copy of the frame (the roster Member Manager keeps), or to typed-in names. Editors of the space lay out plots (the owner can keep that to themselves) and only the owner changes the garden's settings, which belong to each copy of the frame; members see it live and read-only, and when the owner allows public viewing so does anyone the frame is published to, without names or notes.",
     "frame_type": "Tandem",
     "tags": ["household", "garden", "outdoors"],
     "opens": ["members.table.jsonl"],
+    "data": "write",
     "permissions_backend": {
         "net": [
             "api.open-meteo.com",
@@ -13,8 +14,8 @@
     "default_width_px": 900,
     "default_height_px": 700,
     "created_at": "2026-04-27T18:00:00Z",
-    "modified_at": "2026-09-30T02:00:00Z",
-    "app_version_min": "1.0.11",
+    "modified_at": "2026-09-30T22:00:00Z",
+    "app_version_min": "1.0.12",
     "licensed_under_cc0": true,
     "attribution_log": [],
     "icon": "ph:squares-four",

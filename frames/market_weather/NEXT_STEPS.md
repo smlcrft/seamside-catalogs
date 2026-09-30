@@ -22,9 +22,10 @@ Ideas worth chasing once the v1 lands in vendors' hands and we get feedback:
   for the next 7 days, to support the question "should I do Saturday OR Sunday
   this weekend?" not just "what does Saturday look like?"
 
-- **A shared market table** so a multi-vendor market can share one forecast and overlay
-  each booth's own attendance log on top. Today each session keeps its own location and
-  events (its own state in the space), so each booth enters the location again.
+- **A shared market table** in the space's frame data (`ctx.shared.table("markets")`) so a
+  multi-vendor market can share one forecast and overlay each booth's own attendance log on
+  top. Today each session keeps its own location and events in its own settings, so each
+  booth enters the location again.
 
 - **Severe-weather alarms.** A real "DON'T BOTHER OPENING" flag for sustained
   rain >0.25 in/hr, sustained wind >30 mph, lightning probability, etc. Right now

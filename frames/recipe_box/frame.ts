@@ -5,8 +5,8 @@
 //   privacy:        privacy-public-view  — non-members get a live read-only view through
 //                                           GET /api/recipes; space editors manage the
 //                                           collection.
-//   data_storage:   the space's table    — `recipes.table.jsonl` at the space's root,
-//                                           synced with the space; the Meal Planner in
+//   data_storage:   the frame data folder — `_fdata/recipes.table.jsonl`, synced with
+//                                           the space; the Meal Planner in
 //                                           the same space reads the same rows.
 //   view_realtime:  view-collaborative    — every write pushes, so every open page reads
 //                                           again.
@@ -45,7 +45,7 @@ const DEFAULTS: Record<string, unknown> = Object.fromEntries(
 /** Write a recipe over what it held (a new one over the schema's defaults), stamped when
  * it was made and when it changed. */
 async function keep(ctx: Ctx, id: string | null, values: Record<string, unknown>): Promise<Row> {
-  const t = ctx.table<Record<string, unknown>>(RECIPES);
+  const t = ctx.shared.table<Record<string, unknown>>(RECIPES);
   const was = id ? await t.get(id) : null;
   const now = Date.now();
   return await t.upsert({
@@ -85,7 +85,7 @@ function normalizePhoto(v: unknown): string {
 
 // ----- Queries --------------------------------------------------------------------------
 async function recipesData(ctx: Ctx) {
-  const rows = await ctx.table<Record<string, unknown>>(RECIPES).all();
+  const rows = await ctx.shared.table<Record<string, unknown>>(RECIPES).all();
   return rows
     .map((r) => ({
       id: r.id, title: r.title, ingredients_lines: r.ingredients_lines,
@@ -130,10 +130,10 @@ async function handleWrite(ctx: Ctx, op: string, v: Record<string, unknown> | nu
 
   if (op.startsWith("recipe/")) {
     const [id, action] = op.slice("recipe/".length).split("/");
-    if (!id || !(await ctx.table(RECIPES).get(id))) return json({ error: "bad id" }, 400);
+    if (!id || !(await ctx.shared.table(RECIPES).get(id))) return json({ error: "bad id" }, 400);
 
     if (action === "delete") {
-      await ctx.table(RECIPES).delete(id);
+      await ctx.shared.table(RECIPES).delete(id);
       return ok();
     }
     if (action) return json({ error: "not found" }, 404);

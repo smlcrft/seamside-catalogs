@@ -39,9 +39,9 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
 
   // a small PNG goes up as it is; a thumbnail beside it
   await keeper.choose('input[type="file"]', small);
-  const one = await untilRows('the first photo', 'picture_frame_photos', (r) => r.find((x) => x.cells.name === 'tiles.png' && x.cells.thumb_path));
+  const one = await untilRows('the first photo', '_fdata/photos', (r) => r.find((x) => x.cells.name === 'tiles.png' && x.cells.thumb_path));
   expect(one?.cells.mime === 'image/png' && one?.cells.w === 64 && one?.cells.h === 48 && one?.cells.size === readFileSync(small).length && one?.cells.sort_order === 0, 'a picture chosen is a row of the space, measured, its bytes as they were');
-  expect(one?.cells.path === `Picture Frame/${one?.id}/tiles.png` && one?.cells.thumb_path === `Picture Frame/${one?.id}/thumbnail.png` && one?.cells._created_at && one?.cells._modified_at, 'its file and its thumbnail are named on the row, stamped');
+  expect(one?.cells.path === `photos/${one?.id}/tiles.png` && one?.cells.thumb_path === `photos/${one?.id}/thumbnail.png` && one?.cells._created_at && one?.cells._modified_at, 'its file and its thumbnail are named on the row, stamped');
   expect(await keeper.until('the thumbnail to draw', `document.querySelector('.grid .cell img')?.naturalWidth > 0`), 'the grid draws the thumbnail, from bytes the worker handed over');
   const back = await keeper.inFrame(`
     const r = await window.seamside.fetch('/api/photo/${one?.id}');
@@ -51,8 +51,8 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
 
   // a large one is made smaller on the way in
   await keeper.choose('input[type="file"]', big);
-  const two = await untilRows('the second photo', 'picture_frame_photos', (r) => r.find((x) => x.cells.name === 'meadow.png' && x.cells.thumb_path));
-  expect(two?.cells.mime === 'image/jpeg' && two?.cells.w === 3000 && two?.cells.h === 2000 && two?.cells.sort_order === 1 && two?.cells.path === `Picture Frame/${two?.id}/meadow.jpg`, 'a large picture is re-encoded as JPEG, its natural size kept, after the first');
+  const two = await untilRows('the second photo', '_fdata/photos', (r) => r.find((x) => x.cells.name === 'meadow.png' && x.cells.thumb_path));
+  expect(two?.cells.mime === 'image/jpeg' && two?.cells.w === 3000 && two?.cells.h === 2000 && two?.cells.sort_order === 1 && two?.cells.path === `photos/${two?.id}/meadow.jpg`, 'a large picture is re-encoded as JPEG, its natural size kept, after the first');
   expect(await keeper.until('two cells', `document.querySelectorAll('.grid .cell img').length === 2 && [...document.querySelectorAll('.grid .cell img')].every((i) => i.naturalWidth > 0)`), 'and both draw in the grid');
   expect(await keeper.until('the count', `/2 photos/.test(document.querySelector('.bar .count').textContent)`), 'the bar counts them');
   const full = await keeper.inFrame(`
@@ -110,11 +110,11 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.shot('6-confirm');
   await keeper.click('.framelib-dialog-host .framelib-btn-ghost');
   await sleep(400);
-  expect((await rows('picture_frame_photos')).length === 2, 'Cancel keeps the photo');
+  expect((await rows('_fdata/photos')).length === 2, 'Cancel keeps the photo');
   await keeper.click('.grid .cell:nth-child(1) .del');
   await keeper.until('the question again', `!!document.querySelector('.framelib-dialog-host .framelib-btn-danger')`);
   await keeper.click('.framelib-dialog-host .framelib-btn-danger');
-  expect(await untilRows('the photo to go', 'picture_frame_photos', (r) => r.length === 1 && r[0].id === two?.id), 'Delete removes it');
+  expect(await untilRows('the photo to go', '_fdata/photos', (r) => r.length === 1 && r[0].id === two?.id), 'Delete removes it');
   expect(await keeper.until('one cell', `document.querySelectorAll('.grid .cell').length === 1 && /1 photo/.test(document.querySelector('.bar .count').textContent)`), 'and the grid follows');
   expect(await visitor.until('the stranger to lose it', `document.querySelectorAll('.single img, .grid .cell').length === 1`), "and the stranger's page too");
   await keeper.shot('7-after');

@@ -17,9 +17,12 @@
 //   - the owner, or the editor who wrote it: deletes a post.
 //   - the owner: sets the heading, tagline and who may post.
 //
-// Posts, media rows and votes are the space's tables (outpost_posts / outpost_media /
-// outpost_votes). Attached media are files of the space under Outpost/<post_id>/, served
-// by this worker to everyone who reads the board. Settings are rows of __fc_settings.
+// Posts, media rows and votes are tables in the space's frame data folder (_fdata/posts,
+// _fdata/post_media, _fdata/post_votes), where any frame of the space may read them.
+// Attached media are files beside the posts table, _fdata/posts/<post_id>/, served by this
+// worker to everyone who reads the board. The heading and tagline describe the board, so they
+// are rows of the shared _fdata/board_settings beside it; who may post decides who may act,
+// so it is a row of the session's own settings table, which no collaborator reaches.
 // Every write pushes what to read again; each open page reads again as whoever it is.
 // ----------------------------------------------------------------------------------------
 import type { Ctx, FrameTableDecl, PeerInfo } from "@frame-core";
@@ -56,23 +59,24 @@ const MAX_OPTION_LEN = 120;
 const DEFAULT_PAGE = 15;   // posts per feed page
 const MAX_PAGE = 50;
 
-// ----- Media files: Outpost/<post_id>/<name>, files of the space; the media row names it --
-const FOLDER = "Outpost";
+// ----- Media files: posts/<post_id>/<name> within _fdata, beside the posts table; the media
+// row names it ----------------------------------------------------------------------------
+const FOLDER = "posts";
 function postDir(postId: string): string {
   return `${FOLDER}/${postId}`;
 }
 
-// ----- The space's tables (named for this frame, so no other frame's rows land in them) --
-const POSTS = "outpost_posts";
-const MEDIA = "outpost_media";
-const VOTES = "outpost_votes";
-// Every frame in the space shares this store, so the keys carry this frame's name.
-const SETTINGS = "__fc_settings";
+// ----- The shared tables, in the frame data folder; settings are the session's own ------
+const POSTS = "posts";
+const MEDIA = "post_media";
+const VOTES = "post_votes";
+const BOARD = "board_settings";   // shared: title, tagline
+const SETTINGS = "settings";      // the session's own: who_can_post
 
 const TABLES: FrameTableDecl[] = [
   {
     key: POSTS,
-    title: "Outpost Posts",
+    title: "Posts",
     description: "Published posts for this outpost, newest first.",
     schema: [
       { name: "author",         col_type: "text",    nullable: false, default_val: "" },
@@ -85,8 +89,8 @@ const TABLES: FrameTableDecl[] = [
   },
   {
     key: MEDIA,
-    title: "Outpost Media",
-    description: "Attached media; `path` is the file in the space (Outpost/<post_id>/<name>).",
+    title: "Post Media",
+    description: "Attached media; `path` is the file in the frame data folder (posts/<post_id>/<name>).",
     schema: [
       { name: "post_id", col_type: "text",    nullable: false, default_val: "" },
       { name: "name",    col_type: "text",    nullable: false, default_val: "" },
@@ -98,7 +102,7 @@ const TABLES: FrameTableDecl[] = [
   },
   {
     key: VOTES,
-    title: "Outpost Votes",
+    title: "Post Votes",
     description: "One poll vote per (post, voter); re-voting replaces the choice.",
     schema: [
       { name: "post_id", col_type: "text",    nullable: false, default_val: "" },
@@ -110,7 +114,8 @@ const TABLES: FrameTableDecl[] = [
 declareTables(TABLES);
 
 // ----- Rows -----------------------------------------------------------------------------
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+const rows = (ctx: Ctx, name: string) =>
+  name === SETTINGS ? ctx.own.table<Record<string, unknown>>(name) : ctx.shared.table<Record<string, unknown>>(name);
 
 /** The defaults a new row of `name` starts from, as the schema declares them. */
 function defaultsOf(name: string): Record<string, unknown> {
@@ -149,18 +154,20 @@ function by(...cols: string[]) {
 }
 
 // ----- Settings -------------------------------------------------------------------------
-async function setting<T>(ctx: Ctx, key: string): Promise<T | null> {
-  const row = await rows(ctx, SETTINGS).get(key);
+// A setting is a row `{id: key, v: JSON}` of `table` (BOARD or SETTINGS).
+async function setting<T>(ctx: Ctx, table: string, key: string): Promise<T | null> {
+  const row = await rows(ctx, table).get(key);
   if (row?.v == null) return null;
   try { return JSON.parse(String(row.v)) as T; } catch { return null; }
 }
-const setSetting = (ctx: Ctx, key: string, value: unknown) => keep(ctx, SETTINGS, key, { v: JSON.stringify(value) });
+const setSetting = (ctx: Ctx, table: string, key: string, value: unknown) =>
+  keep(ctx, table, key, { v: JSON.stringify(value) });
 
 async function getPrefs(ctx: Ctx): Promise<Prefs> {
   const [title, tagline, who] = await Promise.all([
-    setting<string>(ctx, "outpost_title"),
-    setting<string>(ctx, "outpost_tagline"),
-    setting<string>(ctx, "outpost_who_can_post"),
+    setting<string>(ctx, BOARD, "title"),
+    setting<string>(ctx, BOARD, "tagline"),
+    setting<string>(ctx, SETTINGS, "who_can_post"),
   ]);
   return {
     title: title || DEFAULT_PREFS.title,
@@ -171,9 +178,9 @@ async function getPrefs(ctx: Ctx): Promise<Prefs> {
 
 async function setPrefs(ctx: Ctx, next: Prefs): Promise<void> {
   await Promise.all([
-    setSetting(ctx, "outpost_title", next.title),
-    setSetting(ctx, "outpost_tagline", next.tagline),
-    setSetting(ctx, "outpost_who_can_post", next.who_can_post),
+    setSetting(ctx, BOARD, "title", next.title),
+    setSetting(ctx, BOARD, "tagline", next.tagline),
+    setSetting(ctx, SETTINGS, "who_can_post", next.who_can_post),
   ]);
 }
 
@@ -356,7 +363,7 @@ async function remove(ctx: Ctx, postId: string): Promise<Response> {
   for (const r of await rows(ctx, VOTES).all()) if (r.post_id === postId) await rows(ctx, VOTES).delete(r.id);
   for (const r of await rows(ctx, MEDIA).all()) if (r.post_id === postId) await rows(ctx, MEDIA).delete(r.id);
   await rows(ctx, POSTS).delete(postId);
-  await ctx.files.remove(postDir(postId)).catch(() => { /* no media */ });
+  await ctx.shared.files.remove(postDir(postId)).catch(() => { /* no media */ });
   tell(ctx, "posts");
   return json({ ok: true });
 }
@@ -376,13 +383,14 @@ async function attach(ctx: Ctx, postId: string, request: Request, query: URLSear
   const name = safeName(query.get("name"));
   const mime = sanitizeText(query.get("mime"), 120) || "application/octet-stream";
   // Two attachments of one name get "name (2).ext".
-  const taken = new Set((await ctx.files.list(postDir(postId)).catch(() => [])).map((e) => e.name));
+  const taken = new Set((await ctx.shared.files.list(postDir(postId)).catch(() => [])).map((e) => e.name));
   let file = name;
   for (let n = 2; taken.has(file); n++) file = name.replace(/(\.[^.]*)?$/, (ext) => ` (${n})${ext}`);
   const filePath = `${postDir(postId)}/${file}`;
+  // `path` is relative to _fdata, the convention: a frame reaches it through ctx.shared.files.
   const media = await keep(ctx, MEDIA, null, { post_id: postId, name, mime, size: bytes.byteLength, ord, path: filePath });
   try {
-    await ctx.files.write(filePath, bytes);
+    await ctx.shared.files.write(filePath, bytes);
   } catch (e) {
     await rows(ctx, MEDIA).delete(media.id);
     return refuse(500, "failed to store media: " + e);
@@ -401,7 +409,7 @@ async function serveMedia(ctx: Ctx, rest: string): Promise<Response> {
   // Only a file of this post's folder is served, whatever a row says.
   const filePath = String(media.path ?? "");
   if (!filePath.startsWith(postDir(postId) + "/")) return refuse(404, "not found");
-  const buf = await ctx.files.read(filePath).catch(() => null);
+  const buf = await ctx.shared.files.read(filePath).catch(() => null);
   if (!buf) return refuse(404, "not found");
   const mediaName = String(media.name ?? "file");
   const asciiName = mediaName.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");

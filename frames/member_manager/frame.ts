@@ -6,12 +6,13 @@
 // (ctx.kv `bound/members`), chosen by an editor. It is a shared contract: Community
 // Library, Member Reachout and Garden Planner, bound to the same list, read the same rows.
 // Columns: name, email, phone (optional), role. Preferences (org name, role list, owner-only
-// edit) are this session's own: the `prefs` row of `__fc_settings`, which no wire serves.
+// edit) are this session's own: the `prefs` row of its own `settings` table (`ctx.own`),
+// which no wire serves.
 //
 // Who is shown what is decided here, on ctx.peer: a member of the space reads the roster
 // with its contact details, anyone else names and roles only.
 // ----------------------------------------------------------------------------------------
-import type { Ctx } from "@frame-core";
+import type { Ctx, Table } from "@frame-core";
 import { sanitizeText } from "@frame-core";
 
 // ----- Which list: `members` or a subtype `<name>.members`, bound per session -------------
@@ -23,7 +24,7 @@ async function boundList(ctx: Ctx): Promise<string | null> {
 }
 
 // ----- Preferences (this session's own) ---------------------------------------------------
-const SETTINGS = "__fc_settings";
+const settings = (ctx: Ctx) => ctx.own.table<Record<string, unknown>>("settings");
 
 type Prefs = {
   org_name: string;
@@ -37,22 +38,9 @@ const DEFAULT_PREFS: Prefs = {
   owner_only_edit: false,
 };
 
-/** The stored JSON: the settings row, else what an older copy kept in the session key,
- *  which a stranger could read and a collaborator write, moved into the row once. The row
- *  is written on the first read either way, so a key written at the door later is ignored. */
-async function storedPrefs(ctx: Ctx): Promise<string> {
-  const row = await rows(ctx, SETTINGS).get("prefs");
-  if (row?.v != null) return String(row.v);
-  const old = (await ctx.kv.get("prefs"))?.value;
-  const v = old ?? JSON.stringify(DEFAULT_PREFS);
-  await keep(ctx, SETTINGS, "prefs", { v });
-  if (old != null) await ctx.kv.del("prefs");
-  return v;
-}
-
 async function getPrefs(ctx: Ctx): Promise<Prefs> {
   let p: Partial<Prefs> = {};
-  try { p = JSON.parse(await storedPrefs(ctx)) ?? {}; } catch { /* defaults */ }
+  try { p = JSON.parse(String((await settings(ctx).get("prefs"))?.v ?? "{}")) ?? {}; } catch { /* defaults */ }
   return {
     org_name: typeof p.org_name === "string" && p.org_name ? p.org_name : DEFAULT_PREFS.org_name,
     roles: Array.isArray(p.roles) && p.roles.length > 0 ? p.roles.map(String) : [...DEFAULT_PREFS.roles],
@@ -61,7 +49,7 @@ async function getPrefs(ctx: Ctx): Promise<Prefs> {
 }
 
 async function setPrefs(ctx: Ctx, next: Prefs): Promise<void> {
-  await keep(ctx, SETTINGS, "prefs", { v: JSON.stringify(next) });
+  await keep(settings(ctx), "prefs", { v: JSON.stringify(next) });
 }
 
 // ----- Helpers --------------------------------------------------------------------------
@@ -77,10 +65,10 @@ type Row = Record<string, unknown> & { id: string };
 const rows = (ctx: Ctx, list: string) => ctx.table<Record<string, unknown>>(list);
 
 /** Write a row over what it held, stamped when it was made and when it changed. */
-async function keep(ctx: Ctx, list: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
-  const was = id ? await rows(ctx, list).get(id) : null;
+async function keep(t: Table<Record<string, unknown>>, id: string | null, values: Record<string, unknown>): Promise<Row> {
+  const was = id ? await t.get(id) : null;
   const now = Date.now();
-  return await rows(ctx, list).upsert({
+  return await t.upsert({
     ...(was ?? { _created_at: now }),
     ...values,
     ...(id ? { id } : {}),
@@ -166,7 +154,7 @@ async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): P
     const rowId = v.row_id ? String(v.row_id) : null;
     // An id that names no row is refused, never created.
     if (rowId && !(await rows(ctx, list).get(rowId))) return refuse(404, "member not found");
-    const row = await keep(ctx, list, rowId, { name, email, phone, role });
+    const row = await keep(rows(ctx, list), rowId, { name, email, phone, role });
     tell(ctx, "members");
     return json({ row_id: row.id });
   }

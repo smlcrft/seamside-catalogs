@@ -11,13 +11,14 @@
 //   view_realtime:  view-collaborative    — every mutation pushes, so two aunts cannot both
 //                                           claim the same thing.
 //
-// WHO CLAIMED IS KEPT ON THE SERVER, and so never in the table. A table is a file of the
-// space: every member reads it, through the door or in their synced replica, so a name
-// written there would reach the very person it hides from. Holders live in this worker's
-// `data/claims.json` on the keeper's device, keyed by space and list, which the space does
-// not sync and the door does not serve; `claimed_by`/`claimed_by_id` stay empty. The row
-// keeps only `claimed` (0/1), so a claim outlives the loss of data/ as "claimed by someone"
-// — which anyone who opens the table file can read (the keeper accepted that).
+// WHO CLAIMED IS KEPT BY THE WORKER, and so never in a table of the space. A table there is
+// a file of the space: every member reads it, through the door or in their synced replica
+// (the frame data folder too), so a name written there would reach the very person it
+// hides from. Holders live in this session's own `claims` table (`ctx.own`), one row per
+// claimed wish, which no page, no door line and no other frame reaches and nothing syncs;
+// `claimed_by`/`claimed_by_id` in the list stay empty. The list's row keeps only `claimed`
+// (0/1), so a claim outlives the loss of the session as "claimed by someone" — which
+// anyone who opens the table file can read (the keeper accepted that).
 // The whole point of this frame is that the person a gift
 // is for cannot see who claimed it — so the claim fields are STRIPPED from the payload
 // before it is sent to them, never merely hidden in the frontend. A frontend that receives
@@ -39,7 +40,7 @@
 // again through /api/list, as whoever it is.
 // ----------------------------------------------------------------------------------------
 import type { Ctx, PeerInfo } from "@frame-core";
-import { declareTables, loadJsonFile, sanitizeText, saveJsonFile } from "@frame-core";
+import { declareTables, sanitizeText } from "@frame-core";
 
 // ----- Schema (the `wishes` v1 contract — declared verbatim, one source of truth) -------
 const WISHES_SCHEMA = [
@@ -90,14 +91,24 @@ async function boundList(ctx: Ctx): Promise<string | null> {
   return validList(v) ? v : null;
 }
 
-// ----- Claims: the holder, off the table ---------------------------------------------------
+// ----- Claims: the holder, off the space ---------------------------------------------------
+// One row per claimed wish of the session's own `claims` table, `<list>:<wish id>`.
 type Claim = { by: string; by_id: string };
-const claims: Record<string, Record<string, Claim>> = loadJsonFile(import.meta.url, "claims.json", {});
-const claimsOf = (sfiId: string, list: string): Record<string, Claim> => (claims[`${sfiId}:${list}`] ??= {});
-function setClaim(sfiId: string, list: string, wishId: string, c: Claim | null): void {
-  const m = claimsOf(sfiId, list);
-  if (c) m[wishId] = c; else delete m[wishId];
-  saveJsonFile(import.meta.url, "claims.json", claims);
+const claimTable = (ctx: Ctx) => ctx.own.table<Claim>("claims");
+async function claimsOf(ctx: Ctx, list: string): Promise<Record<string, Claim>> {
+  const out: Record<string, Claim> = {};
+  for (const r of await claimTable(ctx).all()) {
+    if (r.id.startsWith(`${list}:`)) out[r.id.slice(list.length + 1)] = { by: String(r.by ?? ""), by_id: String(r.by_id ?? "") };
+  }
+  return out;
+}
+async function claimOf(ctx: Ctx, list: string, wishId: string): Promise<Claim | null> {
+  const r = await claimTable(ctx).get(`${list}:${wishId}`);
+  return r ? { by: String(r.by ?? ""), by_id: String(r.by_id ?? "") } : null;
+}
+async function setClaim(ctx: Ctx, list: string, wishId: string, c: Claim | null): Promise<void> {
+  if (c) await claimTable(ctx).upsert({ ...c, id: `${list}:${wishId}` });
+  else await claimTable(ctx).delete(`${list}:${wishId}`);
 }
 
 // ----- Who is this wish for? -------------------------------------------------------------
@@ -129,7 +140,7 @@ async function listRows(ctx: Ctx, list: string) {
   const member = peer.is_owner || peer.is_sfi_editor || peer.is_sfi_member;
   const all = (await rows(ctx, list).all())
     .sort((a, b) => cmp(a.for_who, b.for_who) || cmp(a.added_ms, b.added_ms));
-  const held = claimsOf(peer.sfi_id, list);
+  const held = member ? await claimsOf(ctx, list) : {};
   return all.map((r) => {
     const mine = isRecipient(r, peer);
     const base = {
@@ -148,7 +159,7 @@ async function listRows(ctx: Ctx, list: string) {
     const c = held[r.id];
     return {
       ...base,
-      // `claimed` without a holder: the row says so but data/ lost who — "claimed by someone".
+      // `claimed` without a holder: the row says so but who was lost — "claimed by someone".
       claimed: !!c || Number(r.claimed) === 1,
       holder_known: !!c,
       claimed_by: c?.by ?? "",
@@ -173,7 +184,6 @@ async function body(request: Request): Promise<Record<string, unknown> | null> {
 // ----- Writes ----------------------------------------------------------------------------
 async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<Response> {
   const peer = ctx.peer;
-  const sfiId = peer.sfi_id;
   // Never gate writes on is_sfi_member — a Viewer-role member would slip through.
   if (!(peer.is_sfi_editor || peer.is_owner)) return refuse(403, "editors only");
 
@@ -225,10 +235,10 @@ async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): P
     }
 
     if (action === "claim") {
-      if (claimsOf(sfiId, list)[id] || Number(row.claimed) === 1) return refuse(409, "already claimed");
+      if ((await claimOf(ctx, list, id)) || Number(row.claimed) === 1) return refuse(409, "already claimed");
       // A claim needs someone to hold it: an unnamed caller could never release it.
       if (!peer.user_id) return refuse(403, "sign in to claim");
-      setClaim(sfiId, list, id, { by: sanitizeText(peer.user_name, 60), by_id: String(peer.user_id) });
+      await setClaim(ctx, list, id, { by: sanitizeText(peer.user_name, 60), by_id: String(peer.user_id) });
       await keep(ctx, list, id, { claimed: 1 });
       return ok();
     }
@@ -236,17 +246,17 @@ async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): P
     if (action === "unclaim") {
       // Only the person holding the claim may release it — otherwise one relative could
       // quietly take over another's gift, and neither would be told. A claim whose holder
-      // was lost with data/ is nobody's to prove, so any editor may let it go.
-      const c = claimsOf(sfiId, list)[id];
+      // was lost is nobody's to prove, so any editor may let it go.
+      const c = await claimOf(ctx, list, id);
       if (c && c.by_id !== String(peer.user_id ?? "")) return refuse(403, "not your claim");
-      if (c) setClaim(sfiId, list, id, null);
+      if (c) await setClaim(ctx, list, id, null);
       if (Number(row.claimed) === 1) await keep(ctx, list, id, { claimed: 0 });
       return ok();
     }
 
     if (action === "delete") {
       await rows(ctx, list).delete(id);
-      if (claimsOf(sfiId, list)[id]) setClaim(sfiId, list, id, null);
+      if (await claimOf(ctx, list, id)) await setClaim(ctx, list, id, null);
       return ok();
     }
     if (action) return refuse(404, "not found");

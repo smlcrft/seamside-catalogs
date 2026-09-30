@@ -13,7 +13,8 @@
 //                                           and the sharing settings, are this session's settings.
 //   view_realtime:  view-collaborative    — every change is pushed, so every open page reads
 //                                           the folder again as whoever it is.
-//   settings_scope: settings-per-session  — `__fc_settings` rows `folder` and `prefs`.
+//   settings_scope: settings-per-session  — rows `folder` and `prefs` of the session's own
+//                                           settings table, which no page reaches.
 // ----------------------------------------------------------------------------------------
 import type { Ctx, PeerInfo } from "@frame-core";
 import { clampInt, contentType, extname } from "@frame-core";
@@ -29,35 +30,23 @@ const MAX_SIZE_MB = 8;
 const DEFAULT_PREFS: Prefs = { who_can_add: "owner", max_size_mb: MAX_SIZE_MB, max_files: 10 };
 const DEFAULT_FOLDER = "File Folder";
 
-// Settings are rows of this session's own `__fc_settings`, the value as JSON under `v`.
-const SETTINGS = "__fc_settings";
+// Settings are rows of this session's own settings table, the value as JSON under `v`.
+const settingsOf = (ctx: Ctx) => ctx.own.table<Record<string, unknown>>("settings");
 
 async function setSetting(ctx: Ctx, key: string, value: unknown) {
-  const t = ctx.table<Record<string, unknown>>(SETTINGS);
+  const t = settingsOf(ctx);
   const was = await t.get(key), now = Date.now();
   await t.upsert({ ...(was ?? { _created_at: now }), id: key, v: JSON.stringify(value), _modified_at: now });
 }
 
-// A missing row is written on first read, from the session key an older copy kept (`prefs`
-// as JSON, `folder` as text) or else the default, and the key goes: a key written at the
-// door later is never taken up.
-async function setting(ctx: Ctx, key: string, keyIsJson: boolean, fallback: unknown): Promise<unknown> {
-  const row = await ctx.table<Record<string, unknown>>(SETTINGS).get(key);
-  if (row?.v != null) {
-    try { return JSON.parse(String(row.v)); } catch { return null; }
-  }
-  const old = await ctx.kv.get(key);
-  let value: unknown = old?.value ?? fallback;
-  if (keyIsJson && old?.value != null) {
-    try { value = JSON.parse(old.value); } catch { value = fallback; }
-  }
-  await setSetting(ctx, key, value);
-  if (old) await ctx.kv.del(key);
-  return value;
+async function setting(ctx: Ctx, key: string, fallback: unknown): Promise<unknown> {
+  const row = await settingsOf(ctx).get(key);
+  if (row?.v == null) return fallback;
+  try { return JSON.parse(String(row.v)); } catch { return null; }
 }
 
 async function getPrefs(ctx: Ctx): Promise<Prefs> {
-  const saved = await setting(ctx, "prefs", true, DEFAULT_PREFS);
+  const saved = await setting(ctx, "prefs", DEFAULT_PREFS);
   const p = { ...DEFAULT_PREFS, ...(saved && typeof saved === "object" ? saved as Partial<Prefs> : {}) };
   return {
     who_can_add: p.who_can_add === "editors" ? "editors" : "owner",
@@ -74,7 +63,7 @@ function cleanFolder(raw: unknown): string | null {
   return parts.join("/");
 }
 async function getFolder(ctx: Ctx): Promise<string> {
-  return cleanFolder(await setting(ctx, "folder", false, DEFAULT_FOLDER)) || DEFAULT_FOLDER;
+  return cleanFolder(await setting(ctx, "folder", DEFAULT_FOLDER)) || DEFAULT_FOLDER;
 }
 
 // Reduce an incoming filename to a safe basename (no path traversal, no control chars).

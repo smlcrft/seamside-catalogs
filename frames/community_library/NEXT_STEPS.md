@@ -1,6 +1,6 @@
 # Next steps
 
-The frame is intentionally lean — a `members` list of the space chosen per session (Member Manager's roster, read only), the space's `library_assets` table, a settings row for preferences, and a single-page UI. Some natural extensions:
+The frame is intentionally lean — a `members` list of the space chosen per session (Member Manager's roster, read only), the shared `library_assets` table in the space's frame data folder (`_fdata`) with the library's rules beside it in `library_settings`, a row of the session's own settings for who may edit, and a single-page UI. Some natural extensions:
 
 1. **Reservations / waitlist** — let members reserve an item that's currently checked out and notify the next person when it's checked back in.
 2. **Checkout history** — a third table that logs each checkout/checkin event so the community can see who has used an item over time and spot popular items.

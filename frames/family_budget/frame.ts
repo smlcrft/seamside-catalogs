@@ -8,13 +8,14 @@
 //                                           table: the month comes from GET /api/month,
 //                                           and every write is a route here.
 //   data_storage:   the space's tables   — `budget_categories` and `budget_transactions`
-//                                           (`<name>.table.jsonl` at the space's root),
-//                                           synced with the space.
+//                                           (`_fdata/<name>.table.jsonl`, the space's frame
+//                                           data folder), synced with the space.
 //   view_realtime:  view-collaborative    — every write pushes `{ family_budget: "month" }`,
 //                                           which says what to read again and never what
 //                                           it holds, so every open page refreshes live.
 //   settings_scope: the space            — the currency symbol is the `budget_currency`
-//                                           row of `__fc_settings`, its value JSON under `v`.
+//                                           row of `_fdata/budget_settings`, beside the
+//                                           budget it describes, its value JSON under `v`.
 //
 // Categories carry a channel (c1–c12) as their identity color, an income flag, and a
 // monthly budget (the envelope; 0 = no envelope set, income categories never have one).
@@ -27,7 +28,7 @@ import { declareTables, sanitizeText } from "@frame-core";
 // ----- Schemas ----------------------------------------------------------------------------
 const CATEGORIES = "budget_categories";
 const TRANSACTIONS = "budget_transactions";
-const SETTINGS = "__fc_settings";
+const SETTINGS = "budget_settings";
 
 const CATEGORIES_SCHEMA = [
   { name: "name",           col_type: "text" as const,    nullable: false, default_val: "" },
@@ -42,7 +43,7 @@ const TRANSACTIONS_SCHEMA = [
   { name: "date",        col_type: "text" as const, nullable: false, default_val: "" },
 ];
 
-// ----- The space's tables, named for this frame so no other frame's rows land in them ---
+// ----- The space's tables, in its frame data folder -------------------------------------
 declareTables([
   { key: CATEGORIES,   title: "Budget Categories",   description: "Income and expense categories of this space's budget.", schema: CATEGORIES_SCHEMA },
   { key: TRANSACTIONS, title: "Budget Transactions", description: "Transactions of this space's budget.",                  schema: TRANSACTIONS_SCHEMA },
@@ -51,7 +52,9 @@ declareTables([
 type Row = Record<string, unknown> & { id: string };
 type Schema = typeof CATEGORIES_SCHEMA | typeof TRANSACTIONS_SCHEMA;
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+// Every table, the settings included, is the space's frame data (`_fdata/`), shared with
+// every frame and member.
+const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
 
 const defaultsOf = (schema: Schema): Record<string, unknown> => Object.fromEntries(
   schema.map((c) => [c.name, c.col_type === "text" ? c.default_val : Number(c.default_val)]),
@@ -169,7 +172,7 @@ async function write(ctx: Ctx, op: string, v: Record<string, any> | null): Promi
     return json({ ok: true });
   };
 
-  // --- The space's settings ------------------------------------------------------------
+  // --- The budget's settings -----------------------------------------------------------
   if (op === "settings") {
     await keep(ctx, SETTINGS, "budget_currency", { v: JSON.stringify(sanitizeText(v?.currency, 4) || "$") });
     return ok();

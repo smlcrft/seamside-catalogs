@@ -62,7 +62,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.fill('#edit-notes', 'by the gate');
   await keeper.shot('5-new-plot');
   await keeper.click('#edit-save');
-  const north = await untilRows('the plot', 'garden_plots', (r) => r.find((x) => x.cells.name === 'North bed'));
+  const north = await untilRows('the plot', '_fdata/garden_plots', (r) => r.find((x) => x.cells.name === 'North bed'));
   expect(north?.cells.pos_json === '{"x":0,"y":0,"w":3,"h":2}' && north?.cells.assigned_member_id === 'm1' && north?.cells.shade_pct === 50
     && north?.cells.plant_types_json === '[{"plant_type":"tomatoes","planted_at":null,"planted_stage":"sprout"}]' && north?.cells.notes === 'by the gate'
     && north?.cells._created_at > 0 && north?.cells._modified_at > 0, 'the plot is a row of the space');
@@ -73,7 +73,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   // ----- moved by dragging
   let p = await at(keeper, '.plot');
   await drag(keeper, { x: p.x + p.w / 2, y: p.y + p.h / 2 }, { x: p.x + p.w / 2 + 64, y: p.y + p.h / 2 + 32 });
-  const moved = await untilRows('the move', 'garden_plots', (r) => r.find((x) => x.id === north?.id && x.cells.pos_json === '{"x":2,"y":1,"w":3,"h":2}'));
+  const moved = await untilRows('the move', '_fdata/garden_plots', (r) => r.find((x) => x.id === north?.id && x.cells.pos_json === '{"x":2,"y":1,"w":3,"h":2}'));
   expect(moved?.cells.name === 'North bed' && moved?.cells.notes === 'by the gate' && moved?.cells._created_at === north?.cells._created_at, 'a plot dragged is kept where it was dropped, over the row as it was');
 
   // ----- a second, drawn on the empty canvas, for someone not on the roster
@@ -84,7 +84,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('#assign-mode [data-mode="manual"]');
   await keeper.fill('#edit-manual', 'Anna');
   await keeper.click('#edit-save');
-  const guest = await untilRows('the second plot', 'garden_plots', (r) => r.find((x) => x.cells.name === 'Guest bed'));
+  const guest = await untilRows('the second plot', '_fdata/garden_plots', (r) => r.find((x) => x.cells.name === 'Guest bed'));
   expect(guest?.cells.pos_json === '{"x":8,"y":4,"w":2,"h":3}' && guest?.cells.assigned_manual_name === 'Anna' && guest?.cells.assigned_member_id === '' && guest?.cells.shade_pct === 100, 'it is kept at the size it was drawn');
   expect(await keeper.until('both plots', `document.querySelectorAll('.plot').length === 2 && ${text('#count-badge')} === '2'`), 'and both are drawn');
   await keeper.shot('6-garden');
@@ -103,8 +103,8 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('#edit-delete');
   expect(await keeper.until('to be asked', `/Delete "Guest bed"\\?/.test(document.querySelector('.framelib-dialog-host')?.innerText ?? '')`), 'a delete asks first');
   await keeper.click('.framelib-dialog-host .framelib-btn-danger');
-  for (let i = 0; i < 40 && (await rows('garden_plots')).length !== 1; i++) await sleep(250);
-  expect((await rows('garden_plots')).length === 1, 'the plot is gone from the space');
+  for (let i = 0; i < 40 && (await rows('_fdata/garden_plots')).length !== 1; i++) await sleep(250);
+  expect((await rows('_fdata/garden_plots')).length === 1, 'the plot is gone from the space');
   expect(await keeper.until('one plot', `document.querySelectorAll('.plot').length === 1`), "and from the keeper's page");
   expect(await visitor.until('one plot', `document.querySelectorAll('.plot').length === 1 && ${text('#count-badge')} === '1'`), "and from the stranger's");
 

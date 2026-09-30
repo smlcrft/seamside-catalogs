@@ -7,8 +7,8 @@
 //                                           interactive list. The page reads the list
 //                                           from GET /api/list, and every write is a
 //                                           route here.
-//   data_storage:   the space's table    — `grocery.table.jsonl` at the space's root,
-//                                           synced with the space.
+//   data_storage:   the frame data folder — `_fdata/grocery.table.jsonl`, shared with
+//                                           every frame of the space and synced with it.
 //   view_realtime:  view-collaborative    — every write pushes `{ grocery_list: "items" }`,
 //                                           which says what to read again and never what
 //                                           it holds. A push reaches only this session's
@@ -42,7 +42,7 @@ declareTables([
 // ----- Helpers --------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };
 
-const rows = (ctx: Ctx) => ctx.table<Record<string, unknown>>(GROCERY);
+const rows = (ctx: Ctx) => ctx.shared.table<Record<string, unknown>>(GROCERY);
 
 const DEFAULTS: Record<string, unknown> = Object.fromEntries(
   GROCERY_SCHEMA.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),

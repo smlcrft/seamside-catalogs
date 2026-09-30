@@ -3,8 +3,8 @@
 // takes their initials.
 
 export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sleep }) => {
-  // a best an installed copy left behind: the page reads it through the worker
-  await seed('seamdeck_scores', 'old1', { initials: 'ANA', game_id: 'shotput', points: 10, scored_at: 5, client_id: 'c-ana', _created_at: 5, _modified_at: 5 });
+  // a best already on the board: the page reads it through the worker
+  await seed('_fdata/seamdeck_scores', 'old1', { initials: 'ANA', game_id: 'shotput', points: 10, scored_at: 5, client_id: 'c-ana', _created_at: 5, _modified_at: 5 });
 
   const text = `document.getElementById('root').textContent`;
   const hud = `document.querySelector('.hud .turn')?.textContent`;
@@ -65,23 +65,23 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
 
   expect(await keeper.until('the results', `!!document.querySelector('.results') && document.querySelectorAll('.rank').length === 2`, 80), 'six throws end the round in results');
   expect(await visitor.until('the results for the stranger', `!!document.querySelector('.results')`, 80), 'for both of them');
-  const placed = await untilRows('the scores', 'seamdeck_scores', (r) => r.filter((x) => x.cells.game_id === 'shotput' && x.cells.initials === '???').length === 2 && r);
+  const placed = await untilRows('the scores', '_fdata/seamdeck_scores', (r) => r.filter((x) => x.cells.game_id === 'shotput' && x.cells.initials === '???').length === 2 && r);
   const mine = placed?.find((x) => x.cells.initials === '???' && x.cells.points > 0);
   expect(mine && mine.cells.client_id && mine.cells.scored_at > 0 && mine.cells._created_at && mine.cells._modified_at, "each player's best is a row of the space, waiting for initials");
   expect(await keeper.inFrame(`return !!document.querySelector('.initials-input') && /ENTER INITIALS/.test(${text})`), 'the keeper is asked for initials');
-  expect(await keeper.inFrame(`return [...document.querySelectorAll('.lb-row .lb-init')].some((e) => e.textContent === 'ANA')`), 'the board holds the best the copy left');
+  expect(await keeper.inFrame(`return [...document.querySelectorAll('.lb-row .lb-init')].some((e) => e.textContent === 'ANA')`), 'the board holds the best already on it');
   await keeper.shot('5-results');
 
   await keeper.fill('.initials-input', 'kee');
   await keeper.press('Enter');
-  expect(await untilRows('the initials', 'seamdeck_scores', (r) => r.find((x) => x.cells.initials === 'KEE' && x.cells.game_id === 'shotput')), "the keeper's score takes their initials");
+  expect(await untilRows('the initials', '_fdata/seamdeck_scores', (r) => r.find((x) => x.cells.initials === 'KEE' && x.cells.game_id === 'shotput')), "the keeper's score takes their initials");
   expect(await keeper.until('the board to show them', `[...document.querySelectorAll('.lb-row .lb-init')].some((e) => e.textContent === 'KEE') && !document.querySelector('.initials-input')`), 'and the board and the ranking show them');
   expect(await visitor.until("the keeper's initials to reach the stranger", `[...document.querySelectorAll('.rank-name')].some((e) => e.textContent === 'KEE')`), "the stranger's page is told to read again");
   await visitor.fill('.initials-input', 'VIS');
   await visitor.click('.initials button');
-  const both = await untilRows("the stranger's initials", 'seamdeck_scores', (r) => r.find((x) => x.cells.initials === 'VIS'));
+  const both = await untilRows("the stranger's initials", '_fdata/seamdeck_scores', (r) => r.find((x) => x.cells.initials === 'VIS'));
   expect(both?.cells.game_id === 'shotput' && both?.cells.points > 0, "the stranger's score takes theirs");
-  expect((await rows('seamdeck_scores')).every((x) => x.cells.initials !== '???'), 'no score is left waiting');
+  expect((await rows('_fdata/seamdeck_scores')).every((x) => x.cells.initials !== '???'), 'no score is left waiting');
   expect(await visitor.until('both on the board', `['KEE', 'VIS', 'ANA'].every((i) => [...document.querySelectorAll('.lb-row .lb-init')].some((e) => e.textContent === i))`), 'the stranger sees every initials on the board');
   expect(await visitor.inFrame(`return !document.querySelector('.results-actions .cta')`), 'and has no Play again, not being the host');
   await visitor.shot('6-board');

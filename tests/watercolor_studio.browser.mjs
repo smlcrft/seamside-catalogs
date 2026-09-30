@@ -18,24 +18,16 @@ function mixed(ids) {
 }
 
 export default async ({ keeper, visitor: open, expect, sleep, session }) => {
-  // What the daemon holds: the space's folder on disk, this session's own keys, and its prefs as the worker answers them.
+  // What the daemon holds: the space's folder on disk, and the sheet and prefs as the worker answers them.
   const spaces = join(process.env.SEAMSIDE1_DATA, 'profiles/default/spaces');
   // the space whose space.json runs this session (its state folder comes only with its first key)
   const spaceDir = () => readdirSync(spaces).map((d) => join(spaces, d)).find((d) => {
     try { return JSON.parse(readFileSync(join(d, '_meta/space.json'), 'utf8')).sessions?.some((x) => x.id === session); } catch { return false; }
   });
   const onDisk = (path) => { try { return readFileSync(join(spaceDir(), path)); } catch { return null; } };
-  const sheet = () => { try { return JSON.parse(onDisk('Watercolor Studio/Painting/strokes.json')).strokes; } catch { return null; } };
-  const key = (name) => {
-    let v = null;
-    try {
-      for (const l of readFileSync(join(spaceDir(), '_meta/sessions', session, 'state.jsonl'), 'utf8').split('\n')) {
-        try { const op = JSON.parse(l); if (op.key === name) v = op.value; } catch { /* not an op */ }
-      }
-    } catch { /* nothing kept yet */ }
-    return v;
-  };
-  const prefs = () => keeper.inFrame(`const r = await window.seamside.fetch('/api/state'); return r.json().prefs;`);
+  const sheet = () => { try { return JSON.parse(onDisk('_fdata/paintings/Painting/strokes.json')).strokes; } catch { return null; } };
+  const state = () => keeper.inFrame(`const r = await window.seamside.fetch('/api/state'); return r.json();`);
+  const prefs = async () => (await state()).prefs;
   const until = async (what, test, tries = 60) => {
     for (let i = 0; i < tries; i++) { const v = await test(); if (v) return v; await sleep(250); }
     expect(false, `the daemon came to hold ${what}`);
@@ -75,12 +67,12 @@ export default async ({ keeper, visitor: open, expect, sleep, session }) => {
   const s1 = one?.[0];
   expect(s1?.brush === 'round' && s1?.pigment === PANS.ultra && s1?.water === 0.52 && s1?.points.length >= 5 && s1?.id.startsWith('s_') && s1?.created_by_user_id.startsWith('did:'), `a stroke drawn is a stroke of the sheet's file, as painted (${JSON.stringify(s1)?.slice(0, 200)})`);
   expect(s1 && Math.abs(s1.points[0][0] - 0.25) < 0.02 && Math.abs(s1.points.at(-1)[0] - 0.65) < 0.02, 'where it was painted');
-  expect(key('sheet') === 'Watercolor Studio/Painting', 'the sheet is a folder of the space, named by the session\'s sheet key');
+  expect((await state()).sheet === 'paintings/Painting', 'the sheet is a folder of the frame data folder, named by the session\'s sheet key');
   expect(await keeper.until('the count', `${meta} === '1 stroke' && !document.querySelector('#ws-save-btn').hidden`), 'the page counts it and offers to save');
   expect(await paintAt(keeper, 0.45, 0.42) > 0, 'and the paint is on the canvas');
 
   // the picture, rendered by the page and sent up as bytes
-  const pic = await until('the picture', () => isPng(onDisk('Watercolor Studio/Painting/painting.png')) && onDisk('Watercolor Studio/Painting/painting.png'), 80);
+  const pic = await until('the picture', () => isPng(onDisk('_fdata/paintings/Painting/painting.png')) && onDisk('_fdata/paintings/Painting/painting.png'), 80);
   expect(pic && size(pic) === '1600x1067', `painting.png is a PNG of the sheet, 1600 across (${pic && size(pic)})`);
   const tint = await keeper.inFrame(`
     const r = await window.seamside.fetch('/api/picture');
@@ -149,10 +141,10 @@ export default async ({ keeper, visitor: open, expect, sleep, session }) => {
   // the paper and the title each render the picture again: take the one that stopped changing
   let pic2 = null;
   await until('the picture on kraft, settled', async () => {
-    const b = onDisk('Watercolor Studio/Painting/painting.png');
+    const b = onDisk('_fdata/paintings/Painting/painting.png');
     if (!isPng(b) || !pic || b.equals(pic)) return false;
     await sleep(1500);
-    const again = onDisk('Watercolor Studio/Painting/painting.png');
+    const again = onDisk('_fdata/paintings/Painting/painting.png');
     return isPng(again) && again.equals(b) && (pic2 = b);
   }, 80);
   const saved = mkdtempSync(join(tmpdir(), 'watercolor-'));
@@ -178,7 +170,7 @@ export default async ({ keeper, visitor: open, expect, sleep, session }) => {
   await keeper.click('#ws-clear-btn');
   if (!await keeper.until('the confirm', `/Clear the entire sheet\\?/.test(document.querySelector('.framelib-prompt-msg')?.textContent ?? '')`)) return;
   await keeper.click('.framelib-dialog-host .framelib-btn-danger');
-  expect(await until('the sheet cleared', () => !onDisk('Watercolor Studio/Painting/strokes.json') && !onDisk('Watercolor Studio/Painting/painting.png')), 'Clear removes the sheet\'s files');
+  expect(await until('the sheet cleared', () => !onDisk('_fdata/paintings/Painting/strokes.json') && !onDisk('_fdata/paintings/Painting/painting.png')), 'Clear removes the sheet\'s files');
   expect(await keeper.until('an empty sheet', `${meta} === '0 strokes' && document.querySelector('#ws-save-btn').hidden`), 'the page is empty');
   expect(await visitor.until('the stranger\'s empty sheet', `(() => { const c = document.querySelector('#ws-paint'); return c.getContext('2d').getImageData(Math.round(c.width * 0.45), Math.round(c.height * 0.42), 1, 1).data[3] === 0; })()`), "and so is the stranger's");
   await keeper.shot('7-cleared');

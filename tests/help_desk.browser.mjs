@@ -13,17 +13,17 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   const send = `.hd-anon [data-form] button`;
   await visitor.click(send);
   await sleep(500);
-  expect((await rows('help_desk_submissions')).length === 0 && !await visitor.inFrame(`return /Message sent/.test(document.body.innerText)`), 'Send with no email sends nothing');
+  expect((await rows('_fdata/help_desk_submissions')).length === 0 && !await visitor.inFrame(`return /Message sent/.test(document.body.innerText)`), 'Send with no email sends nothing');
   await visitor.fill('#hd-email', 'not-an-email');
   await visitor.click(send);
   await sleep(500);
-  expect((await rows('help_desk_submissions')).length === 0, 'an address that is not one is not sent');
+  expect((await rows('_fdata/help_desk_submissions')).length === 0, 'an address that is not one is not sent');
   await visitor.fill('#hd-email', 'pat@example.com');
   await visitor.fill('#hd-f-default_message', 'The door sticks.');
   await visitor.shot('2-form');
   await visitor.click(send);
   expect(await visitor.until('the page to say it was sent', `/Message sent/.test(document.body.innerText)`), 'the visitor is told it was sent');
-  const sub = await untilRows('the message', 'help_desk_submissions', (r) => r.find((x) => x.cells.email === 'pat@example.com'));
+  const sub = await untilRows('the message', '_fdata/help_desk_submissions', (r) => r.find((x) => x.cells.email === 'pat@example.com'));
   expect(sub?.cells.status === 'new' && sub?.cells.fields_json === '{"default_message":"The door sticks."}', 'the message is a row of the space');
 
   // nobody touches the keeper's page: the push brings the message to it
@@ -34,11 +34,11 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.until('the message to open', `!!document.querySelector('.hd-sub-detail select')`);
   expect(await keeper.inFrame(`return /The door sticks\./.test(document.querySelector('.hd-sub-detail').innerText)`), 'the opened message shows what was written');
   await keeper.inFrame(`const s = document.querySelector('.hd-sub-detail select'); s.value = 'in_progress'; s.dispatchEvent(new Event('change', { bubbles: true })); return true;`);
-  expect(await untilRows('the status', 'help_desk_submissions', (r) => r.find((x) => x.cells.status === 'in_progress' && x.cells.email === 'pat@example.com')), 'a status chosen is kept, over the row as it was');
+  expect(await untilRows('the status', '_fdata/help_desk_submissions', (r) => r.find((x) => x.cells.status === 'in_progress' && x.cells.email === 'pat@example.com')), 'a status chosen is kept, over the row as it was');
   expect(await keeper.until('the pill to follow', `/in progress/.test(document.querySelector('.hd-sub-head .hd-status-pill').textContent)`), 'and the inbox shows it');
   await keeper.fill('.hd-note-form textarea', 'Called back.');
   await keeper.click('.hd-note-form button');
-  const note = await untilRows('the note', 'help_desk_notes', (r) => r.find((x) => x.cells.body === 'Called back.'));
+  const note = await untilRows('the note', '_fdata/help_desk_notes', (r) => r.find((x) => x.cells.body === 'Called back.'));
   expect(note?.cells.submission_id === sub?.id, 'a note is kept against its message');
   expect(await keeper.until('the note to draw', `/Called back\./.test(document.querySelector('.hd-notes')?.innerText ?? '')`), 'and drawn from the answer');
   await keeper.shot('4-note');
@@ -47,14 +47,14 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.until('the fields page', `!!document.querySelector('.hd-add-form')`);
   await keeper.click('.hd-add-form button');
   await sleep(400);
-  expect((await rows('help_desk_fields')).length === 1, 'a field with no label is not added');
+  expect((await rows('_fdata/help_desk_fields')).length === 1, 'a field with no label is not added');
   await keeper.fill('.hd-add-form input[type="text"]', 'Phone');
   await keeper.click('.hd-add-form button');
-  expect(await untilRows('the field', 'help_desk_fields', (r) => r.find((x) => x.cells.label === 'Phone' && x.cells.sort_order === 1)), 'a field is added after the last');
+  expect(await untilRows('the field', '_fdata/help_desk_fields', (r) => r.find((x) => x.cells.label === 'Phone' && x.cells.sort_order === 1)), 'a field is added after the last');
   expect(await keeper.until('the field to list', `[...document.querySelectorAll('.hd-field-row .label')].some((l) => l.textContent === 'Phone')`), 'and listed');
   await keeper.fill('.hd-title-edit input', 'Front desk');
   await keeper.inFrame(`document.querySelector('.hd-title-edit input').blur(); return true;`);
-  expect(await untilRows('the title', '__fc_settings', (r) => r.find((x) => x.id === 'help_desk_title' && x.cells.v === '"Front desk"')), 'the title is kept where installed copies keep it');
+  expect(await untilRows('the title', '_fdata/help_desk_settings', (r) => r.find((x) => x.id === 'help_desk_title' && x.cells.v === '"Front desk"')), 'the title is kept beside the desk\'s tables');
   await keeper.shot('5-fields');
 
   await visitor.send('Page.reload');

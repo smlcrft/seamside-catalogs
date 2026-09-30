@@ -7,7 +7,7 @@
 //                                           frame at all is the platform's call (the space's tier
 //                                           and whether the frame is published), never the frame's
 //                                           — if a request lands here, the viewer may see it.
-//   data_storage:   the space's table    — `calendar.table.jsonl` at the space's root, one row
+//   data_storage:   the space's table    — `_fdata/calendar.table.jsonl`, one row
 //                                           per event (row id = event id): synced with the space
 //                                           to every member, openable in any table tool. Two
 //                                           editors changing different events never collide.
@@ -77,7 +77,7 @@ function todayIso(): string {
 }
 
 // ----- The events table -----------------------------------------------------------------
-const events = (ctx: Ctx) => ctx.table<Record<string, unknown>>("calendar");
+const events = (ctx: Ctx) => ctx.shared.table<Record<string, unknown>>("calendar");
 
 async function loadEvents(ctx: Ctx): Promise<CalEvent[]> {
   const rows = (await events(ctx).all())

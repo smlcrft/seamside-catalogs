@@ -8,9 +8,9 @@
 //                                           share link is the trip's handout. The page
 //                                           reads no table: everything comes from the
 //                                           routes below, and every write is one of them.
-//   data_storage:   the space's tables   — trips.table.jsonl plus trip_itinerary /
+//   data_storage:   the space's frame data — trips.table.jsonl plus trip_itinerary /
 //                                           trip_packing / trip_expenses rows keyed by
-//                                           trip_id, at the space's root: synced with it
+//                                           trip_id, under `_fdata/`: synced with it
 //                                           and shared by every Trip Planner in the space.
 //   view_realtime:  view-collaborative    — every write pushes `{ trip_planner: "trips" }`,
 //                                           which says what to read again and never what
@@ -22,7 +22,7 @@
 import type { Ctx } from "@frame-core";
 import { declareTables, sanitizeText } from "@frame-core";
 
-// ----- The space's tables (named for the trip, so no other frame's rows land in them) -----
+// ----- The space's frame data tables (named for the trip, so no other frame's rows land in them) -----
 const TRIPS = "trips";
 const ITINERARY = "trip_itinerary";
 const PACKING = "trip_packing";
@@ -92,7 +92,7 @@ const DEFAULTS: Record<string, Record<string, unknown>> = Object.fromEntries(TAB
 // ----- Rows -----------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
 
 /** Write a row over what it held (a new one from the schema's defaults), stamped. */
 async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {

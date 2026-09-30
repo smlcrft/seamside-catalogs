@@ -381,7 +381,7 @@
         if (!watching || !window.seamside?.kv?.watch) return;
         let soon = 0;
         const later = () => { clearTimeout(soon); soon = setTimeout(refresh, 250); };
-        const ws = ["t/meal_plan/", "t/recipes/"].map((p) => window.seamside.kv.watch(p, later));
+        const ws = ["t/_fdata%2Fmeal_plan/", "t/_fdata%2Frecipes/"].map((p) => window.seamside.kv.watch(p, later));
         return () => { clearTimeout(soon); ws.forEach((w) => w.close()); };
       }, [watching]);
 

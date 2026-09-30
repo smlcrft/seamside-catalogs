@@ -4,10 +4,10 @@
 // Design axes:
 //   privacy:        privacy-public-view  — editors curate the photos; Viewer-role members and
 //                                          anonymous link visitors get a browseable read-only view.
-//   data_storage:   the space's table    — photo ROWS are `picture_frame_photos.table.jsonl` at
-//                                          the space's root; each photo and its thumbnail are files
-//                                          of the space under `Picture Frame/<photo_id>/`, named by
-//                                          the row. Display state is this session's own keys.
+//   data_storage:   the frame data folder — photo ROWS are `_fdata/photos.table.jsonl`; each
+//                                          photo and its thumbnail are files beside it, under
+//                                          `_fdata/photos/<photo_id>/`, named by the row (paths
+//                                          within `_fdata`). Display state is this session's own keys.
 //   view_realtime:  view-collaborative   — every mutation pushes what changed, and every open page
 //                                          of the frame reads again as whoever it is.
 //   settings_scope: photos per space, display per session — two frames in one space share
@@ -41,8 +41,8 @@
 import type { Ctx } from "@frame-core";
 import { clampInt, declareTables, sanitizeText, toIntOrNull } from "@frame-core";
 
-// ----- The space's table (named for this frame: its rows point at bytes only it serves) ----
-const PHOTOS = "picture_frame_photos";
+// ----- The shared photos table, in the frame data folder --------------------------------
+const PHOTOS = "photos";
 const SCHEMA: Array<{ name: string; col_type: "text" | "integer"; nullable: boolean; default_val: string }> = [
   { name: "name",       col_type: "text",    nullable: false, default_val: "" },          // original filename
   { name: "mime",       col_type: "text",    nullable: false, default_val: "image/jpeg" },
@@ -52,14 +52,14 @@ const SCHEMA: Array<{ name: string; col_type: "text" | "integer"; nullable: bool
   { name: "sort_order", col_type: "integer", nullable: false, default_val: "0" },
   { name: "added_ms",   col_type: "integer", nullable: false, default_val: "0" },
   { name: "added_by",   col_type: "text",    nullable: false, default_val: "" },
-  { name: "path",       col_type: "text",    nullable: false, default_val: "" },          // Picture Frame/<id>/<name>
+  { name: "path",       col_type: "text",    nullable: false, default_val: "" },          // photos/<id>/<name>, within _fdata
   { name: "thumb_path", col_type: "text",    nullable: false, default_val: "" },          // its grid thumbnail, if any
 ];
 declareTables([
   {
     key: PHOTOS,
-    title: "Picture Frame Photos",
-    description: "Photos shown by this picture frame; `path` and `thumb_path` are its files in the space.",
+    title: "Photos",
+    description: "Photos on a picture frame; `path` and `thumb_path` are files in the frame data folder.",
     schema: SCHEMA,
   },
 ]);
@@ -70,7 +70,7 @@ const DEFAULTS: Record<string, unknown> = Object.fromEntries(
 );
 
 type Row = Record<string, unknown> & { id: string };
-const photosOf = (ctx: Ctx) => ctx.table<Record<string, unknown>>(PHOTOS);
+const photosOf = (ctx: Ctx) => ctx.shared.table<Record<string, unknown>>(PHOTOS);
 
 /** Lay `values` over the row as it stands (or the defaults, for a new one), stamped. */
 async function keep(ctx: Ctx, id: string | null, values: Record<string, unknown>): Promise<Row> {
@@ -93,8 +93,8 @@ const MAX_SECS = 3600;
 const DEFAULT_SECS = 15;
 const MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-// ----- Files (in the space): Picture Frame/<photo_id>/<name> and its thumbnail ----------
-const FOLDER = "Picture Frame";
+// ----- Files, beside the table: _fdata/photos/<photo_id>/<name> and its thumbnail ------
+const FOLDER = PHOTOS;
 function dirFor(id: string): string { return `${FOLDER}/${id}`; }
 const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 // The stored name says what the bytes are (the page may re-encode a photo as JPEG).
@@ -346,7 +346,7 @@ async function remove(ctx: Ctx, id: string): Promise<Response> {
   const idx = before.findIndex((p) => p.id === id);
 
   await photosOf(ctx).delete(id);
-  await ctx.files.remove(dirFor(id)).catch(() => { /* already gone */ });
+  await ctx.shared.files.remove(dirFor(id)).catch(() => { /* already gone */ });
 
   const after = before.filter((p) => p.id !== id);
   const patch: Partial<Display> = {};
@@ -401,10 +401,11 @@ async function upload(ctx: Ctx, query: URLSearchParams, buf: Uint8Array): Promis
   });
   try {
     const file = `${dirFor(row.id)}/${fileName(name, mime)}`;
-    await ctx.files.write(file, buf);
+    await ctx.shared.files.write(file, buf);
+    // `path` is relative to _fdata, the convention: a frame reaches it through ctx.shared.files.
     await keep(ctx, row.id, { path: file });
   } catch (e) {
-    await ctx.files.remove(dirFor(row.id)).catch(() => {});
+    await ctx.shared.files.remove(dirFor(row.id)).catch(() => {});
     await photosOf(ctx).delete(row.id);
     return refuse(500, "failed to store photo: " + e);
   }
@@ -425,7 +426,7 @@ async function uploadThumb(ctx: Ctx, id: string, buf: Uint8Array): Promise<Respo
   if (!(await photosOf(ctx).get(id))) return refuse(404, "photo not found");
   try {
     const file = `${dirFor(id)}/thumbnail.${EXT[sniffMime(buf)]}`;
-    await ctx.files.write(file, buf);
+    await ctx.shared.files.write(file, buf);
     await keep(ctx, id, { thumb_path: file });
   } catch (e) {
     // A missing thumbnail is survivable — /api/thumb falls back to the full image.
@@ -442,7 +443,7 @@ async function photo(ctx: Ctx, id: string): Promise<Response> {
   const row = await photosOf(ctx).get(id);
   if (!row) return refuse(404, "not found");
   const file = fileOf(id, row.path);
-  const buf = file ? await ctx.files.read(file).catch(() => null) : null;
+  const buf = file ? await ctx.shared.files.read(file).catch(() => null) : null;
   if (!buf) return refuse(404, "not found");
   return serveBytes(buf, String(row.mime || "application/octet-stream"));
 }
@@ -453,11 +454,11 @@ async function thumb(ctx: Ctx, id: string): Promise<Response> {
   const row = await photosOf(ctx).get(id);
   if (!row) return refuse(404, "not found");
   const t = fileOf(id, row.thumb_path);
-  let buf = t ? await ctx.files.read(t).catch(() => null) : null;
+  let buf = t ? await ctx.shared.files.read(t).catch(() => null) : null;
   const mime = buf ? sniffMime(buf) : String(row.mime || "image/jpeg");
   if (!buf) {
     const file = fileOf(id, row.path);
-    buf = file ? await ctx.files.read(file).catch(() => null) : null;
+    buf = file ? await ctx.shared.files.read(file).catch(() => null) : null;
   }
   if (!buf) return refuse(404, "not found");
   return serveBytes(buf, mime);

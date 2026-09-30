@@ -22,6 +22,7 @@
     { "why": "a stranger writes no key at the door", "do": "KV.PUT weather_location f:{id}", "body": "\"Oslo\"", "status": 403 },
     { "why": "nor a row", "do": "KV.PUT t/weather/x", "body": { "v": 1 }, "status": 403 },
     { "why": "nor a viewer", "as": "viewer", "at": "space", "do": "KV.PUT t/weather/x", "body": { "v": 1 }, "status": 403 },
-    { "why": "and looking a place up left nothing in the session's keys", "as": "collaborator", "at": "space", "do": "KV.LIST weather f:{id}", "lacks": ["weather_location", "Oslo"] }
+    { "why": "a page reaches no key of the session's own, a member's included: the door refuses it", "as": "collaborator", "at": "space", "do": "KV.LIST weather f:{id}", "status": 403, "lacks": ["weather_location", "Oslo"] },
+    { "why": "nor takes a member's write to one", "as": "collaborator", "at": "space", "do": "KV.PUT weather_location f:{id}", "body": "\"Oslo\"", "status": 403 }
   ]
 }

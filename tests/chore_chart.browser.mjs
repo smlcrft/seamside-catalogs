@@ -32,7 +32,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.fill('.add .f-chore', 'Dishes');
   await keeper.fill('.add .f-who', 'Ana');
   await keeper.press('Enter');
-  const dishes = await untilRows('the chore', 'chores', (r) => byName(r, 'Dishes'));
+  const dishes = await untilRows('the chore', '_fdata/chores', (r) => byName(r, 'Dishes'));
   expect(dishes?.cells.assignee === 'Ana' && dishes?.cells.cadence === 'daily' && dishes?.cells.sort_order === 0 && dishes?.cells.last_done_ms === 0
     && dishes?.cells.streak === 0 && dishes?.cells.best_streak === 0 && dishes?.cells.notes === '' && dishes?.cells._created_at && dishes?.cells._modified_at,
   'Enter adds a chore, a row of the space from the contract\'s defaults, stamped');
@@ -41,14 +41,14 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   expect(await keeper.inFrame(`const c = ${card('Dishes')}; return c.querySelector('.who-name').textContent === 'Ana' && c.querySelector('.rhythm').textContent === 'daily' && c.querySelectorAll('.slot').length === 7 && c.querySelectorAll('.slot.live').length === 1 && !c.classList.contains('done')`), 'a daily card is a week of holes, one of them live');
 
   // rows other devices left: done yesterday on a run, done today, done long ago
-  await seed('chores', 'yday', { chore: 'Feed the cat', assignee: 'Bo', cadence: 'daily', last_done_ms: noon(1), last_done_by: 'Bo', streak: 3, best_streak: 3, sort_order: 1, notes: '', _created_at: 5, _modified_at: 5 });
-  await seed('chores', 'today', { chore: 'Water plants', assignee: 'Bo', cadence: 'daily', last_done_ms: noon(0) < Date.now() ? noon(0) : Date.now(), last_done_by: 'Bo', streak: 2, best_streak: 5, sort_order: 2, notes: '', _created_at: 6, _modified_at: 6 });
-  await seed('chores', 'lastwk', { chore: 'Bins', assignee: '', cadence: 'weekly', last_done_ms: noon(7), last_done_by: '', streak: 2, best_streak: 2, sort_order: 3, notes: '', _created_at: 7, _modified_at: 7 });
-  await seed('chores', 'long', { chore: 'Hoover', assignee: 'Cy', cadence: 'daily', last_done_ms: noon(3), last_done_by: 'Cy', streak: 6, best_streak: 6, sort_order: 4, notes: '', _created_at: 8, _modified_at: 8 });
+  await seed('_fdata/chores', 'yday', { chore: 'Feed the cat', assignee: 'Bo', cadence: 'daily', last_done_ms: noon(1), last_done_by: 'Bo', streak: 3, best_streak: 3, sort_order: 1, notes: '', _created_at: 5, _modified_at: 5 });
+  await seed('_fdata/chores', 'today', { chore: 'Water plants', assignee: 'Bo', cadence: 'daily', last_done_ms: noon(0) < Date.now() ? noon(0) : Date.now(), last_done_by: 'Bo', streak: 2, best_streak: 5, sort_order: 2, notes: '', _created_at: 6, _modified_at: 6 });
+  await seed('_fdata/chores', 'lastwk', { chore: 'Bins', assignee: '', cadence: 'weekly', last_done_ms: noon(7), last_done_by: '', streak: 2, best_streak: 2, sort_order: 3, notes: '', _created_at: 7, _modified_at: 7 });
+  await seed('_fdata/chores', 'long', { chore: 'Hoover', assignee: 'Cy', cadence: 'daily', last_done_ms: noon(3), last_done_by: 'Cy', streak: 6, best_streak: 6, sort_order: 4, notes: '', _created_at: 8, _modified_at: 8 });
   // one more typed, which reads the board again with them
   await keeper.fill('.add .f-chore', 'Sweep');
   await keeper.press('Enter');
-  expect(await untilRows('the next chore', 'chores', (r) => byName(r, 'Sweep')?.cells.sort_order === 5 && byName(r, 'Sweep')?.cells.assignee === 'Ana'), 'the next chore goes after the last, for the same person');
+  expect(await untilRows('the next chore', '_fdata/chores', (r) => byName(r, 'Sweep')?.cells.sort_order === 5 && byName(r, 'Sweep')?.cells.assignee === 'Ana'), 'the next chore goes after the last, for the same person');
   expect(await keeper.until('the seeded cards', `document.querySelectorAll('.card').length === 6`), 'the board draws the chores other devices left');
   expect(await keeper.inFrame(`return ${card('Water plants')}.classList.contains('done') && !${card('Feed the cat')}.classList.contains('done') && !${card('Hoover')}.classList.contains('done')`), 'done today is done, done yesterday or before is not');
   expect(await keeper.inFrame(`return document.querySelector('.progress span').textContent === '1 of 6 done' && document.querySelector('.cards .card:last-child .c-name').textContent === 'Water plants'`), 'the count says one done, and the done card steps to the end');
@@ -57,25 +57,25 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
 
   // punching a chore done last period continues its run
   await clickIn(keeper, 'Feed the cat', '.slot.live');
-  const fed = await untilRows('the punch', 'chores', (r) => r.find((x) => x.id === 'yday' && x.cells.streak === 4));
+  const fed = await untilRows('the punch', '_fdata/chores', (r) => r.find((x) => x.id === 'yday' && x.cells.streak === 4));
   expect(fed?.cells.best_streak === 4 && fed?.cells.last_done_ms > noon(0) - 12 * 3600e3 && fed?.cells.assignee === 'Bo' && fed?.cells._created_at === 5, 'a punch after yesterday\'s continues the run and raises the best, over the row');
   expect(await keeper.until('the card to settle', `${card('Feed the cat')}.classList.contains('done') && ${card('Feed the cat')}.querySelectorAll('.slot.punched').length === 4`), 'and the card is punched four times');
   // one done long ago starts over
   await clickIn(keeper, 'Hoover', '.slot.live');
-  expect(await untilRows('the fresh run', 'chores', (r) => r.find((x) => x.id === 'long' && x.cells.streak === 1 && x.cells.best_streak === 6)), 'a punch after a gap starts the run at 1 and keeps the best');
+  expect(await untilRows('the fresh run', '_fdata/chores', (r) => r.find((x) => x.id === 'long' && x.cells.streak === 1 && x.cells.best_streak === 6)), 'a punch after a gap starts the run at 1 and keeps the best');
   // a weekly one done last week continues too
   await clickIn(keeper, 'Bins', '.slot.live');
-  expect(await untilRows('the weekly run', 'chores', (r) => r.find((x) => x.id === 'lastwk' && x.cells.streak === 3 && x.cells.best_streak === 3)), 'a weekly punch after last week\'s continues the run');
+  expect(await untilRows('the weekly run', '_fdata/chores', (r) => r.find((x) => x.id === 'lastwk' && x.cells.streak === 3 && x.cells.best_streak === 3)), 'a weekly punch after last week\'s continues the run');
   expect(await keeper.until('the count to follow', `document.querySelector('.progress span').textContent === '4 of 6 done'`), 'and the count follows');
   await keeper.shot('3-punched');
 
   // the live hole of a done card undoes the punch
   await clickIn(keeper, 'Feed the cat', '.slot.live');
-  const undone = await untilRows('the undo', 'chores', (r) => r.find((x) => x.id === 'yday' && x.cells.last_done_ms === 0));
+  const undone = await untilRows('the undo', '_fdata/chores', (r) => r.find((x) => x.id === 'yday' && x.cells.last_done_ms === 0));
   expect(undone?.cells.streak === 3 && undone?.cells.best_streak === 4 && undone?.cells.last_done_by === '', 'an undo gives back the run, and the best stays');
   expect(await keeper.until('the card to open again', `!${card('Feed the cat')}.classList.contains('done') && /best 4/.test(${card('Feed the cat')}.querySelector('.tally')?.textContent ?? '')`), 'and the card is open again, its best shown');
   await sleep(300);
-  expect((await rows('chores')).find((x) => x.id === 'today')?.cells.streak === 2, 'nothing touched the one done today');
+  expect((await rows('_fdata/chores')).find((x) => x.id === 'today')?.cells.streak === 2, 'nothing touched the one done today');
 
   // the menu: rename
   await clickIn(keeper, 'Sweep', '.c-name');
@@ -83,19 +83,19 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   if (!await keeper.until('the rename prompt', `document.querySelector('.framelib-prompt-input')?.value === 'Sweep'`)) return;
   await keeper.fill('.framelib-prompt-input', 'Sweep the porch');
   await keeper.click('.framelib-btn-primary');
-  expect(await untilRows('the rename', 'chores', (r) => r.find((x) => x.cells.chore === 'Sweep the porch' && x.cells.sort_order === 5 && x.cells.assignee === 'Ana')), 'a chore is renamed from its menu, over the row');
+  expect(await untilRows('the rename', '_fdata/chores', (r) => r.find((x) => x.cells.chore === 'Sweep the porch' && x.cells.sort_order === 5 && x.cells.assignee === 'Ana')), 'a chore is renamed from its menu, over the row');
   expect(await keeper.until('the new name', `!!${card('Sweep the porch')}`), 'and the card says so');
   // who does it, from the person on the card
   await clickIn(keeper, 'Sweep the porch', '.who');
   if (!await keeper.until('the who prompt', `document.querySelector('.framelib-prompt-input')?.value === 'Ana'`)) return;
   await keeper.fill('.framelib-prompt-input', 'Dee');
   await keeper.press('Enter');
-  expect(await untilRows('the person', 'chores', (r) => r.find((x) => x.cells.chore === 'Sweep the porch' && x.cells.assignee === 'Dee')), 'a chore is given to someone else');
+  expect(await untilRows('the person', '_fdata/chores', (r) => r.find((x) => x.cells.chore === 'Sweep the porch' && x.cells.assignee === 'Dee')), 'a chore is given to someone else');
   expect(await keeper.until('the badge', `${card('Sweep the porch')}?.querySelector('.who-name').textContent === 'Dee' && ${card('Sweep the porch')}.querySelector('.badge').textContent === 'D'`), 'and the card carries their name and initial');
   // how often, from the rhythm on the card
   await clickIn(keeper, 'Sweep the porch', '.rhythm');
   await choose(keeper, 'monthly');
-  expect(await untilRows('the rhythm', 'chores', (r) => r.find((x) => x.cells.chore === 'Sweep the porch' && x.cells.cadence === 'monthly')), 'a chore\'s rhythm is changed');
+  expect(await untilRows('the rhythm', '_fdata/chores', (r) => r.find((x) => x.cells.chore === 'Sweep the porch' && x.cells.cadence === 'monthly')), 'a chore\'s rhythm is changed');
   expect(await keeper.until('the monthly card', `${card('Sweep the porch')}.querySelector('.rhythm').textContent === 'monthly' && ${card('Sweep the porch')}.querySelectorAll('.slot').length === 4`), 'and a monthly card holds four holes');
   await keeper.shot('4-changed');
 
@@ -109,11 +109,11 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await pick(visitor, 'Feed the cat', '.slot.live');
   await visitor.click('[data-pick]');
   await sleep(400);
-  expect((await rows('chores')).find((x) => x.id === 'yday')?.cells.last_done_ms === 0, "a stranger's press changes nothing");
+  expect((await rows('_fdata/chores')).find((x) => x.id === 'yday')?.cells.last_done_ms === 0, "a stranger's press changes nothing");
 
   // nobody touches the stranger's page: the push says to read again
   await clickIn(keeper, 'Feed the cat', '.slot.live');
-  expect(await untilRows('the punch again', 'chores', (r) => r.find((x) => x.id === 'yday' && x.cells.last_done_ms > 0)), 'the keeper punches it again');
+  expect(await untilRows('the punch again', '_fdata/chores', (r) => r.find((x) => x.id === 'yday' && x.cells.last_done_ms > 0)), 'the keeper punches it again');
   expect(await visitor.until('it to reach the stranger', `${card('Feed the cat')}?.classList.contains('done') && document.querySelector('.progress span').textContent === '4 of 6 done'`), "and the stranger's open page is told to read again");
 
   // remove asks first
@@ -123,12 +123,12 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.shot('6-remove');
   await keeper.click('.framelib-btn-ghost');
   await sleep(400);
-  expect((await rows('chores')).some((x) => x.id === 'long') && await keeper.inFrame(`return !!${card('Hoover')}`), 'Cancel removes nothing');
+  expect((await rows('_fdata/chores')).some((x) => x.id === 'long') && await keeper.inFrame(`return !!${card('Hoover')}`), 'Cancel removes nothing');
   await clickIn(keeper, 'Hoover', '.c-name');
   await choose(keeper, 'Remove');
   await keeper.until('the confirm again', `!!document.querySelector('.framelib-btn-primary')`);
   await keeper.click('.framelib-btn-primary');
-  expect(await untilRows('the removal', 'chores', (r) => r.length === 5 && !r.some((x) => x.id === 'long')), 'Remove takes the chore out');
+  expect(await untilRows('the removal', '_fdata/chores', (r) => r.length === 5 && !r.some((x) => x.id === 'long')), 'Remove takes the chore out');
   expect(await keeper.until('it to go', `document.querySelectorAll('.card').length === 5`), 'and it is gone from the board');
   expect(await visitor.until('it to go for the stranger', `document.querySelectorAll('.card').length === 5`), "and from the stranger's");
   await keeper.shot('7-after');

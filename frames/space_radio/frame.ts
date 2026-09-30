@@ -146,8 +146,8 @@ const STATIONS: Station[] = [
 const STATION_INDEX = new Set(STATIONS.map((s) => s.id));
 
 // ----------------------------------------------------------------------------------------
-// PER-SESSION STATE — the session's `playstate` key (ctx.kv): station + playing + who
-// last changed it. Two radios in one space play apart.
+// PER-SESSION STATE — the session's `playstate` key (ctx.kv), which only this worker
+// reads: station + playing + who last changed it. Two radios in one space play apart.
 // ----------------------------------------------------------------------------------------
 type Playstate = {
   station_id: string | null;

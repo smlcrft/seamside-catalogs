@@ -6,8 +6,8 @@
 //                                           GET /api/list; space editors add and tick,
 //                                           every write a route here.
 //   data_storage:   the space's tables   — `assignments.table.jsonl` (the work) and
-//                                           `assignments_courses.table.jsonl`, files at the
-//                                           space's root, synced with it. Named for this frame:
+//                                           `assignments_courses.table.jsonl`, in the space's
+//                                           frame data folder `_fdata/`, synced with it. Named for this frame:
 //                                           courses are its own data, not a contract other
 //                                           frames share (see "When NOT to write a contract"
 //                                           in docs/schema-contracts.md).
@@ -53,7 +53,7 @@ declareTables([
 
 type Row = Record<string, unknown> & { id: string };
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
 
 /** What a new row holds before anything is said of it: the schema's own defaults. */
 const defaultsOf = (schema: { name: string; col_type: string; default_val: string }[]) =>

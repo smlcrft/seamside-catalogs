@@ -6,7 +6,7 @@
 //                                           space editors get the interactive one. The page
 //                                           reads no table: the board comes from
 //                                           GET /api/list, and every write is a route here.
-//   data_storage:   the space's table    — `chores.table.jsonl` at the space's root,
+//   data_storage:   the space's table    — `_fdata/chores.table.jsonl`, frame data,
 //                                           synced with the space; any frame in the space
 //                                           that speaks `chores` works on the same rows.
 //   view_realtime:  view-collaborative    — every write pushes `{ chore_chart: "chores" }`,
@@ -45,7 +45,7 @@ declareTables([
 
 type Row = Record<string, unknown> & { id: string };
 
-const chores = (ctx: Ctx) => ctx.table<Record<string, unknown>>(CHORES);
+const chores = (ctx: Ctx) => ctx.shared.table<Record<string, unknown>>(CHORES);
 
 /** What a new row holds before anything is said of it: the schema's own defaults. */
 const DEFAULTS: Record<string, unknown> = Object.fromEntries(

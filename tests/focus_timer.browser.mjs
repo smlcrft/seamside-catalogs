@@ -3,8 +3,8 @@
 
 export default async ({ keeper, visitor: open, expect, sleep }) => {
   const text = (sel) => `(document.querySelector('${sel}')?.textContent ?? '').trim()`;
-  // What the door keeps for this session, read as the keeper: the daemon's copy, not the page's.
-  const kept = async () => JSON.parse(await keeper.inFrame(`return (await window.seamside.kv.get('timer'))?.value ?? 'null';`) ?? 'null');
+  // What the worker keeps for this session, read through its own route: the daemon's copy, not the page's.
+  const kept = async () => JSON.parse(await keeper.inFrame(`const r = await window.seamside.fetch('/api/state'); return JSON.stringify((await r.json()).session ?? null);`) ?? 'null');
   const untilKept = async (what, test) => {
     for (let i = 0; i < 40; i++) { const v = await kept(); if (v && test(v)) return v; await sleep(250); }
     expect(false, `the session kept ${what}`);

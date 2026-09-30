@@ -2,8 +2,6 @@
   "tier": "members",
   "publish": "open",
   "steps": [
-    { "why": "a public-control switch an installed copy left behind", "as": "collaborator", "at": "space", "do": "KV.PUT t/__fc_settings/allow_public_control", "body": { "v": "false", "_created_at": 1, "_modified_at": 1 }, "status": 200 },
-
     { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["id=\"root\""] },
     { "why": "a stranger is told no device is connected", "do": "GET {api}/device", "status": 200, "is": { "/connected": false, "/can_connect": false, "/missing/0": "sensor" }, "absent": ["/keys", "/values", "/public_control"] },
     { "why": "so is someone signed in and on no roster", "as": "signed", "do": "GET {api}/device", "is": { "/connected": false } },
@@ -26,11 +24,14 @@
     { "why": "and another", "as": "collaborator", "do": "PUT {api}/settings/hidden", "body": { "key": "led", "enabled": true }, "status": 200 },
     { "why": "and shows one again", "as": "collaborator", "do": "PUT {api}/settings/hidden", "body": { "key": "led", "enabled": false }, "status": 200 },
     { "why": "switches public control on", "as": "collaborator", "do": "PUT {api}/settings/public_control", "body": { "enabled": true }, "status": 200 },
-    { "why": "each setting a row of __fc_settings, its value JSON under v", "table": "__fc_settings", "has": ["view:rgb", "\\\"palette\\\"", "hidden:servo", "allow_public_control", "_created_at", "_modified_at"], "lacks": ["hidden:led"] },
+    { "why": "each setting a row of the session's own settings, its value JSON under v", "table": "_settings", "has": ["view:rgb", "\\\"palette\\\"", "hidden:servo", "allow_public_control", "_created_at", "_modified_at"], "lacks": ["hidden:led"] },
 
     { "why": "with public control on a stranger may ask, and is told there is no device", "do": "POST {api}/set", "body": { "key": "servo", "value": 90 }, "status": 409, "has": ["no local-device bus"] },
     { "why": "an ask names what it is for", "do": "POST {api}/run", "body": {}, "status": 400, "is": { "/error": "command required" } },
     { "why": "a collaborator's read is told the same", "as": "collaborator", "do": "POST {api}/read", "body": { "name": "temp" }, "status": 409, "has": ["no local-device bus"] },
+    { "why": "the door hands the settings to no stranger", "do": "KV.GET t/_settings/allow_public_control f:{id}", "status": 403 },
+    { "why": "nor to a collaborator", "as": "collaborator", "at": "space", "do": "KV.LIST t/_settings/ f:{id}", "status": 403, "lacks": ["hidden:servo"] },
+    { "why": "nor takes a collaborator's write past the worker", "as": "collaborator", "at": "space", "do": "KV.PUT t/_settings/allow_public_control f:{id}", "body": { "v": "false" }, "status": 403 },
     { "why": "and still nothing is connected", "do": "GET {api}/device", "is": { "/connected": false }, "absent": ["/hidden", "/views"] }
   ]
 }

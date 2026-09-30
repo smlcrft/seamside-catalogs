@@ -1,6 +1,6 @@
 {
     "name": "RSS Reader",
-    "description": "A reader for the open web, shared with the people you read alongside. Paste any site or feed address and the frame finds the feed, pulls the items in, and keeps them in groups you name. What you boost and what you say about an item is shared with the space, so it becomes a small room of co-readers rather than a lonely inbox; members boost and comment, editors manage the feeds. Keyboard-first: j and k move, m marks read, b boosts. Because a reader must reach whatever you subscribe to, it asks to reach anything on the network \u2014 the internet, your home network and this computer \u2014 which you are shown and asked to allow before it is added. Feeds, items, boosts, comments and each person's read marks are the space's own tables (rss_*), so members can see each other's read marks.",
+    "description": "A reader for the open web, shared with the people you read alongside. Paste any site or feed address and the frame finds the feed, pulls the items in, and keeps them in groups you name. What you boost and what you say about an item is shared with the space, so it becomes a small room of co-readers rather than a lonely inbox; members boost and comment, editors manage the feeds. Keyboard-first: j and k move, m marks read, b boosts. Because a reader must reach whatever you subscribe to, it asks to reach anything on the network \u2014 the internet, your home network and this computer \u2014 which you are shown and asked to allow before it is added. Feeds, items, boosts, comments and each person's read marks are tables in the space's frame data (rss_*), so members can see each other's read marks.",
     "frame_type": "Tandem",
     "tags": [
         "everyday",
@@ -16,8 +16,8 @@
     "default_width_px": 900,
     "default_height_px": 640,
     "created_at": "2026-07-01T00:00:00Z",
-    "modified_at": "2026-09-29T22:00:00Z",
-    "app_version_min": "1.0.11",
+    "modified_at": "2026-09-30T22:00:00Z",
+    "app_version_min": "1.0.12",
     "licensed_under_cc0": true,
     "attribution_log": [],
     "icon": "ph:rss",

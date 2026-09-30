@@ -66,7 +66,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   expect(await keeper.until('the thumbnail', `document.querySelector('.ed .pf-thumb')?.naturalWidth > 0`), 'a chosen photo is shown on the sheet');
   await keeper.shot('3-new-recipe');
   await keeper.click('.framelib-modal-actions .btn-primary');
-  const ragu = await untilRows('the recipe', 'recipes', (r) => r.find((x) => x.cells.title === "Nonna's ragù"));
+  const ragu = await untilRows('the recipe', '_fdata/recipes', (r) => r.find((x) => x.cells.title === "Nonna's ragù"));
   expect(ragu?.cells.servings === 4 && ragu?.cells.tags === 'pasta,sunday' && ragu?.cells.ingredients_lines === '1 onion\n500 g beef\n1 tin tomatoes' && ragu?.cells.steps_lines === 'Brown the beef\nAdd the tomatoes\nSimmer for hours' && ragu?.cells.notes === 'From Nonna. Less salt next time.', 'the recipe is a row of the space, its fields as the contract holds them');
   expect(ragu?.cells.created_ms > 0 && ragu?.cells._created_at > 0 && ragu?.cells._modified_at > 0, 'stamped when it was made');
   const uri = ragu?.cells.photo ?? '';
@@ -83,12 +83,12 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.choose('.ed input[type="file"]', small);
   await keeper.until('the thumbnail', `document.querySelector('.ed .pf-thumb')?.naturalWidth > 0`);
   await keeper.click('.framelib-modal-actions .btn-primary');
-  const pie = await untilRows('the second recipe', 'recipes', (r) => r.find((x) => x.cells.title === 'Weeknight pie'));
+  const pie = await untilRows('the second recipe', '_fdata/recipes', (r) => r.find((x) => x.cells.title === 'Weeknight pie'));
   expect(pie?.cells.servings === 0 && pie?.cells.tags === 'weeknight' && pie?.cells.notes === '' && /^data:image\/jpeg;base64,/.test(pie?.cells.photo ?? ''), 'a recipe with little in it starts from the defaults');
   expect(await size(keeper, pie?.cells.photo ?? '') === '40x30', 'a small photo keeps its size');
 
   // a recipe another frame or a table tool put in the table, in the contract's shape
-  await seed('recipes', 'kept1', { title: 'apple crumble', ingredients_lines: '6 apples\nbutter', steps_lines: 'Bake', servings: 6, tags: 'dessert', notes: '', created_ms: 7 });
+  await seed('_fdata/recipes', 'kept1', { title: 'apple crumble', ingredients_lines: '6 apples\nbutter', steps_lines: 'Bake', servings: 6, tags: 'dessert', notes: '', created_ms: 7 });
   await keeper.send('Page.reload');
   keeper.child = null;
   for (let i = 0; i < 60 && !keeper.child; i++) await sleep(250);
@@ -124,7 +124,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
 
   await keeper.fill('h1.t-title input', 'Ragù alla Nonna');
   await keeper.press('Enter');
-  const renamed = await untilRows('the rename', 'recipes', (r) => r.find((x) => x.id === ragu?.id && x.cells.title === 'Ragù alla Nonna'));
+  const renamed = await untilRows('the rename', '_fdata/recipes', (r) => r.find((x) => x.id === ragu?.id && x.cells.title === 'Ragù alla Nonna'));
   expect(renamed?.cells.photo === uri && renamed?.cells.created_ms === ragu?.cells.created_ms && renamed?.cells._created_at === ragu?.cells._created_at && renamed?.cells.servings === 4, 'a rename lands over the row, which kept what it held');
 
   await keeper.click('.rec-edit');
@@ -132,18 +132,18 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.clear('.ed input.f-serv');
   await keeper.fill('.ed input.f-serv', '6');
   await blur(keeper);
-  expect(await untilRows('the servings', 'recipes', (r) => r.find((x) => x.id === ragu?.id && x.cells.servings === 6)), 'servings are kept as the field is left');
+  expect(await untilRows('the servings', '_fdata/recipes', (r) => r.find((x) => x.id === ragu?.id && x.cells.servings === 6)), 'servings are kept as the field is left');
   await keeper.click('.ed textarea');
   await keeper.inFrame(`const t = document.querySelector('.ed textarea'); t.setSelectionRange(t.value.length, t.value.length); return true;`);
   await keeper.send('Input.insertText', { text: '\nbasil' }, keeper.child);
   await blur(keeper);
-  expect(await untilRows('the ingredients', 'recipes', (r) => r.find((x) => x.id === ragu?.id && x.cells.ingredients_lines === '1 onion\n500 g beef\n1 tin tomatoes\nbasil')), 'an ingredient added is kept');
+  expect(await untilRows('the ingredients', '_fdata/recipes', (r) => r.find((x) => x.id === ragu?.id && x.cells.ingredients_lines === '1 onion\n500 g beef\n1 tin tomatoes\nbasil')), 'an ingredient added is kept');
   await keeper.inFrame(`[...document.querySelectorAll('.ed .pf-btn')].find((b) => b.textContent.trim() === 'remove').setAttribute('data-t', 'rm'); return true;`);
   await keeper.click('.ed .pf-btn[data-t="rm"]');
-  expect(await untilRows('the photo to go', 'recipes', (r) => r.find((x) => x.id === ragu?.id && x.cells.photo === '')), 'a photo is removed');
+  expect(await untilRows('the photo to go', '_fdata/recipes', (r) => r.find((x) => x.id === ragu?.id && x.cells.photo === '')), 'a photo is removed');
   expect(await keeper.until('the empty photo', `!!document.querySelector('.ed .pf-empty')`), 'and the sheet says so');
   await keeper.choose('.ed input[type="file"]', photo);
-  const again = await untilRows('the photo to come back', 'recipes', (r) => r.find((x) => x.id === ragu?.id && /^data:image\/jpeg;base64,/.test(x.cells.photo)));
+  const again = await untilRows('the photo to come back', '_fdata/recipes', (r) => r.find((x) => x.id === ragu?.id && /^data:image\/jpeg;base64,/.test(x.cells.photo)));
   expect(again && await size(keeper, again.cells.photo) === '512x341', 'and another put in its place, downscaled');
   await keeper.shot('6-edit');
   await keeper.click('.framelib-modal-actions button:last-child');
@@ -162,9 +162,9 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.until('the edit sheet', `!!document.querySelector('.framelib-modal .ed-del')`);
   await keeper.click('.ed-del');
   expect(await keeper.inFrame(`return document.querySelector('.ed-del').classList.contains('armed') && document.querySelector('.ed-del').textContent.trim() === 'Click again to delete'`), 'the first press arms delete');
-  expect((await rows('recipes')).length === 3, 'and deletes nothing yet');
+  expect((await rows('_fdata/recipes')).length === 3, 'and deletes nothing yet');
   await keeper.click('.ed-del');
-  expect(await untilRows('the delete', 'recipes', (r) => r.length === 2 && !r.some((x) => x.id === ragu?.id)), 'the second press deletes the row');
+  expect(await untilRows('the delete', '_fdata/recipes', (r) => r.length === 2 && !r.some((x) => x.id === ragu?.id)), 'the second press deletes the row');
   expect(await keeper.until('the shelf again', `${names}.join('|') === 'apple crumble|Weeknight pie'`), 'and the keeper is back at the shelf');
   expect(await visitor.until('the stranger to be put back', `!document.querySelector('.cook') && ${names}.join('|') === 'apple crumble|Weeknight pie'`), "the stranger's page follows, off the recipe that went");
   await visitor.shot('8-visitor-after-delete');

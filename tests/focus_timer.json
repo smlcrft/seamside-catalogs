@@ -2,13 +2,11 @@
   "tier": "members",
   "publish": "open",
   "steps": [
-    { "why": "a timer an installed copy kept in the session, missing fields it never wrote", "as": "collaborator", "at": "space", "do": "KV.PUT timer f:{id}", "body": "{\"duration_s\":600,\"label\":\"Old sprint\"}", "status": 200 },
-
     { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["Focus Timer", "/api/state"] },
     { "why": "and at the root", "do": "GET {frame}/", "status": 200, "has": ["Focus Timer"] },
     { "why": "the worker's own code is not a page", "do": "GET {frame}/frame.ts", "status": 404, "lacks": ["handleWrite"] },
 
-    { "why": "a stranger watches the timer an installed copy kept, the rest read as the defaults", "do": "GET {api}/state", "status": 200, "is": { "/session/duration_s": 600, "/session/label": "Old sprint", "/session/ends_at_ms": 0, "/session/paused_left_s": 0, "/session/started_by": "", "/session/max_minutes": 60, "/session/min_minutes": 1 } },
+    { "why": "a stranger watches a timer nobody has set, at its defaults", "do": "GET {api}/state", "status": 200, "is": { "/session/duration_s": 1500, "/session/label": "", "/session/ends_at_ms": 0, "/session/paused_left_s": 0, "/session/started_by": "", "/session/max_minutes": 60, "/session/min_minutes": 1 } },
     { "why": "and is told who they are", "do": "GET {api}/whoami", "status": 200, "is": { "/is_anon": true, "/is_sfi_member": false, "/is_sfi_editor": false, "/is_owner": false } },
     { "why": "a stranger starts nothing", "do": "POST {api}/start", "body": {}, "status": 403, "is": { "/error": "editors only" } },
     { "why": "turns no dial", "do": "POST {api}/set", "body": { "minutes": 5 }, "status": 403 },
@@ -22,7 +20,9 @@
     { "why": "a viewer starts nothing", "as": "viewer", "do": "POST {api}/start", "body": {}, "status": 403 },
     { "why": "turns no dial", "as": "viewer", "do": "PUT {api}/set", "body": { "minutes": 5 }, "status": 403 },
     { "why": "names nothing", "as": "viewer", "do": "POST {api}/label", "body": { "label": "Mine" }, "status": 403 },
-    { "why": "nothing was written by any of that", "as": "collaborator", "at": "space", "do": "KV.GET timer f:{id}", "has": ["Old sprint"], "lacks": ["Mine", "\\\"duration_s\\\":60,", "\\\"duration_s\\\":300"] },
+    { "why": "nothing was written by any of that", "as": "collaborator", "do": "GET {api}/state", "status": 200, "is": { "/session/duration_s": 1500, "/session/label": "", "/session/ends_at_ms": 0, "/session/started_by": "" } },
+    { "why": "the timer is the session's own: the door hands it to nobody, a member included", "as": "collaborator", "at": "space", "do": "KV.GET timer f:{id}", "status": 403 },
+    { "why": "nor takes a member's write to it", "as": "collaborator", "at": "space", "do": "KV.PUT timer f:{id}", "body": "{\"duration_s\":60}", "status": 403 },
 
     { "why": "a collaborator drives it", "as": "collaborator", "do": "GET {api}/whoami", "is": { "/is_sfi_editor": true } },
     { "why": "the dial stops at an hour", "as": "collaborator", "do": "POST {api}/set", "body": { "minutes": 90 }, "status": 200, "is": { "/session/duration_s": 3600 } },
@@ -41,7 +41,7 @@
     { "why": "an op there is none of", "as": "collaborator", "do": "POST {api}/nope", "body": {}, "status": 404 },
     { "why": "a route there is none of", "do": "GET {api}/nope", "status": 404 },
 
-    { "why": "kept as the session's timer key, in the shape installed copies hold", "as": "collaborator", "at": "space", "do": "KV.GET timer f:{id}", "has": ["Chapter three", "\\\"duration_s\\\":600", "\\\"ends_at_ms\\\":0", "\\\"started_by\\\":\\\"\\\""] },
+    { "why": "the owner reads the timer only through the frame too", "as": "owner", "at": "space", "do": "KV.GET timer f:{id}", "status": 403 },
     { "why": "and a viewer reads what the owner left", "as": "viewer", "do": "GET {api}/state", "is": { "/session/label": "Chapter three", "/session/duration_s": 600 } }
   ]
 }

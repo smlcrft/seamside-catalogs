@@ -2,7 +2,7 @@
   "tier": "members",
   "publish": "open",
   "steps": [
-    { "why": "a wish an installed copy left behind, claimed by someone no longer known", "as": "collaborator", "at": "space", "do": "KV.PUT t/christmas.wishes/old1", "body": { "item": "Kettle", "for_who": "Collaborator", "for_user_id": "{did:collaborator}", "url": "", "notes": "a quiet one", "claimed_by": "", "claimed_by_id": "", "added_ms": 5, "claimed": 1, "_created_at": 5, "_modified_at": 5 }, "status": 200 },
+    { "why": "a wish on the list, claimed by someone no longer known", "as": "collaborator", "at": "space", "do": "KV.PUT t/christmas.wishes/old1", "body": { "item": "Kettle", "for_who": "Collaborator", "for_user_id": "{did:collaborator}", "url": "", "notes": "a quiet one", "claimed_by": "", "claimed_by_id": "", "added_ms": 5, "claimed": 1, "_created_at": 5, "_modified_at": 5 }, "status": 200 },
 
     { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["Gift List"] },
     { "why": "before a list is chosen there is nothing to show", "do": "GET {api}/list", "status": 200, "is": { "/bound": null, "/can_bind": false, "/wishes": [] }, "lacks": ["Kettle"] },
@@ -34,12 +34,15 @@
 
     { "why": "a wish needs an item", "as": "admin", "do": "POST {api}/wish", "body": { "item": "  " }, "status": 400, "is": { "/error": "item required" } },
     { "why": "an admin adds a wish for the collaborator", "as": "admin", "do": "POST {api}/wish", "body": { "item": " Bike ", "for_who": "Collaborator", "notes": "blue" }, "status": 200, "is": { "/wishes/1/item": "Bike", "/wishes/1/for_who": "Collaborator", "/wishes/1/claimed": false }, "save": { "bike": "/wishes/1/id" } },
-    { "why": "as a row of the list, in the shape installed copies hold", "table": "christmas.wishes", "has": ["\"item\":\"Bike\"", "\"notes\":\"blue\"", "\"url\":\"\"", "\"claimed_by\":\"\"", "\"claimed_by_id\":\"\"", "\"claimed\":0", "\"added_ms\":", "_created_at", "_modified_at", "Kettle"] },
+    { "why": "as a row of the list, in the contract's shape", "table": "christmas.wishes", "has": ["\"item\":\"Bike\"", "\"notes\":\"blue\"", "\"url\":\"\"", "\"claimed_by\":\"\"", "\"claimed_by_id\":\"\"", "\"claimed\":0", "\"added_ms\":", "_created_at", "_modified_at", "Kettle"] },
     { "why": "the admin claims it", "as": "admin", "do": "POST {api}/wish/{bike}/claim", "body": {}, "status": 200, "is": { "/wishes/1/claimed": true, "/wishes/1/holder_known": true, "/wishes/1/claimed_by": "Admin", "/wishes/1/claimed_by_id": "{did:admin}", "/wishes/1/claimed_by_me": true } },
     { "why": "the row says claimed and never by whom", "table": "christmas.wishes", "has": ["\"claimed\":1", "\"item\":\"Bike\"", "\"notes\":\"blue\""], "lacks": ["Admin", "{did:admin}"] },
 
     { "why": "the person the wishes are for is told nothing of a claim", "as": "collaborator", "do": "GET {api}/list", "status": 200, "is": { "/wishes/0": { "id": "old1", "item": "Kettle", "for_who": "Collaborator", "url": "", "notes": "a quiet one", "added_ms": 5, "for_me": true }, "/wishes/1/id": "{bike}", "/wishes/1/item": "Bike", "/wishes/1/for_me": true }, "lacks": ["claimed", "holder_known", "Admin", "{did:admin}"] },
     { "why": "nor by the table at the door", "as": "collaborator", "do": "KV.LIST t/christmas.wishes/", "lacks": ["Admin", "{did:admin}"] },
+    { "why": "the holder is kept in the frame's own claims, off the space", "table": "_claims", "has": ["christmas.wishes:{bike}", "\"by\":\"Admin\"", "{did:admin}"] },
+    { "why": "which the person the wish is for cannot read at the door", "as": "collaborator", "do": "KV.LIST t/_claims/ f:{id}", "status": 403, "lacks": ["Admin", "{did:admin}"] },
+    { "why": "nor can anyone else", "as": "admin", "do": "KV.GET t/_claims/christmas.wishes:{bike} f:{id}", "status": 403, "lacks": ["Admin", "{did:admin}"] },
     { "why": "and cannot claim what is for them", "as": "collaborator", "do": "POST {api}/wish/{bike}/claim", "body": {}, "status": 400, "is": { "/error": "that one is for you" }, "lacks": ["claimed", "Admin"] },
     { "why": "nor release it", "as": "collaborator", "do": "POST {api}/wish/{bike}/unclaim", "body": {}, "status": 400, "is": { "/error": "that one is for you" } },
     { "why": "their own change to it is answered with nothing of the claim", "as": "collaborator", "do": "PUT {api}/wish/{bike}", "body": { "notes": "red", "url": "https://example.com/bike" }, "status": 200, "is": { "/wishes/1/notes": "red", "/wishes/1/url": "https://example.com/bike", "/wishes/1/item": "Bike" }, "lacks": ["claimed", "holder_known", "Admin", "{did:admin}"] },

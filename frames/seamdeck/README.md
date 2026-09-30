@@ -50,7 +50,7 @@ Every game keeps its feel in named constants at the top of its sim:
 One worker, on the space owner's device, serves every session of the frame;
 every player's requests reach it, so worker memory — keyed by the session
 (`ctx.frame`) — is already shared multiplayer state (high scores are the
-space's `seamdeck_scores` table, one board per space). Live updates are
+`seamdeck_scores` table in the space's frame data (`_fdata/`), one board per space). Live updates are
 `ctx.push({ seamdeck: "state" })`, which carries nothing: every open page
 reads `/api/state` again. Races run locally on each
 player's screen from a shared per-round `seed`; the finished input trace is

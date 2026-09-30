@@ -1,22 +1,22 @@
 // ----------------------------------------------------------------------------------------
 // Community Library — track community-owned items (books, tools, gear) and who has them
-// checked out. Two tables of the space: `library_assets` for items + checkout info, and a
-// `members` list — `members.table.jsonl` or a subtype such as `club.members.table.jsonl` —
-// the roster Member Manager keeps, which this frame only reads. Each session is bound to one
-// list (ctx.kv `bound/members`), chosen by an editor. Preferences (org name, borrow
-// durations, item types, edit policy) govern the space's one library_assets table, so they
-// are one settings row of the space.
+// checked out. Two tables of the space: `library_assets` in its frame data folder
+// (`_fdata/library_assets.table.jsonl`) for items + checkout info, and a `members` list —
+// `members.table.jsonl` or a subtype such as `club.members.table.jsonl` — the roster Member
+// Manager keeps, which this frame only reads. Each session is bound to one list (ctx.kv
+// `bound/members`), chosen by an editor. What describes the library (its name, item types,
+// loan lengths) goes with the items: the `library` row of `_fdata/library_settings`, so every
+// session and every member's copy follows one set of rules. Who may edit is this session's
+// own: the `prefs` row of its own `settings` table (`ctx.own`), which no wire serves, since
+// a table in `_fdata` is any collaborator's to write at the door.
 //
 // Anyone not on the space's roster is shown what is in and what is out, and nothing else:
 // the page reads no item itself, and every route decides on ctx.peer.
 // ----------------------------------------------------------------------------------------
-import type { Ctx } from "@frame-core";
+import type { Ctx, Table } from "@frame-core";
 import { declareTables, sanitizeText, toIntOrNull } from "@frame-core";
 
 const ASSETS = "library_assets";
-// Settings are rows of a store every frame in the space shares, so the key carries this
-// frame's name. The value is JSON under `v`.
-const SETTINGS = "__fc_settings";
 
 declareTables([
   {
@@ -41,19 +41,24 @@ const NEW_ASSET = { needs_attention: 0 };
 
 type Row = Record<string, unknown> & { id: string };
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+type Rows = Table<Record<string, unknown>>;
+/** The shared items and the library's rules beside them; this session's own settings (a
+ *  settings value is JSON under `v`); a members list. */
+const assetTable = (ctx: Ctx): Rows => ctx.shared.table(ASSETS);
+const libraryRules = (ctx: Ctx): Rows => ctx.shared.table("library_settings");
+const settings = (ctx: Ctx): Rows => ctx.own.table("settings");
+const rows = (ctx: Ctx, list: string): Rows => ctx.table(list);
 
 /** Write a row over what it held, stamped when it was made and when it changed. */
 async function keep(
-  ctx: Ctx,
-  name: string,
+  t: Rows,
   id: string | null,
   values: Record<string, unknown>,
   fresh: Record<string, unknown> = {},
 ): Promise<Row> {
-  const was = id ? await rows(ctx, name).get(id) : null;
+  const was = id ? await t.get(id) : null;
   const now = Date.now();
-  return await rows(ctx, name).upsert({
+  return await t.upsert({
     ...(was ?? { ...fresh, _created_at: now }),
     ...values,
     ...(id ? { id } : {}),
@@ -70,7 +75,7 @@ async function boundList(ctx: Ctx): Promise<string | null> {
   return validList(v) ? v : null;
 }
 
-// ----- Preferences (a settings row of the space) -----------------------------------------
+// ----- Preferences: the library's rules (shared) and who may edit (this session's own) ----
 type BorrowOption = { label: string; days: number };
 type Prefs = {
   org_name: string;
@@ -93,29 +98,32 @@ const DEFAULT_PREFS: Prefs = {
   owner_only_edit: false,
 };
 
-const PREFS_KEY = "community_library_prefs";
+const LIBRARY_KEY = "library";
+const PREFS_KEY = "prefs";
 
-function clonePrefs(p: Prefs): Prefs {
-  return {
-    org_name: p.org_name,
-    item_types: [...p.item_types],
-    borrow_options: p.borrow_options.map((o) => ({ label: o.label, days: o.days })),
-    default_borrow_days: p.default_borrow_days,
-    owner_only_edit: p.owner_only_edit,
-  };
+/** A settings row's JSON, or nothing when absent or unreadable. The shared row is any
+ *  collaborator's to write, so what it holds is checked below as it is read. */
+async function stored(t: Rows, id: string): Promise<Partial<Prefs>> {
+  try {
+    const row = await t.get(id);
+    const v = row?.v == null ? null : JSON.parse(String(row.v));
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
 }
 
 async function getPrefs(ctx: Ctx): Promise<Prefs> {
-  let p: Prefs | null = null;
-  try {
-    const row = await rows(ctx, SETTINGS).get(PREFS_KEY);
-    p = row?.v == null ? null : JSON.parse(String(row.v)) as Prefs;
-  } catch { /* unreadable: the defaults */ }
-  if (!p) return clonePrefs(DEFAULT_PREFS);
+  const library = await stored(libraryRules(ctx), LIBRARY_KEY);
+  const p: Partial<Prefs> = {
+    ...(Object.keys(library).length ? library : DEFAULT_PREFS),
+    owner_only_edit: (await stored(settings(ctx), PREFS_KEY)).owner_only_edit,
+  };
   const itemTypes = Array.isArray(p.item_types) && p.item_types.length > 0
     ? p.item_types.map(String) : [...DEFAULT_PREFS.item_types];
   const borrowOptions = Array.isArray(p.borrow_options) && p.borrow_options.length > 0
     ? p.borrow_options
+        .filter((o) => o && typeof o === "object")
         .map((o) => ({ label: String((o as BorrowOption).label ?? ""), days: Number((o as BorrowOption).days) }))
         .filter((o) => o.label && Number.isFinite(o.days) && o.days > 0)
     : [...DEFAULT_PREFS.borrow_options];
@@ -130,7 +138,11 @@ async function getPrefs(ctx: Ctx): Promise<Prefs> {
   };
 }
 
-const setPrefs = (ctx: Ctx, next: Prefs) => keep(ctx, SETTINGS, PREFS_KEY, { v: JSON.stringify(next) });
+async function setPrefs(ctx: Ctx, next: Prefs): Promise<void> {
+  const { owner_only_edit, ...library } = next;
+  await keep(libraryRules(ctx), LIBRARY_KEY, { v: JSON.stringify(library) });
+  await keep(settings(ctx), PREFS_KEY, { v: JSON.stringify({ owner_only_edit }) });
+}
 
 // ----- Helpers --------------------------------------------------------------------------
 // Writes are editor-only. Never gate on is_sfi_member — a Viewer-role member would slip
@@ -213,7 +225,7 @@ async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): P
   }
 
   if (!canEdit(ctx, prefs)) return refuse(403, "editing is restricted");
-  const assets = rows(ctx, ASSETS);
+  const assets = assetTable(ctx);
   // An id that names no item is refused, never created.
   const named = v?.row_id ? String(v.row_id) : "";
   if (named && !(await assets.get(named))) return refuse(404, "item not found");
@@ -226,7 +238,7 @@ async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): P
     if (!name) return refuse(400, "name required");
     if (!itemType) return refuse(400, "item_type required");
     if (!prefs.item_types.includes(itemType)) return refuse(400, "item_type not in allowed list");
-    const row = await keep(ctx, ASSETS, named || null, {
+    const row = await keep(assetTable(ctx), named || null, {
       name, item_type: itemType, notes,
       ...(named ? {} : { needs_attention: 0 }),
     }, NEW_ASSET);
@@ -251,7 +263,7 @@ async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): P
     const allowedDays = prefs.borrow_options.map((o) => o.days);
     if (!allowedDays.includes(borrowDays)) return refuse(400, "borrow_days not in allowed list");
     const checkedOutAt = toIntOrNull(v.checked_out_at) ?? Date.now();
-    await keep(ctx, ASSETS, named, {
+    await keep(assetTable(ctx), named, {
       checked_out_member_id: memberId,
       checked_out_manual_name: memberId ? "" : manualName,
       checked_out_at: checkedOutAt,
@@ -263,7 +275,7 @@ async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): P
 
   if (op === "asset/checkin") {
     if (!named) return refuse(400, "row_id required");
-    await keep(ctx, ASSETS, named, {
+    await keep(assetTable(ctx), named, {
       checked_out_member_id: "",
       checked_out_manual_name: "",
       checked_out_at: null,
@@ -278,7 +290,7 @@ async function write(ctx: Ctx, op: string, v: Record<string, unknown> | null): P
     if (!named) return refuse(400, "row_id required");
     const update: Record<string, unknown> = { needs_attention: v.needs_attention ? 1 : 0 };
     if (typeof v.notes !== "undefined") update.notes = sanitizeText(v.notes, 1000);
-    await keep(ctx, ASSETS, named, update);
+    await keep(assetTable(ctx), named, update);
     tell(ctx, "assets");
     return json({ row_id: named });
   }
@@ -294,7 +306,7 @@ async function roster(ctx: Ctx): Promise<Row[]> {
 
 async function listAssets(ctx: Ctx): Promise<Response> {
   const now = Date.now();
-  const all = await rows(ctx, ASSETS).all();
+  const all = await assetTable(ctx).all();
   all.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
   if (ctx.peer.is_anon) {

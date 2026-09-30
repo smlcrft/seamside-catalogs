@@ -767,7 +767,7 @@ import { frame, applyChannel } from "/lib/js/framelib.js";
   function renderMeta() {
     titleInput.value = prefs.title;
     saveBtn.hidden = !order.length;
-    metaEl.title = sheetDir ? `Kept in this space at ${sheetDir}/` : "";
+    metaEl.title = sheetDir ? `Kept in this space's frame data at ${sheetDir}/` : "";
     metaEl.textContent = canEdit
       ? `${order.length} stroke${order.length === 1 ? "" : "s"}`
       : "view only";

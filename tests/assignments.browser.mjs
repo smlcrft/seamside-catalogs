@@ -54,14 +54,14 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('.header .iconbtn');
   await answer(keeper, 'Biology');
   await answer(keeper, '4');
-  const bio = await untilRows('the course', 'assignments_courses', (r) => r.find((x) => x.cells.name === 'Biology'));
+  const bio = await untilRows('the course', '_fdata/assignments_courses', (r) => r.find((x) => x.cells.name === 'Biology'));
   expect(bio?.cells.credits === 4 && bio?.cells.sort_order === 0 && bio?.cells._created_at > 0 && bio?.cells._modified_at > 0, 'a course is a row of the space, with its credits');
   expect(await keeper.until('the board', `/Nothing outstanding\\./.test(${verdict}) && !!document.querySelector('.add .f-title')`), 'and the board opens with nothing outstanding and the add strip');
   expect(await visitor.until('the course to reach the stranger', `/Nothing outstanding\\./.test(${verdict})`), "the stranger's open page is told to read again");
   await keeper.click('.header .iconbtn');
   await answer(keeper, 'History');
   await answer(keeper, '');
-  const hist = await untilRows('the second course', 'assignments_courses', (r) => r.find((x) => x.cells.name === 'History'));
+  const hist = await untilRows('the second course', '_fdata/assignments_courses', (r) => r.find((x) => x.cells.name === 'History'));
   expect(hist?.cells.credits === 3 && hist?.cells.sort_order === 1, 'a course given no credits is worth three, and goes after');
   expect(await keeper.until('both in the picker', `[...document.querySelectorAll('.add .f-course option')].map((o) => o.textContent).join('|') === 'Biology|History'`), 'the add strip offers both courses in order');
 
@@ -74,7 +74,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   expect(await keeper.until('the date to show', `!document.querySelector('.dp') && document.querySelector('[data-t="due"]').textContent.trim() === 'tomorrow'`), 'the calendar sets the date and closes');
   await keeper.fill('.add .f-title', 'Lab report');
   await keeper.press('Enter');
-  const lab = await untilRows('the work', 'assignments', (r) => r.find((x) => x.cells.title === 'Lab report'));
+  const lab = await untilRows('the work', '_fdata/assignments', (r) => r.find((x) => x.cells.title === 'Lab report'));
   expect(lab?.cells.course_id === bio?.id && lab?.cells.due === day(1) && lab?.cells.size === 3 && lab?.cells.weight === 0 && lab?.cells.earned === -1 && lab?.cells.possible === 100 && lab?.cells.done === 0 && lab?.cells.added_ms > 0 && lab?.cells._created_at > 0, 'Enter adds the work to the first course, huge and due tomorrow, unmarked');
   expect(await keeper.until('the verdict', `${verdict} === 'Start with Lab report.' && !!document.querySelector('.w.s3.lead') && document.querySelector('.add .f-title').value === ''`), 'the page names it as the thing to start, drawn big, and the box is cleared');
   expect(await keeper.inFrame(`return /start now/.test(${text}) && /tomorrow/.test(document.querySelector('.w .dp-trigger').textContent)`), 'under start now, due tomorrow');
@@ -88,7 +88,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   expect(await keeper.until('the draft', `document.querySelector('[data-t="size"]').textContent.trim() === 'tiny' && document.querySelector('[data-t="due"]').textContent.trim() === 'no date'`), 'the size cycles on to tiny, and the date is cleared');
   await keeper.fill('.add .f-title', 'Reading');
   await keeper.press('Enter');
-  const reading = await untilRows('the second work', 'assignments', (r) => r.find((x) => x.cells.title === 'Reading'));
+  const reading = await untilRows('the second work', '_fdata/assignments', (r) => r.find((x) => x.cells.title === 'Reading'));
   expect(reading?.cells.course_id === hist?.id && reading?.cells.due === '' && reading?.cells.size === 1, 'it lands in the chosen course, tiny and undated');
   expect(await keeper.until('the second row', `${titles}.join('|') === 'Lab report|Reading' && /no date/.test(${text}) && !!document.querySelector('.w.s1')`), 'and is drawn small, under no date');
   await keeper.shot('2-work');
@@ -98,12 +98,12 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('[data-t]');
   await pick(keeper, 'Weight of the course grade');
   await answer(keeper, '30');
-  expect(await untilRows('the weight', 'assignments', (r) => r.find((x) => x.id === lab?.id && x.cells.weight === 30)), 'a weight is kept on the row');
+  expect(await untilRows('the weight', '_fdata/assignments', (r) => r.find((x) => x.id === lab?.id && x.cells.weight === 30)), 'a weight is kept on the row');
   await mark(keeper, 'Lab report', '.w-title');
   await keeper.click('[data-t]');
   await pick(keeper, 'Enter a score');
   await answer(keeper, '90');
-  const scored = await untilRows('the score', 'assignments', (r) => r.find((x) => x.id === lab?.id && x.cells.earned === 90));
+  const scored = await untilRows('the score', '_fdata/assignments', (r) => r.find((x) => x.id === lab?.id && x.cells.earned === 90));
   expect(scored?.cells.done === 1 && scored?.cells.weight === 30 && scored?.cells.due === lab?.cells.due && scored?.cells._created_at === lab?.cells._created_at, 'a score marks it finished, over what the row held');
   expect(await keeper.until('the score to show', `/finished/.test(${text}) && document.querySelector('.w.done .score')?.textContent === '90%' && document.querySelector('.gpa b')?.textContent === '3.70'`), 'it moves to finished with its score, and the GPA is drawn');
 
@@ -119,7 +119,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('[data-t="hist"]');
   await pick(keeper, 'Credits');
   await answer(keeper, '2');
-  expect(await untilRows('the credits', 'assignments_courses', (r) => r.find((x) => x.id === hist?.id && x.cells.credits === 2 && x.cells.name === 'History' && x.cells.sort_order === 1)), 'a course takes new credits, the rest of it kept');
+  expect(await untilRows('the credits', '_fdata/assignments_courses', (r) => r.find((x) => x.id === hist?.id && x.cells.credits === 2 && x.cells.name === 'History' && x.cells.sort_order === 1)), 'a course takes new credits, the rest of it kept');
   expect(await keeper.until('the card to follow', `document.querySelectorAll('.cc .unit')[1]?.textContent === '2 cr'`), 'and its card says so');
   await keeper.inFrame(`document.querySelectorAll('.seg button')[0].setAttribute('data-t', 'due'); return true;`);
   await keeper.click('[data-t="due"]');
@@ -127,18 +127,18 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   // a tick lifts the row out; a second puts it back
   await mark(keeper, 'Reading', '.tick');
   await keeper.click('[data-t]');
-  expect(await untilRows('the tick', 'assignments', (r) => r.find((x) => x.id === reading?.id && x.cells.done === 1)), 'a tick finishes the work');
+  expect(await untilRows('the tick', '_fdata/assignments', (r) => r.find((x) => x.id === reading?.id && x.cells.done === 1)), 'a tick finishes the work');
   expect(await keeper.until('the row to move', `${verdict} === 'Nothing outstanding.' && document.querySelectorAll('.w.done').length === 2`), 'and it lifts into finished');
   await mark(keeper, 'Reading', '.tick');
   await keeper.click('[data-t]');
-  expect(await untilRows('the untick', 'assignments', (r) => r.find((x) => x.id === reading?.id && x.cells.done === 0 && x.cells.size === 1)), 'a second tick puts it back');
+  expect(await untilRows('the untick', '_fdata/assignments', (r) => r.find((x) => x.id === reading?.id && x.cells.done === 0 && x.cells.size === 1)), 'a second tick puts it back');
 
   // a date from the row itself
   await keeper.until('the row back', `document.querySelectorAll('.w.done').length === 1`);
   await mark(keeper, 'Reading', '.dp-trigger');
   await keeper.click('[data-t]');
   await quick(keeper, 'next week');
-  expect(await untilRows('the date', 'assignments', (r) => r.find((x) => x.id === reading?.id && x.cells.due === day(7))), "a row's date is set from its calendar");
+  expect(await untilRows('the date', '_fdata/assignments', (r) => r.find((x) => x.id === reading?.id && x.cells.due === day(7))), "a row's date is set from its calendar");
   expect(await keeper.until('the date to draw', `/later/.test(${text})`), 'and a tiny thing a week out is later');
 
   // a stranger's page offers nothing to press, and a press changes nothing
@@ -148,28 +148,28 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await mark(visitor, 'Reading', '.tick');
   await visitor.inFrame(`document.querySelector('[data-t]').disabled = false; document.querySelector('[data-t]').click(); return true;`);
   await sleep(600);
-  expect((await rows('assignments')).find((x) => x.id === reading?.id)?.cells.done === 0, "a stranger's press changes nothing");
+  expect((await rows('_fdata/assignments')).find((x) => x.id === reading?.id)?.cells.done === 0, "a stranger's press changes nothing");
 
   // a rename and a removal, through the menu
   await mark(keeper, 'Reading', '.w-title');
   await keeper.click('[data-t]');
   await pick(keeper, 'Rename');
   await answer(keeper, 'Chapter 4 reading');
-  expect(await untilRows('the rename', 'assignments', (r) => r.find((x) => x.id === reading?.id && x.cells.title === 'Chapter 4 reading' && x.cells.due === day(7))), 'a rename lands over the row');
+  expect(await untilRows('the rename', '_fdata/assignments', (r) => r.find((x) => x.id === reading?.id && x.cells.title === 'Chapter 4 reading' && x.cells.due === day(7))), 'a rename lands over the row');
   expect(await visitor.until('the rename to reach the stranger', `${titles}.includes('Chapter 4 reading')`), 'and reaches the stranger');
   await mark(keeper, 'Chapter 4 reading', '.w-title');
   await keeper.click('[data-t]');
   await pick(keeper, 'Remove');
   await ok(keeper);
-  expect(await untilRows('the removal', 'assignments', (r) => r.length === 1 && r[0].id === lab?.id), 'removing work deletes its row');
+  expect(await untilRows('the removal', '_fdata/assignments', (r) => r.length === 1 && r[0].id === lab?.id), 'removing work deletes its row');
   expect(await keeper.until('it to go', `${titles}.join('|') === 'Lab report'`), 'and it is gone from the page');
 
-  // work an installed copy left behind, read as it was
-  await seed('assignments', 'old1', { course_id: hist?.id, title: 'Old essay', due: day(-2), weight: 50, size: 2, earned: -1, possible: 100, done: 0, added_ms: 5, _created_at: 5, _modified_at: 5 });
+  // work already in the table, read as it was
+  await seed('_fdata/assignments', 'old1', { course_id: hist?.id, title: 'Old essay', due: day(-2), weight: 50, size: 2, earned: -1, possible: 100, done: 0, added_ms: 5, _created_at: 5, _modified_at: 5 });
   await visitor.send('Page.reload');
   visitor.child = null;
   for (let i = 0; i < 60 && !visitor.child; i++) await sleep(250);
-  expect(await visitor.until('the old work', `${titles}.includes('Old essay')`), 'work an installed copy left is read');
+  expect(await visitor.until('the old work', `${titles}.includes('Old essay')`), 'work already in the table is read');
   expect(await visitor.inFrame(`return /1 overdue — start with Old essay\\./.test(${verdict}) && /2 days late/.test(${text}) && /50% of grade/.test(${text})`), 'overdue, two days late, and half the grade');
   await visitor.shot('5-stranger-overdue');
 
@@ -181,8 +181,8 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('[data-t="hist"]');
   await pick(keeper, 'Remove');
   await ok(keeper);
-  expect(await untilRows('the course to go', 'assignments_courses', (r) => r.length === 1 && r[0].id === bio?.id), 'a course is removed');
-  expect(await untilRows('its work to go', 'assignments', (r) => r.length === 1 && r[0].id === lab?.id), 'and its work with it');
+  expect(await untilRows('the course to go', '_fdata/assignments_courses', (r) => r.length === 1 && r[0].id === bio?.id), 'a course is removed');
+  expect(await untilRows('its work to go', '_fdata/assignments', (r) => r.length === 1 && r[0].id === lab?.id), 'and its work with it');
   expect(await visitor.until('the stranger to follow', `!${titles}.includes('Old essay')`), "and the stranger's page follows");
   await keeper.shot('6-after');
 };

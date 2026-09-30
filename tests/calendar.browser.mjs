@@ -21,7 +21,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   expect(await keeper.inFrame(`return document.querySelector('.form input[type=date]').value === ${JSON.stringify(todayIso)}`), 'a new event starts today');
   await keeper.press('Enter');
   await sleep(400);
-  expect((await rows('calendar')).length === 0 && await keeper.inFrame(`return ${modalOpen}`), 'Enter with no title adds nothing');
+  expect((await rows('_fdata/calendar')).length === 0 && await keeper.inFrame(`return ${modalOpen}`), 'Enter with no title adds nothing');
   await keeper.fill('.form input[type=text]', 'Market day');
   // a time control takes no typed text here; set it as the picker would
   await keeper.inFrame(`const t = document.querySelector('.form input[type=time]'); t.value = '09:30'; t.dispatchEvent(new Event('input', { bubbles: true })); return true;`);
@@ -32,7 +32,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.fill('.form textarea', 'Bring bags');
   await keeper.shot('2-editor');
   await keeper.click(primary);
-  const market = await untilRows('the event', 'calendar', (r) => r.find((x) => x.cells.title === 'Market day'));
+  const market = await untilRows('the event', '_fdata/calendar', (r) => r.find((x) => x.cells.title === 'Market day'));
   expect(market?.cells.date === todayIso && market?.cells.time === '09:30' && market?.cells.dur === 60 && market?.cells.color === 'c3'
     && market?.cells.url === 'https://example.com/market' && market?.cells.note === 'Bring bags' && market?.cells.recur === null
     && market?.cells.tz && market?.cells._created_at && market?.cells._modified_at, 'an event added is a row of the space, stamped, with its zone');
@@ -48,7 +48,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('.ends .toggle input');
   await keeper.fill('.form input[type=text]', 'Standup');
   await keeper.press('Enter');
-  const standup = await untilRows('the series', 'calendar', (r) => r.find((x) => x.cells.title === 'Standup'));
+  const standup = await untilRows('the series', '_fdata/calendar', (r) => r.find((x) => x.cells.title === 'Standup'));
   const r = standup?.cells.recur;
   expect(standup?.cells.date === '' && JSON.stringify(r?.days) === JSON.stringify([now.getDay()]) && r?.start === todayIso && r?.until === '' && r?.skip?.length === 0, 'a weekly event is kept as a series, forever, from today');
   expect(await keeper.until('both to draw', `${chips}.includes('Standup') && ${chips}.includes('Market day')`), 'and drawn beside the first');
@@ -66,8 +66,8 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.clear('.form input[type=text]');
   await keeper.fill('.form input[type=text]', 'Market morning');
   await keeper.click(primary);
-  const changed = await untilRows('the change', 'calendar', (r) => r.find((x) => x.id === market?.id && x.cells.title === 'Market morning'));
-  expect(changed?.cells._created_at === market?.cells._created_at && changed?.cells.note === 'Bring bags' && (await rows('calendar')).length === 2, 'a change keeps the row, its birth and the rest of it');
+  const changed = await untilRows('the change', '_fdata/calendar', (r) => r.find((x) => x.id === market?.id && x.cells.title === 'Market morning'));
+  expect(changed?.cells._created_at === market?.cells._created_at && changed?.cells.note === 'Bring bags' && (await rows('_fdata/calendar')).length === 2, 'a change keeps the row, its birth and the rest of it');
   expect(await keeper.until('the new name', `${chips}.includes('Market morning')`), 'and is drawn');
 
   // the week view
@@ -87,13 +87,13 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await visitor.click('.fb-btn:not(.primary)');
 
   // nobody touches the stranger's page: a push says to read again
-  await seed('calendar', 'seeded0001', { title: 'Open house', date: todayIso, time: '', tz: '', dur: 0, color: '', url: '', note: '', recur: null, _created_at: 1, _modified_at: 1 });
+  await seed('_fdata/calendar', 'seeded0001', { title: 'Open house', date: todayIso, time: '', tz: '', dur: 0, color: '', url: '', note: '', recur: null, _created_at: 1, _modified_at: 1 });
   await keeper.click('.vtoggle button:nth-child(1)');
   await keeper.click('.cell.today .cell-head');
   await keeper.until('an editor for today', modalOpen);
   await keeper.fill('.form input[type=text]', 'Picnic');
   await keeper.click(primary);
-  await untilRows('the picnic', 'calendar', (r) => r.find((x) => x.cells.title === 'Picnic'));
+  await untilRows('the picnic', '_fdata/calendar', (r) => r.find((x) => x.cells.title === 'Picnic'));
   expect(await visitor.until('the picnic to reach the stranger', `/Picnic/.test(document.body.textContent)`), "the stranger's open page reads again when told");
 
   // deleting: a one-time event goes outright, a series asks which days
@@ -101,7 +101,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('.chip[data-pick]');
   await keeper.until('the editor for the picnic', `document.querySelector('.form input[type=text]')?.value === 'Picnic'`);
   await keeper.click('.fb-btn.danger');
-  expect(await untilRows('the picnic to go', 'calendar', (r) => !r.some((x) => x.cells.title === 'Picnic')), 'Delete removes a one-time event');
+  expect(await untilRows('the picnic to go', '_fdata/calendar', (r) => !r.some((x) => x.cells.title === 'Picnic')), 'Delete removes a one-time event');
   await keeper.inFrame(`[...document.querySelectorAll('.cell.today .chip')].find((c) => /Standup/.test(c.textContent)).setAttribute('data-pick', ''); return true;`);
   await keeper.click('.chip[data-pick]');
   await keeper.until('the editor for the series', `document.querySelector('.form input[type=text]')?.value === 'Standup'`);
@@ -109,7 +109,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   if (!await keeper.until('the question', `!!document.querySelector('.delsheet')`)) return;
   await keeper.shot('6-delete-series');
   await keeper.click('.delopt:nth-of-type(1)');
-  const skipped = await untilRows('the day to be skipped', 'calendar', (r) => r.find((x) => x.id === standup?.id && x.cells.recur?.skip?.includes(todayIso)));
+  const skipped = await untilRows('the day to be skipped', '_fdata/calendar', (r) => r.find((x) => x.id === standup?.id && x.cells.recur?.skip?.includes(todayIso)));
   expect(skipped?.cells.recur?.days?.length === 1 && skipped?.cells.recur?.until === '', 'Only this day skips today and keeps the series');
   expect(await keeper.until('today to lose it', `!${chips}.includes('Standup') && ${chips}.includes('Open house')`), 'and today no longer shows it');
   expect(await visitor.until('the stranger to follow', `!/Standup/.test(document.querySelector('.cell.today')?.textContent ?? '') && /Open house/.test(document.body.textContent)`), 'nor does the stranger\'s');

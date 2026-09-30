@@ -6,11 +6,11 @@
 //                                           space editors get the interactive planner.
 //                                           The page reads the week from GET /api/week,
 //                                           and every write is a route here.
-//   data_storage:   the space's tables   — `meal_plan.table.jsonl` at the space's root.
+//   data_storage:   the frame data folder — `_fdata/meal_plan.table.jsonl`.
 //   contracts:      owns `meal_plan` v1; reads `recipes` v1 (picker + ingredient
 //                                           expansion) and inserts into `grocery` v1
-//                                           ("send to grocery list"). Every table is the
-//                                           space's by name, so a Recipe Box and a Grocery
+//                                           ("send to grocery list"). Every table is in
+//                                           the space's frame data folder by name, so a Recipe Box and a Grocery
 //                                           List in the same space share these rows with no
 //                                           setup. See docs/schema-contracts.md.
 //   view_realtime:  view-collaborative    — every plan write pushes `{ meal_planner: "week" }`,
@@ -67,7 +67,7 @@ declareTables([
 type Row = Record<string, unknown> & { id: string };
 type Column = { name: string; col_type: "text" | "integer"; default_val: string };
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
 
 const defaultsOf = (schema: Column[]): Record<string, unknown> =>
   Object.fromEntries(schema.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]));

@@ -6,7 +6,7 @@
 //                                           read-only view; editors get the interactive UI.
 //                                           The page reads no table: the list comes from
 //                                           GET /api/list, and every write is a route here.
-//   data_storage:   the space's table    — `checklist.table.jsonl` at the space's root:
+//   data_storage:   the space's table    — `_fdata/checklist.table.jsonl`, frame data:
 //                                           one list per space, synced with it to every
 //                                           member, openable in any table tool. Every
 //                                           checklist session in the space shows it.
@@ -41,7 +41,7 @@ declareTables([{
 // ----- Helpers --------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };
 
-const items = (ctx: Ctx) => ctx.table<Record<string, unknown>>(ITEMS);
+const items = (ctx: Ctx) => ctx.shared.table<Record<string, unknown>>(ITEMS);
 
 const DEFAULTS: Record<string, unknown> = Object.fromEntries(
   SCHEMA.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),

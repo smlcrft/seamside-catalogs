@@ -33,7 +33,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   expect(await keeper.inFrame(`return ${titles} === 'To do|In progress|Done'`), 'an empty board opens with To do, In progress and Done');
   expect(await keeper.inFrame(`return ${text('.header .mode')} === 'owner' && !document.querySelector('.banner') && !!document.querySelector('.new-col input')`), 'the keeper is the owner, with the board to edit');
   expect(await keeper.inFrame(`return getComputedStyle(document.querySelector('.col')).display === 'flex' && document.styleSheets.length >= 2`), 'the page has its style');
-  const seeded = await untilRows('the seeded columns', 'kanban_columns', (r) => r.length === 3 && r);
+  const seeded = await untilRows('the seeded columns', '_fdata/kanban_columns', (r) => r.length === 3 && r);
   const col = (t) => seeded?.find((x) => x.cells.title === t)?.id;
   const [todo, doing, done] = [col('To do'), col('In progress'), col('Done')];
   expect(seeded?.find((x) => x.id === todo)?.cells.channel === 'c2' && seeded?.find((x) => x.id === done)?.cells.sort_order === 2, 'as rows of the space');
@@ -50,11 +50,11 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.until('the draft', `document.activeElement?.closest('.card-draft')`);
   await keeper.fill(`.col[data-id="${todo}"] .card-draft input`, 'Write the plan');
   await keeper.press('Enter');
-  const plan = await untilRows('the card', 'kanban_cards', (r) => r.find((x) => x.cells.title === 'Write the plan'));
+  const plan = await untilRows('the card', '_fdata/kanban_cards', (r) => r.find((x) => x.cells.title === 'Write the plan'));
   expect(plan?.cells.column_id === todo && plan?.cells.description === '' && plan?.cells.label === '' && plan?.cells.created_ms > 0 && plan?.cells._created_at > 0 && plan?.cells._modified_at > 0, 'a card typed in is a row of the space');
   await keeper.fill(`.col[data-id="${todo}"] .card-draft input`, 'Buy paint');
   await keeper.press('Enter');
-  await untilRows('the second card', 'kanban_cards', (r) => r.length === 2);
+  await untilRows('the second card', '_fdata/kanban_cards', (r) => r.length === 2);
   await keeper.press('Escape');
   expect(await keeper.until('both cards, the newest first', `${cardsOf(todo)} === 'Buy paint|Write the plan' && !document.querySelector('.card-draft')`), 'the + puts a card at the top');
   expect(await visitor.until('the cards to arrive by themselves', `${cardsOf(todo)} === 'Buy paint|Write the plan'`), "the stranger's open page is told of them");
@@ -70,22 +70,22 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.shot('3-editor');
   await keeper.inFrame(`[...document.querySelectorAll('.framelib-modal-actions button')].find((b) => b.textContent.trim() === 'Done').id = 'k-done'; return true;`);
   await keeper.click('#k-done');
-  const edited = await untilRows('the details', 'kanban_cards', (r) => r.find((x) => x.id === plan?.id && x.cells.label === 'design' && x.cells.description === 'Three pages, no more.'));
+  const edited = await untilRows('the details', '_fdata/kanban_cards', (r) => r.find((x) => x.id === plan?.id && x.cells.label === 'design' && x.cells.description === 'Three pages, no more.'));
   expect(edited?.cells.title === 'Write the plan' && edited?.cells.column_id === todo && edited?.cells._created_at === plan?.cells._created_at, 'a label and details are kept, over the row as it was');
   expect(await keeper.until('the card to show them', `!document.querySelector('.framelib-modal') && document.querySelector('#k-plan .card-label')?.textContent === 'design' && /Three pages/.test(document.querySelector('#k-plan .card-desc')?.textContent ?? '')`), 'the editor closes and the card shows its label');
 
   // ----- a column renamed, recoloured, added
   await keeper.fill(`.col[data-id="${doing}"] .col-title input`, 'Doing');
   await keeper.press('Enter');
-  expect(await untilRows('the new name', 'kanban_columns', (r) => r.find((x) => x.id === doing && x.cells.title === 'Doing' && x.cells.channel === 'c4')), 'a column is renamed by typing over its name');
+  expect(await untilRows('the new name', '_fdata/kanban_columns', (r) => r.find((x) => x.id === doing && x.cells.title === 'Doing' && x.cells.channel === 'c4')), 'a column is renamed by typing over its name');
   await keeper.click(`.col[data-id="${doing}"] .col-dot`);
   await keeper.until('the swatches', `!!document.querySelector('.pop')`);
   await keeper.shot('4-swatches');
   await keeper.click('.pop-swatches button[title="c9"]');
-  expect(await untilRows('the new colour', 'kanban_columns', (r) => r.find((x) => x.id === doing && x.cells.channel === 'c9' && x.cells.title === 'Doing')), 'and recoloured from its dot');
+  expect(await untilRows('the new colour', '_fdata/kanban_columns', (r) => r.find((x) => x.id === doing && x.cells.channel === 'c9' && x.cells.title === 'Doing')), 'and recoloured from its dot');
   await keeper.fill('.new-col input', 'Review');
   await keeper.press('Enter');
-  const review = (await untilRows('the new column', 'kanban_columns', (r) => r.find((x) => x.cells.title === 'Review')))?.id;
+  const review = (await untilRows('the new column', '_fdata/kanban_columns', (r) => r.find((x) => x.cells.title === 'Review')))?.id;
   expect(await keeper.until('four columns', `${titles} === 'To do|Doing|Done|Review'`), 'a column typed in is added at the end');
   expect(await visitor.until('the columns to follow', `${titles} === 'To do|Doing|Done|Review' && document.querySelector('.col[data-id="${doing}"]').getAttribute('style').includes('--os-c9')`), "and the stranger's page follows, colour included");
 
@@ -93,7 +93,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   const from = await at(keeper, '#k-plan');
   const into = await at(keeper, `.col[data-id="${doing}"] .cards`);
   await drag(keeper, from, { x: into.x, y: into.top + 10 });
-  const moved = await untilRows('the move', 'kanban_cards', (r) => r.find((x) => x.id === plan?.id && x.cells.column_id === doing));
+  const moved = await untilRows('the move', '_fdata/kanban_cards', (r) => r.find((x) => x.id === plan?.id && x.cells.column_id === doing));
   expect(moved?.cells.label === 'design' && moved?.cells.sort_order === 0, 'a card dragged to another column lands there, as it was');
   expect(await keeper.until('the card to move', `${cardsOf(doing)} === 'Write the plan' && ${cardsOf(todo)} === 'Buy paint'`), 'and the board shows it there');
   expect(await visitor.until('the move to arrive', `${cardsOf(doing)} === 'Write the plan'`), 'the stranger sees it moved');
@@ -103,7 +103,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   const grip = await at(keeper, `.col[data-id="${done}"] .col-grip`);
   const first = await at(keeper, `.col[data-id="${todo}"]`);
   await drag(keeper, grip, { x: first.left + 20, y: first.top + 20 });
-  expect(await untilRows('the reorder', 'kanban_columns', (r) => {
+  expect(await untilRows('the reorder', '_fdata/kanban_columns', (r) => {
     const o = (id) => r.find((x) => x.id === id)?.cells.sort_order;
     return o(done) === 0 && o(todo) === 1 && o(doing) === 2 && o(review) === 3;
   }), 'a column dragged to the front is kept first');
@@ -126,14 +126,14 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.click('.ed-del');
   expect(await keeper.until('to be asked again', `${text('.ed-del')} === 'Click again to delete'`), 'a delete asks first');
   await keeper.click('.ed-del');
-  for (let i = 0; i < 40 && (await rows('kanban_cards')).length !== 1; i++) await sleep(250);
-  expect((await rows('kanban_cards')).length === 1, 'the card is gone from the space');
+  for (let i = 0; i < 40 && (await rows('_fdata/kanban_cards')).length !== 1; i++) await sleep(250);
+  expect((await rows('_fdata/kanban_cards')).length === 1, 'the card is gone from the space');
   await keeper.click(`.col[data-id="${review}"] .col-dot`);
   await keeper.until('the swatches', `!!document.querySelector('.pop-del')`);
   await keeper.click('.pop-del');
   await keeper.click('.pop-del');
-  for (let i = 0; i < 40 && (await rows('kanban_columns')).length !== 3; i++) await sleep(250);
-  expect((await rows('kanban_columns')).length === 3, 'the column is gone from the space');
+  for (let i = 0; i < 40 && (await rows('_fdata/kanban_columns')).length !== 3; i++) await sleep(250);
+  expect((await rows('_fdata/kanban_columns')).length === 3, 'the column is gone from the space');
   expect(await keeper.until('the board to follow', `${titles} === 'Done|To do|Doing' && ${cardsOf(todo)} === ''`), "and from the keeper's board");
   expect(await visitor.until('the board to follow', `${titles} === 'Done|To do|Doing' && document.querySelectorAll('.card').length === 1`), "and from the stranger's");
   await visitor.shot('7-stranger-end');

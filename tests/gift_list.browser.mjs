@@ -42,7 +42,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   const teapot = await untilRows('the wish', LIST, (r) => r.find((x) => x.cells.item === 'Teapot'));
   expect(teapot && teapot.cells.for_who === 'Gran' && teapot.cells.for_user_id === '' && teapot.cells.claimed === 0
     && teapot.cells.url === '' && teapot.cells.notes === '' && teapot.cells.claimed_by === '' && teapot.cells.claimed_by_id === ''
-    && teapot.cells.added_ms > 0 && teapot.cells._created_at > 0 && teapot.cells._modified_at > 0, 'a wish is a row of the list, in the shape installed copies hold');
+    && teapot.cells.added_ms > 0 && teapot.cells._created_at > 0 && teapot.cells._modified_at > 0, 'a wish is a row of the list, stamped when it was made');
   expect(await keeper.until('the wish to draw', `[...document.querySelectorAll('.list')].some((l) => l.querySelector('.l-name').textContent === 'Gran' && /Teapot/.test(l.textContent))`), "and is drawn on Gran's list, from the answer");
   expect(await keeper.inFrame(`return document.querySelector('.add .f-item').value === '' && document.querySelector('.add .f-for').value === 'Gran'`), 'the strip keeps who it is for');
   await add('Socks', '');
@@ -85,7 +85,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   expect(await untilRows('the wish to go', LIST, (r) => !r.some((x) => x.cells.item === 'Book')), 'a second removes the wish');
   expect(await visitor.until('the wish to go there too', `!/Book/.test(document.querySelector('.lists').textContent)`), 'for the stranger as well');
 
-  // ---- another list, holding a row an installed copy left: claimed, by nobody known
+  // ---- another list, holding a row claimed by nobody known
   await seed('wishes', 'old1', { item: 'Kettle', for_who: 'Gran', for_user_id: '', url: '', notes: 'a quiet one', claimed_by: '', claimed_by_id: '', added_ms: 5, claimed: 1, _created_at: 5, _modified_at: 5 });
   await keeper.click('.which button');
   await keeper.until('the chooser again', `document.querySelectorAll('.framelib-choose-opt').length >= 2`);

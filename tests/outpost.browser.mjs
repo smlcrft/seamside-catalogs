@@ -44,7 +44,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.click('.kinds-seg button:nth-child(2)');
   await keeper.fill('textarea.compose', 'Is the gate code still 1234? See https://example.com/gate.');
   await keeper.click('.btn-primary');
-  const q = await untilRows('the question', 'outpost_posts', (r) => r.find((x) => x.cells.kind === 'question'));
+  const q = await untilRows('the question', '_fdata/posts', (r) => r.find((x) => x.cells.kind === 'question'));
   expect(q?.cells.text === 'Is the gate code still 1234? See https://example.com/gate.' && q?.cells.poll_options === null && q?.cells.author_user_id && q?.cells.created_ms > 0 && q?.cells._created_at && q?.cells._modified_at, 'a post is a row of the space, stamped, by the keeper');
   expect(await keeper.until('the post to draw', `document.querySelector('${first} .body')?.textContent === 'Is the gate code still 1234? See https://example.com/gate.' && document.querySelector('${first} .kindtag').textContent === 'question'`), 'and heads the feed');
   expect(await keeper.inFrame(`return document.querySelector('${first} .body a')?.textContent === 'https://example.com/gate' && document.querySelector('textarea.compose').value === ''`), 'its link is a link, and the composer is empty again');
@@ -56,11 +56,11 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.click('.addopt');
   await keeper.fill('.poll-row:nth-child(3) input', 'Never');
   await keeper.click('.btn-primary');
-  const poll = await untilRows('the poll', 'outpost_posts', (r) => r.find((x) => x.cells.poll_options));
+  const poll = await untilRows('the poll', '_fdata/posts', (r) => r.find((x) => x.cells.poll_options));
   expect(poll?.cells.poll_options === '["Tuesday","Thursday","Never"]' && poll?.cells.kind === 'thought' && poll?.cells.text === '', 'a poll is kept as its options');
   expect(await keeper.until('the poll to draw', `document.querySelectorAll('${first} .poll .opt').length === 3 && /0 votes · tap to vote/.test(document.querySelector('${first} .poll .tally').textContent)`), 'and drawn, nobody having voted');
   await keeper.click(`${first} .poll .opt:nth-child(2)`);
-  const vote = await untilRows('the vote', 'outpost_votes', (r) => r.find((x) => x.cells.post_id === poll?.id));
+  const vote = await untilRows('the vote', '_fdata/post_votes', (r) => r.find((x) => x.cells.post_id === poll?.id));
   expect(vote?.cells.choice === 1 && vote?.id === `${poll?.id}:${vote?.cells.voter}` && vote?.cells.voter.startsWith('u:'), 'a vote is a row keyed by post and voter');
   expect(await keeper.until('the tally', `/1 vote · you voted/.test(document.querySelector('${first} .poll .tally').textContent) && document.querySelector('${first} .poll .opt.chosen .lbl')?.textContent === 'Thursday' && document.querySelector('${first} .poll .opt.chosen .pct').textContent === '100%'`), 'the poll says so');
   await keeper.shot('2-poll');
@@ -71,9 +71,9 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.choose('input[type="file"]', notes);
   expect(await keeper.until('two pending', `[...document.querySelectorAll('.pending .pill > span')].map((s) => s.textContent).join('|') === 'tiles.png|notes.bin'`), 'both wait in the composer');
   await keeper.click('.btn-primary');
-  const media = await untilRows('both attachments', 'outpost_media', (r) => r.length === 2 && r);
+  const media = await untilRows('both attachments', '_fdata/post_media', (r) => r.length === 2 && r);
   const img = media?.find((m) => m.cells.name === 'tiles.png'), bin = media?.find((m) => m.cells.name === 'notes.bin');
-  expect(img?.cells.mime === 'image/png' && img?.cells.size === readFileSync(picture).length && img?.cells.ord === 0 && img?.cells.path === `Outpost/${img?.cells.post_id}/tiles.png`, 'the picture is a row naming its file of the space');
+  expect(img?.cells.mime === 'image/png' && img?.cells.size === readFileSync(picture).length && img?.cells.ord === 0 && img?.cells.path === `posts/${img?.cells.post_id}/tiles.png`, 'the picture is a row naming its file in the frame data folder');
   expect(bin?.cells.ord === 1 && bin?.cells.size === 3000 && bin?.cells.post_id === img?.cells.post_id, 'and the file after it, on the same post');
   expect(await keeper.until('the picture to draw', `document.querySelector('${first} .media img')?.naturalWidth === 48`), 'the picture draws from the bytes the worker hands over');
   expect(await keeper.inFrame(`return document.querySelector('${first} .media .filelink span')?.textContent === 'notes.bin' && document.querySelector('.pending') === null`), 'the file is a link to save, and the composer is empty');
@@ -100,13 +100,13 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.inFrame(`document.querySelector('.card .field input.txt').id = 'op-tagline'; return true;`);
   await keeper.fill('#op-tagline', 'News from the shed');
   await keeper.inFrame(`document.querySelector('#op-tagline').blur(); return true;`);
-  expect(await untilRows('the tagline', '__fc_settings', (r) => r.find((x) => x.id === 'outpost_tagline' && x.cells.v === '"News from the shed"')), 'the tagline is kept where installed copies keep it');
+  expect(await untilRows('the tagline', '_fdata/board_settings', (r) => r.find((x) => x.id === 'tagline' && x.cells.v === '"News from the shed"')), 'the tagline is kept as the board\'s, beside its posts');
   expect(await keeper.until('the tagline to show', `document.querySelector('.header .tagline')?.textContent === 'News from the shed'`), 'and shown under the heading');
   await keeper.fill('input.htitle', 'Shed board');
   await keeper.inFrame(`document.querySelector('input.htitle').blur(); return true;`);
-  expect(await untilRows('the heading', '__fc_settings', (r) => r.find((x) => x.id === 'outpost_title' && x.cells.v === '"Shed board"')), 'and so is the heading');
+  expect(await untilRows('the heading', '_fdata/board_settings', (r) => r.find((x) => x.id === 'title' && x.cells.v === '"Shed board"')), 'and so is the heading');
   await keeper.click('.card .seg:not(.kinds-seg) button:nth-child(2)');
-  expect(await untilRows('who may post', '__fc_settings', (r) => r.find((x) => x.id === 'outpost_who_can_post' && x.cells.v === '"owner"')), 'Owner only is kept');
+  expect(await untilRows('who may post', '_settings', (r) => r.find((x) => x.id === 'who_can_post' && x.cells.v === '"owner"')), 'Owner only is kept as the session\'s own setting');
   expect(await keeper.until('the choice to hold', `document.querySelector('.card .seg:not(.kinds-seg) button.active')?.textContent.trim() === 'Owner only' && !!document.querySelector('textarea.compose')`), 'and shown, the owner still posting');
   await keeper.shot('4-settings');
 
@@ -124,14 +124,14 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.fill('textarea.compose', 'Gate fixed.');
   await keeper.click('.kinds-seg button:nth-child(4)');
   await keeper.click('.btn-primary');
-  expect(await untilRows('the news', 'outpost_posts', (r) => r.find((x) => x.cells.text === 'Gate fixed.' && x.cells.kind === 'announcement')), 'a post of news is kept');
+  expect(await untilRows('the news', '_fdata/posts', (r) => r.find((x) => x.cells.text === 'Gate fixed.' && x.cells.kind === 'announcement')), 'a post of news is kept');
   expect(await visitor.until('the news to arrive', `document.querySelector('.feed .post:first-child .body')?.textContent === 'Gate fixed.' && document.querySelector('.feed .post:first-child .kindtag').textContent === 'news'`), "the stranger's open page is told of it");
 
   // the stranger signs in and votes
   await visitor.click(`.feed .post:nth-child(3) .poll .votenote.signin`);
   if (await visitor.until('the stranger to be named', `!document.querySelector('.poll .votenote.signin') && !document.querySelector('.feed .post:nth-child(3) .poll .opt').disabled`)) {
     await visitor.click(`.feed .post:nth-child(3) .poll .opt:nth-child(1)`);
-    const two = await untilRows('the second vote', 'outpost_votes', (r) => r.filter((x) => x.cells.post_id === poll?.id).length === 2 && r);
+    const two = await untilRows('the second vote', '_fdata/post_votes', (r) => r.filter((x) => x.cells.post_id === poll?.id).length === 2 && r);
     expect(two?.find((x) => x.cells.voter !== vote?.cells.voter)?.cells.choice === 0, 'a stranger who signed in votes, as themselves');
     expect(await visitor.until('their tally', `/2 votes · you voted/.test(document.querySelector('.feed .post:nth-child(3) .poll .tally').textContent)`), 'and sees it counted');
     expect(await keeper.until('the keeper to see it', `/2 votes · you voted/.test(document.querySelector('.feed .post:nth-child(3) .poll .tally').textContent)`), "and the keeper's open page follows");
@@ -141,10 +141,10 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   // the keeper deletes the post with the attachments: one click arms, the second deletes
   const withMedia = `.feed .post:nth-child(2)`;
   await keeper.click(`${withMedia} .iconbtn.del`);
-  expect(await keeper.inFrame(`return document.querySelector('${withMedia} .iconbtn.del').classList.contains('armed')`) && (await rows('outpost_posts')).length === 4, 'the first click only arms');
+  expect(await keeper.inFrame(`return document.querySelector('${withMedia} .iconbtn.del').classList.contains('armed')`) && (await rows('_fdata/posts')).length === 4, 'the first click only arms');
   await keeper.click(`${withMedia} .iconbtn.del`);
-  expect(await untilRows('the post to go', 'outpost_posts', (r) => r.length === 3 && !r.find((x) => x.id === img?.cells.post_id))
-    && await untilRows('its media rows to go', 'outpost_media', (r) => r.length === 0 || null), 'the second deletes the post and its attachments');
+  expect(await untilRows('the post to go', '_fdata/posts', (r) => r.length === 3 && !r.find((x) => x.id === img?.cells.post_id))
+    && await untilRows('its media rows to go', '_fdata/post_media', (r) => r.length === 0 || null), 'the second deletes the post and its attachments');
   expect(await keeper.until('the feed to lose it', `document.querySelectorAll('.feed .post').length === 3 && !document.querySelector('.feed .media')`), 'and the feed loses it');
   expect(await visitor.until('the stranger to lose it', `document.querySelectorAll('.feed .post').length === 3 && !document.querySelector('.feed .media')`), 'for the stranger too');
   await keeper.shot('7-deleted');

@@ -7,16 +7,17 @@
 //                                          The page reads no table: everything comes from
 //                                          GET /api/state, and every write is a route here.
 //   data_storage:   the space's tables   — `roadmap_milestones.table.jsonl` and
-//                                          `roadmap_tasks.table.jsonl` at the space's root,
-//                                          synced with it; one roadmap per space.
+//                                          `roadmap_tasks.table.jsonl` in the space's frame
+//                                          data folder `_fdata/`, synced with it; one
+//                                          roadmap per space.
 //   view_realtime:  view-collaborative   — every write pushes `{ roadmap: "state" }`, which
 //                                          says what to read again and never what it holds.
-//   settings_scope: settings-per-device  — project meta + links are rows of `__fc_settings`
-//                                          (this device's own), under `roadmap_*` keys,
-//                                          since other frames share that store.
+//   settings_scope: the space            — project meta + links are rows of
+//                                          `_fdata/roadmap_settings`, beside the roadmap
+//                                          they describe, under `roadmap_*` keys.
 //
 // Data model:
-//   meta        `__fc_settings` rows — project name, overview, links (JSON under `v`).
+//   meta        `roadmap_settings` rows — project name, overview, links (JSON under `v`).
 //   milestones  real milestones (kind='milestone', with a target date + completed flag)
 //               PLUS two auto-created singleton buckets, kind='backburner' / 'maybelater',
 //               which hold parked tasks and never appear on the timeline.
@@ -31,10 +32,10 @@
 import type { Ctx } from "@frame-core";
 import { declareTables, sanitizeText, toIntOrNull, clampInt } from "@frame-core";
 
-// ----- The space's tables (named for this frame) ----------------------------------------
+// ----- The space's tables, in its frame data folder -------------------------------------
 const MILESTONES = "roadmap_milestones";
 const TASKS = "roadmap_tasks";
-const SETTINGS = "__fc_settings";
+const SETTINGS = "roadmap_settings";
 
 type Column = { name: string; col_type: "text" | "integer"; nullable: boolean; default_val?: string };
 const SCHEMAS: Record<string, Column[]> = {
@@ -96,7 +97,9 @@ function isSafeUrl(u: string): boolean {
 // ----- Rows -----------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+// Every table, the settings included, is the space's frame data (`_fdata/`), shared with
+// every frame and member.
+const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
 
 const defaultsOf = (name: string): Record<string, unknown> => Object.fromEntries(
   (SCHEMAS[name] ?? [])

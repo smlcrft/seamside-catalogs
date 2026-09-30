@@ -22,7 +22,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.fill(text, 'The door sticks.');
   await keeper.shot('2-typed');
   await keeper.click('.dc-send');
-  const first = await untilRows('the message', 'discussion_messages', (r) => r.find((x) => x.cells.body === 'The door sticks.'));
+  const first = await untilRows('the message', '_fdata/discussion_messages', (r) => r.find((x) => x.cells.body === 'The door sticks.'));
   expect(first?.cells.user_id && first?.cells.user_name && first?.cells._created_at && first?.cells._modified_at && typeof first?.cells.created_at === 'number', 'a message sent by the button is a row of the space');
   expect(await keeper.until('the message to draw', `/The door sticks\\./.test(document.querySelector('.dc-msg-body')?.textContent ?? '')`), 'and drawn');
   expect(await keeper.inFrame(`return document.querySelector(${JSON.stringify(text)}).value === ''`), 'and the composer is empty again');
@@ -31,7 +31,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   for (const type of ['keyDown', 'keyUp']) {
     await keeper.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 }, keeper.child);
   }
-  expect(await untilRows('the second message', 'discussion_messages', (r) => r.find((x) => x.cells.body === 'Sent with Enter.')), 'Enter sends too');
+  expect(await untilRows('the second message', '_fdata/discussion_messages', (r) => r.find((x) => x.cells.body === 'Sent with Enter.')), 'Enter sends too');
   expect(await keeper.until('both to draw', `document.querySelectorAll('.dc-msg').length === 2`), 'and both are drawn');
 
   const visitor = await open();
@@ -45,7 +45,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.until('the picker', `document.querySelectorAll('.dc-picker button').length === 10`);
   await keeper.shot('4-picker');
   await keeper.click('.dc-picker button[title="heart"]');
-  const heart = await untilRows('the reaction', 'discussion_reactions', (r) => r.find((x) => x.cells.icon === 'heart' && x.cells.message_id === first.id));
+  const heart = await untilRows('the reaction', '_fdata/discussion_reactions', (r) => r.find((x) => x.cells.icon === 'heart' && x.cells.message_id === first.id));
   expect(heart?.id === `${first.id}:${first.cells.user_id}:heart` && heart?.cells._created_at, 'a reaction is a row keyed by message, person and icon');
   expect(await keeper.until('the reaction to draw', `!!document.querySelector('.dc-msg[data-id="${first.id}"] .dc-reaction.mine .ph-heart')`), 'and drawn as the keeper\'s own');
   expect(await visitor.until('the reaction to arrive by itself', `!!document.querySelector('.dc-msg[data-id="${first.id}"] .dc-reaction .ph-heart')`), "a stranger's open page is told of it");
@@ -56,7 +56,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   expect(await visitor.until('the new message to arrive by itself', `[...document.querySelectorAll('.dc-msg-body')].some((b) => b.textContent === 'One more.')`), 'and of a new message');
 
   await keeper.click(`.dc-msg[data-id="${first.id}"] .dc-reaction`);
-  expect(await untilRows('the reaction to go', 'discussion_reactions', (r) => r.length === 0), 'the same reaction again takes it back');
+  expect(await untilRows('the reaction to go', '_fdata/discussion_reactions', (r) => r.length === 0), 'the same reaction again takes it back');
 
   await keeper.click('.dc-topline .dc-icon-btn');
   await keeper.until('the settings', `!!document.querySelector('.dc-settings-fields input[type="text"]')`);
@@ -75,7 +75,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   expect(await viaFrame('/api/state', (s) => s.prefs?.title === 'Front porch'), 'a title typed over the old one is kept when the field is left');
 
   await keeper.click(`.dc-msg[data-id="${first.id}"] .dc-msg-delete`);
-  expect(await untilRows('the message to go', 'discussion_messages', (r) => r.length === 2 && !r.find((x) => x.id === first.id)), 'a message deleted is gone from the space');
+  expect(await untilRows('the message to go', '_fdata/discussion_messages', (r) => r.length === 2 && !r.find((x) => x.id === first.id)), 'a message deleted is gone from the space');
   expect(await keeper.until('it to go from the page', `!document.querySelector('.dc-msg[data-id="${first.id}"]')`), 'and from the page');
   expect(await visitor.until('it to go from the visitor', `document.querySelectorAll('.dc-msg').length === 2 && !document.querySelector('.dc-msg[data-id="${first.id}"]')`), "and from the stranger's");
   await keeper.shot('6-after');

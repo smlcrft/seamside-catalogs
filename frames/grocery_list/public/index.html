@@ -188,7 +188,7 @@
       useEffect(() => {
         if (!watching || !window.seamside?.kv?.watch) return;
         let soon = 0;
-        const w = window.seamside.kv.watch("t/grocery/", () => { clearTimeout(soon); soon = setTimeout(refresh, 250); });
+        const w = window.seamside.kv.watch("t/_fdata%2Fgrocery/", () => { clearTimeout(soon); soon = setTimeout(refresh, 250); });
         return () => { clearTimeout(soon); w.close(); };
       }, [watching]);
 

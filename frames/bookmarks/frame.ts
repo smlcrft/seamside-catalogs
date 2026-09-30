@@ -4,7 +4,7 @@
 // Design axes:
 //   privacy:        privacy-public-view  — non-members read and follow the links, through
 //                                           GET /api/list; space editors save and edit.
-//   data_storage:   the space's table    — `bookmarks.table.jsonl` at the space's root,
+//   data_storage:   the space's table    — `_fdata/bookmarks.table.jsonl`, the frame data folder,
 //                                           synced with the space to every member. No
 //                                           contract: nothing else acts on these rows
 //                                           (docs/schema-contracts.md, "When NOT to write a
@@ -46,7 +46,7 @@ const DEFAULTS: Record<string, unknown> = Object.fromEntries(
 /** Write a bookmark over what it held (a new one over the schema's defaults), stamped when
  * it was made and when it changed. */
 async function keep(ctx: Ctx, id: string | null, values: Record<string, unknown>): Promise<Row> {
-  const t = ctx.table<Record<string, unknown>>(BOOKMARKS);
+  const t = ctx.shared.table<Record<string, unknown>>(BOOKMARKS);
   const was = id ? await t.get(id) : null;
   const now = Date.now();
   return await t.upsert({
@@ -99,7 +99,7 @@ function cleanTags(raw: unknown): string {
 }
 
 async function listRows(ctx: Ctx) {
-  const rows = (await ctx.table<Record<string, unknown>>(BOOKMARKS).all())
+  const rows = (await ctx.shared.table<Record<string, unknown>>(BOOKMARKS).all())
     .sort((a, b) => (Number(b.added_ms) || 0) - (Number(a.added_ms) || 0))
     .slice(0, 2000);
   return rows.map((r) => ({
@@ -113,7 +113,7 @@ const json = (v: unknown, status = 200) => Response.json(v, { status });
 
 async function handleWrite(ctx: Ctx, op: string, v: Record<string, unknown> | null): Promise<Response> {
   if (!(ctx.peer.is_sfi_editor || ctx.peer.is_owner)) return json({ error: "editors only" }, 403);
-  const t = ctx.table<Record<string, unknown>>(BOOKMARKS);
+  const t = ctx.shared.table<Record<string, unknown>>(BOOKMARKS);
 
   // What changed, never what it holds: each page reads again as whoever it is.
   const ok = (extra?: Record<string, unknown>) => {

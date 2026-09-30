@@ -47,17 +47,17 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   // ----- adding
   await keeper.click('.compose button');
   await sleep(400);
-  expect((await rows('library_assets')).length === 0, 'an item with no name is not added');
+  expect((await rows('_fdata/library_assets')).length === 0, 'an item with no name is not added');
   await keeper.fill('.compose input', 'Ladder');
   await choose(keeper, '.compose select', 'Tool');
   await keeper.click('.compose button');
-  const ladder = await untilRows('the ladder', 'library_assets', (r) => asset(r, 'Ladder'));
-  expect(ladder?.cells.item_type === 'Tool' && ladder?.cells.needs_attention === 0 && ladder?.cells._created_at > 0 && ladder?.cells._modified_at > 0, 'an item added is a row of the space, in the shape installed copies hold');
+  const ladder = await untilRows('the ladder', '_fdata/library_assets', (r) => asset(r, 'Ladder'));
+  expect(ladder?.cells.item_type === 'Tool' && ladder?.cells.needs_attention === 0 && ladder?.cells._created_at > 0 && ladder?.cells._modified_at > 0, 'an item added is a row of the space\'s frame data, stamped');
   expect(await keeper.until('the ladder to list', `document.querySelector('.asset-name')?.textContent === 'Ladder' && document.querySelector('.compose input').value === ''`), 'and is listed from the answer, the field cleared');
   await keeper.fill('.compose input', 'Atlas');
   await choose(keeper, '.compose select', 'Book');
   await keeper.inFrame(`document.querySelector('.compose input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true;`);
-  expect(await untilRows('the atlas', 'library_assets', (r) => asset(r, 'Atlas')?.cells.item_type === 'Book'), 'Enter adds one too');
+  expect(await untilRows('the atlas', '_fdata/library_assets', (r) => asset(r, 'Atlas')?.cells.item_type === 'Book'), 'Enter adds one too');
   expect(await keeper.until('the count', `/^2\\s*items$/.test(document.querySelector('.airhero')?.innerText.trim() ?? '')`), 'the page counts two items');
   await keeper.shot('3-items');
 
@@ -67,11 +67,11 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await choose(keeper, '.dialog .field:last-of-type select', 14);
   await keeper.shot('4-check-out');
   await keeper.click('.dialog-actions button:last-child');
-  const out = await untilRows('the loan', 'library_assets', (r) => r.find((x) => x.cells.checked_out_member_id === 'm1'));
+  const out = await untilRows('the loan', '_fdata/library_assets', (r) => r.find((x) => x.cells.checked_out_member_id === 'm1'));
   expect(out?.cells.name === 'Ladder' && out?.cells.borrow_days === 14 && out?.cells.checked_out_manual_name === '' && out?.cells.checked_out_at > 0 && out?.cells.item_type === 'Tool', 'a loan is kept over the row as it was');
   expect(await keeper.until('the borrower to show', `document.querySelector('.meta-borrower')?.textContent === 'Ada Lovelace' && /out · due/.test(document.querySelector('.status-chip.status-checked_out')?.innerText ?? '') && !document.querySelector('.dialog')`), 'the page names the borrower and says when it is due');
   await keeper.click(`${await item(keeper, 'Ladder')} button[title="Check in"]`);
-  expect(await untilRows('the return', 'library_assets', (r) => asset(r, 'Ladder')?.cells.checked_out_at === null && asset(r, 'Ladder')?.cells.checked_out_member_id === ''), 'checked in, the loan is cleared');
+  expect(await untilRows('the return', '_fdata/library_assets', (r) => asset(r, 'Ladder')?.cells.checked_out_at === null && asset(r, 'Ladder')?.cells.checked_out_member_id === ''), 'checked in, the loan is cleared');
   expect(await keeper.until('the shelf', `!document.querySelector('.meta-borrower') && document.querySelectorAll('.status-chip.status-available').length === 2`), 'and both are in the library');
 
   // ----- out to somebody by name
@@ -83,18 +83,18 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('.framelib-modal-actions .framelib-btn-primary');
   await keeper.fill('.dialog input[type="text"]', 'Pat');
   await keeper.click('.dialog-actions button:last-child');
-  expect(await untilRows('the loan by name', 'library_assets', (r) => asset(r, 'Atlas')?.cells.checked_out_manual_name === 'Pat' && asset(r, 'Atlas')?.cells.borrow_days === 7), 'a loan by name runs the default time');
+  expect(await untilRows('the loan by name', '_fdata/library_assets', (r) => asset(r, 'Atlas')?.cells.checked_out_manual_name === 'Pat' && asset(r, 'Atlas')?.cells.borrow_days === 7), 'a loan by name runs the default time');
 
   // ----- a flag, an edit
   await keeper.click(`${await item(keeper, 'Ladder')} button[title="Flag for attention"]`);
   await keeper.fill('.dialog textarea', 'rung bent');
   await keeper.click('.dialog-actions button:last-child');
-  expect(await untilRows('the flag', 'library_assets', (r) => asset(r, 'Ladder')?.cells.needs_attention === 1 && asset(r, 'Ladder')?.cells.notes === 'rung bent'), 'a flag is kept with what is wrong');
+  expect(await untilRows('the flag', '_fdata/library_assets', (r) => asset(r, 'Ladder')?.cells.needs_attention === 1 && asset(r, 'Ladder')?.cells.notes === 'rung bent'), 'a flag is kept with what is wrong');
   expect(await keeper.until('the chip', `/needs attention/.test(document.querySelector('.status-chip.status-issue')?.innerText ?? '') && /rung bent/.test(document.querySelector('.asset-notes')?.innerText ?? '')`), 'and shown');
   await keeper.click(`${await item(keeper, 'Ladder')} button[title="Edit"]`);
   await keeper.fill('.dialog input[type="text"]', 'Tall ladder');
   await keeper.click('.dialog-actions button:last-child');
-  const tall = await untilRows('the new name', 'library_assets', (r) => asset(r, 'Tall ladder'));
+  const tall = await untilRows('the new name', '_fdata/library_assets', (r) => asset(r, 'Tall ladder'));
   expect(tall?.id === ladder?.id && tall?.cells.needs_attention === 1 && tall?.cells.notes === 'rung bent' && tall?.cells._created_at === ladder?.cells._created_at, 'an edit changes the item and keeps the rest');
 
   // ----- the owner's settings
@@ -104,6 +104,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.fill('.dialog input[type="text"]', 'Tool Shed');
   await keeper.click('.dialog-actions button:last-child');
   const kept = (await viaFrame('/api/state', (s) => s.prefs?.org_name === 'Tool Shed'))?.prefs ?? {};
+  expect(await untilRows('the shared rules', '_fdata/library_settings', (r) => r.find((x) => x.id === 'library' && /Tool Shed/.test(x.cells.v) && !/owner_only_edit/.test(x.cells.v))), "the library's rules are kept beside its items, and who may edit is not");
   expect(kept.org_name === 'Tool Shed' && kept.item_types?.length === 5 && kept.borrow_options?.length === 4 && kept.default_borrow_days === 7 && kept.owner_only_edit === false, 'the settings are kept');
   expect(await keeper.until('the name', `document.querySelector('.page-header h1').textContent === 'Tool Shed' && !document.querySelector('.dialog')`), 'and the page takes the new name');
   await keeper.shot('6-library');
@@ -122,7 +123,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.fill('.compose input', 'Saw');
   await choose(keeper, '.compose select', 'Tool');
   await keeper.click('.compose button');
-  await untilRows('the saw', 'library_assets', (r) => asset(r, 'Saw'));
+  await untilRows('the saw', '_fdata/library_assets', (r) => asset(r, 'Saw'));
   expect(await visitor.until('the saw to arrive by itself', `[...document.querySelectorAll('.public-name')].some((n) => n.textContent === 'Saw')`), "a stranger's open page is told to read again");
   expect(/Saw/.test(await text(keeper, '#list-wrap')), "and the keeper's lists it");
 
@@ -131,7 +132,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('.dialog .danger');
   expect(await keeper.until('to be asked', `/Delete "Saw"\\?/.test(document.querySelector('.framelib-modal')?.innerText ?? '')`), 'a delete is asked about');
   await keeper.click('.framelib-modal-actions .framelib-btn-danger');
-  expect(await untilRows('the saw to go', 'library_assets', (r) => r.length === 2 && !asset(r, 'Saw')), 'and the item goes');
+  expect(await untilRows('the saw to go', '_fdata/library_assets', (r) => r.length === 2 && !asset(r, 'Saw')), 'and the item goes');
   expect(await visitor.until('the saw to leave', `document.querySelectorAll('.public-row').length === 2`), 'from the page of whoever was looking');
   expect((await text(visitor, '.airhero')).replace(/\s+/g, ' ').trim() === '2 items · 1 out · 1 needs attention', 'which counts what it is shown');
   await visitor.shot('8-stranger-after');

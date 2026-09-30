@@ -74,7 +74,7 @@ declareTables(TABLES);
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any> & { id: string };
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
 const all = (ctx: Ctx, name: string) => rows(ctx, name).all() as Promise<Row[]>;
 
 /** What a new row of this table starts from. */
@@ -107,7 +107,7 @@ const tell = (ctx: Ctx) => ctx.push({ rss_reader: "feeds" });
 const json = (v: unknown, status = 200) => Response.json(v, { status });
 
 // ----- Read state ------------------------------------------------------------------------
-// Each person's read marks are rows of the space's `rss_reads` table (one per person and
+// Each person's read marks are rows of the frame data's `rss_reads` table (one per person and
 // item), so they travel with the space — and, being a table of the space, every member can
 // read whose marks are whose.
 const safeId = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, "_");

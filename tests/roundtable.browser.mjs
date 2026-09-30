@@ -23,30 +23,30 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   // an item by the button, one by Enter; an empty composer adds nothing
   await keeper.click(`${positive} .rt-item-composer button`);
   await sleep(400);
-  expect((await rows('roundtable_items')).length === 0, 'Add with nothing written adds nothing');
+  expect((await rows('_fdata/roundtable_items')).length === 0, 'Add with nothing written adds nothing');
   await keeper.fill(`${positive} .rt-item-composer input`, 'A bench by the door');
   await keeper.click(`${positive} .rt-item-composer button`);
-  const bench = await untilRows('the item', 'roundtable_items', (r) => r.find((x) => x.cells.body === 'A bench by the door'));
+  const bench = await untilRows('the item', '_fdata/roundtable_items', (r) => r.find((x) => x.cells.body === 'A bench by the door'));
   expect(bench?.cells.kind === 'positive' && bench?.cells.user_id && bench?.cells._created_at && bench?.cells._modified_at, 'an item added by the button is a row of the space');
-  const own = await untilRows('its vote', 'roundtable_votes', (r) => r.find((x) => x.cells.item_id === bench?.id));
+  const own = await untilRows('its vote', '_fdata/roundtable_votes', (r) => r.find((x) => x.cells.item_id === bench?.id));
   expect(own?.id === `${bench?.id}:${bench?.cells.user_id}`, "with its author's vote, keyed by the two");
   expect(await keeper.until('the item to draw', `document.querySelector('${positive} .rt-item .rt-item-text')?.textContent === 'A bench by the door' && document.querySelector('${positive} .rt-vote.mine .count')?.textContent === '1'`), 'and drawn with one vote, the keeper\'s own');
   expect(await keeper.inFrame(`return document.querySelector('${positive} .rt-item-composer input').value === ''`), 'the composer is cleared');
 
   await keeper.fill(`${negative} .rt-item-composer input`, 'The door sticks');
   await keeper.press('Enter');
-  const door = await untilRows('the second item', 'roundtable_items', (r) => r.find((x) => x.cells.body === 'The door sticks'));
+  const door = await untilRows('the second item', '_fdata/roundtable_items', (r) => r.find((x) => x.cells.body === 'The door sticks'));
   expect(door?.cells.kind === 'negative', 'Enter in the field adds an item to its own list');
   expect(await keeper.until('it to draw', `document.querySelector('${negative} .rt-item .rt-item-text')?.textContent === 'The door sticks'`), 'and it is drawn there');
 
   // a message by Enter, one by the button
   await keeper.fill('.rt-composer textarea', 'Hello all.');
   await keeper.press('Enter');
-  expect(await untilRows('the message', 'roundtable_messages', (r) => r.find((x) => x.cells.body === 'Hello all.' && x.cells._created_at)), 'Enter sends a message, a row of the space');
+  expect(await untilRows('the message', '_fdata/roundtable_messages', (r) => r.find((x) => x.cells.body === 'Hello all.' && x.cells._created_at)), 'Enter sends a message, a row of the space');
   await keeper.fill('.rt-composer textarea', 'And again.');
   await keeper.click('.rt-composer .rt-send');
   expect(await keeper.inFrame(`return document.querySelector('.rt-composer textarea').value === ''`), 'and leaves the field empty');
-  expect(await untilRows('the second message', 'roundtable_messages', (r) => r.length === 2 && r.find((x) => x.cells.body === 'And again.')), 'the button sends one too');
+  expect(await untilRows('the second message', '_fdata/roundtable_messages', (r) => r.length === 2 && r.find((x) => x.cells.body === 'And again.')), 'the button sends one too');
   expect(await keeper.until('both to draw', `[...document.querySelectorAll('.rt-msg-body')].map((m) => m.textContent).join('|') === 'Hello all.|And again.'`), 'and both are drawn, in order');
   await keeper.shot('2-filled');
 
@@ -59,11 +59,11 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
 
   // nobody touches the stranger's page: a push says to read again
   await keeper.click(`${positive} .rt-vote`);
-  expect(await untilRows('the vote to go', 'roundtable_votes', (r) => !r.some((x) => x.cells.item_id === bench?.id)), 'a vote clicked again is taken back');
+  expect(await untilRows('the vote to go', '_fdata/roundtable_votes', (r) => !r.some((x) => x.cells.item_id === bench?.id)), 'a vote clicked again is taken back');
   expect(await keeper.until('the count to follow', `document.querySelector('${positive} .rt-vote .count')?.textContent === '0' && !document.querySelector('${positive} .rt-vote.mine')`), 'and the keeper sees none');
   expect(await visitor.until('the count to reach the stranger', `document.querySelector('${positive} .rt-vote .count')?.textContent === '0'`), "and the stranger's open page is told to read again");
   await keeper.click(`${positive} .rt-vote`);
-  expect(await untilRows('the vote to come back', 'roundtable_votes', (r) => r.find((x) => x.id === own?.id)), 'and given again, the same row');
+  expect(await untilRows('the vote to come back', '_fdata/roundtable_votes', (r) => r.find((x) => x.id === own?.id)), 'and given again, the same row');
 
   // settings: the sheet, then the title in place
   await keeper.click('.rt-topline .rt-icon-btn');
@@ -88,14 +88,14 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.shot('5-confirm');
   await keeper.click('.framelib-dialog-host .framelib-btn-ghost');
   await sleep(400);
-  expect((await rows('roundtable_items')).length === 2, 'Cancel leaves the item');
+  expect((await rows('_fdata/roundtable_items')).length === 2, 'Cancel leaves the item');
   await keeper.click(`${negative} .rt-item-delete`);
   await keeper.until('the question again', `!!document.querySelector('.framelib-dialog-host .framelib-btn-danger')`);
   await keeper.click('.framelib-dialog-host .framelib-btn-danger');
-  expect(await untilRows('the item to go', 'roundtable_items', (r) => r.length === 1 && r[0].id === bench?.id), 'Delete removes it');
-  expect(await untilRows('its vote to go', 'roundtable_votes', (r) => r.length === 1 && r[0].cells.item_id === bench?.id), 'with its vote');
+  expect(await untilRows('the item to go', '_fdata/roundtable_items', (r) => r.length === 1 && r[0].id === bench?.id), 'Delete removes it');
+  expect(await untilRows('its vote to go', '_fdata/roundtable_votes', (r) => r.length === 1 && r[0].cells.item_id === bench?.id), 'with its vote');
   await keeper.click('.rt-msg-delete');
-  expect(await untilRows('the message to go', 'roundtable_messages', (r) => r.length === 1 && r[0].cells.body === 'And again.'), 'a message is removed by its author');
+  expect(await untilRows('the message to go', '_fdata/roundtable_messages', (r) => r.length === 1 && r[0].cells.body === 'And again.'), 'a message is removed by its author');
   expect(await visitor.until('both to leave the stranger\'s page', `!document.querySelector('${negative} .rt-item') && document.querySelectorAll('.rt-msg-body').length === 1`), 'and the stranger sees both gone');
   await keeper.shot('6-after');
   await visitor.shot('7-stranger-after');

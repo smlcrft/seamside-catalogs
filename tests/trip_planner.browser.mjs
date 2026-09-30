@@ -45,21 +45,21 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await setDate(keeper, '#tf-start', '2026-08-10');
   await setDate(keeper, '#tf-end', '2026-08-11');
   await keeper.click('.tform .btn-primary');
-  const trip = await untilRows('the trip', 'trips', (r) => r.find((x) => x.cells.name === 'Big Sur'));
-  expect(trip?.cells.destination === 'Big Sur' && trip?.cells.start_date === '2026-08-10' && trip?.cells.end_date === '2026-08-11' && trip?.cells.notes === '' && trip?.cells.created_ms > 0 && trip?.cells._created_at > 0, 'the trip is a row of the space, in the shape installed copies hold');
+  const trip = await untilRows('the trip', '_fdata/trips', (r) => r.find((x) => x.cells.name === 'Big Sur'));
+  expect(trip?.cells.destination === 'Big Sur' && trip?.cells.start_date === '2026-08-10' && trip?.cells.end_date === '2026-08-11' && trip?.cells.notes === '' && trip?.cells.created_ms > 0 && trip?.cells._created_at > 0, 'the trip is a row of the space\'s frame data, in the shape the others hold');
   expect(await keeper.until('the trip to open', `document.querySelector('h1.t-title input')?.value === 'Big Sur' && document.querySelectorAll('.day').length === 2`), 'the only trip opens by itself, a day for each day of it');
 
   // ----- the itinerary, typed in
   await keeper.fill('.day:nth-child(1) .f-time', '09:00');
   await keeper.fill('.day:nth-child(1) .f-act', 'Bixby Bridge');
   await keeper.press('Enter');
-  const bixby = await untilRows('the first stop', 'trip_itinerary', (r) => r.find((x) => x.cells.activity === 'Bixby Bridge'));
+  const bixby = await untilRows('the first stop', '_fdata/trip_itinerary', (r) => r.find((x) => x.cells.activity === 'Bixby Bridge'));
   expect(bixby?.cells.trip_id === trip?.id && bixby?.cells.day_date === '2026-08-10' && bixby?.cells.time === '09:00' && bixby?.cells.sort_order === 0 && bixby?.cells.geo_q === '', 'a stop typed in is kept on its day, first');
   expect(await keeper.until('the stop to draw', `${acts} === 'Bixby Bridge' && document.querySelector('.day:nth-child(1) .f-act').value === ''`), 'and drawn, the add row emptied');
   await keeper.fill('.day:nth-child(1) .f-act', 'Lunch');
   await keeper.fill('.day:nth-child(1) .f-loc', 'Nepenthe');
   await keeper.press('Enter');
-  const lunch = await untilRows('the place to be looked up', 'trip_itinerary', (r) => r.find((x) => x.cells.activity === 'Lunch' && x.cells.geo_q === 'Nepenthe'));
+  const lunch = await untilRows('the place to be looked up', '_fdata/trip_itinerary', (r) => r.find((x) => x.cells.activity === 'Lunch' && x.cells.geo_q === 'Nepenthe'));
   expect(lunch?.cells.sort_order === 1, 'a second stop goes after the first, and its place is looked up once');
   if (offline) expect(lunch?.cells.lat === 0 && lunch?.cells.lon === 0 && !await keeper.inFrame(`return !!document.querySelector('.tmap')`), 'offline, nothing is found and no empty map is drawn');
   expect(await keeper.until('both stops', `${acts} === 'Bixby Bridge|Lunch' && /Nepenthe/.test(${text('.it-loc')})`), 'both stops are drawn in order');
@@ -69,7 +69,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   const grip = await at(keeper, `.it-row[data-id="${lunch?.id}"] .it-grip`);
   const first = await at(keeper, `.it-row[data-id="${bixby?.id}"]`);
   if (grip && first) await drag(keeper, grip, { x: first.x, y: first.top + 2 });
-  expect(await untilRows('the reorder', 'trip_itinerary', (r) => {
+  expect(await untilRows('the reorder', '_fdata/trip_itinerary', (r) => {
     const o = (id) => r.find((x) => x.id === id)?.cells.sort_order;
     return o(lunch?.id) === 0 && o(bixby?.id) === 1;
   }), 'a stop dragged above another is kept first');
@@ -80,14 +80,14 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   if (!await keeper.until('the entry dialog', `/Edit entry/.test(document.body.textContent) && !!document.querySelector('.ed input')`)) return;
   await keeper.fill('.ed input[placeholder="10:00 or all day"]', '08:30');
   await keeper.inFrame(`document.querySelector('.ed input[placeholder="10:00 or all day"]').blur(); return true;`);
-  const edited = await untilRows('the time', 'trip_itinerary', (r) => r.find((x) => x.id === bixby?.id && x.cells.time === '08:30'));
+  const edited = await untilRows('the time', '_fdata/trip_itinerary', (r) => r.find((x) => x.id === bixby?.id && x.cells.time === '08:30'));
   expect(edited?.cells.activity === 'Bixby Bridge' && edited?.cells._created_at === bixby?.cells._created_at, 'a time changed in the dialog lands over the row as it was');
   await keeper.shot('3-edit-entry');
   await keeper.click('.ed-del + button');
   expect(await keeper.until('the dialog to close', `!document.querySelector('.ed')`), 'Done closes the dialog');
 
   // ----- a stop with a place on the map
-  await seed('trip_itinerary', 'pinned', { trip_id: trip?.id, day_date: '2026-08-11', time: '', activity: 'McWay Falls', location: 'McWay Falls', sort_order: 0, lat: 36.158, lon: -121.672, geo_q: 'McWay Falls', _created_at: 1, _modified_at: 1 });
+  await seed('_fdata/trip_itinerary', 'pinned', { trip_id: trip?.id, day_date: '2026-08-11', time: '', activity: 'McWay Falls', location: 'McWay Falls', sort_order: 0, lat: 36.158, lon: -121.672, geo_q: 'McWay Falls', _created_at: 1, _modified_at: 1 });
   await reload(keeper);
   // online, Nepenthe is found too and pinned first
   const mcway = `[...document.querySelectorAll('.tmap .pin')].find((p) => p.title === 'McWay Falls · McWay Falls')`;
@@ -109,15 +109,15 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.fill('.pack-add .f-item', 'Jacket');
   await keeper.fill('.pack-add .f-cat', 'clothes');
   await keeper.press('Enter');
-  const jacket = await untilRows('the item', 'trip_packing', (r) => r.find((x) => x.cells.item === 'Jacket'));
+  const jacket = await untilRows('the item', '_fdata/trip_packing', (r) => r.find((x) => x.cells.item === 'Jacket'));
   expect(jacket?.cells.category === 'clothes' && jacket?.cells.packed === 0 && jacket?.cells.trip_id === trip?.id, 'an item is kept under its category, not packed');
   await keeper.fill('.pack-add .f-item', 'Headlamp');
   await keeper.clear('.pack-add .f-cat');
   await keeper.press('Enter');
-  expect((await untilRows('the second item', 'trip_packing', (r) => r.find((x) => x.cells.item === 'Headlamp')))?.cells.category === 'general', 'an item with no category is general');
+  expect((await untilRows('the second item', '_fdata/trip_packing', (r) => r.find((x) => x.cells.item === 'Headlamp')))?.cells.category === 'general', 'an item with no category is general');
   expect(await keeper.until('both items', `document.querySelectorAll('.pack-row').length === 2 && /0 of 2 packed/.test(${text('.pack-progress')})`), 'both are listed, none packed');
   await keeper.click('.pack-row input[type="checkbox"]');
-  expect(await untilRows('packed', 'trip_packing', (r) => r.filter((x) => x.cells.packed === 1).length === 1), 'a box ticked is packed');
+  expect(await untilRows('packed', '_fdata/trip_packing', (r) => r.filter((x) => x.cells.packed === 1).length === 1), 'a box ticked is packed');
   expect(await keeper.until('the count', `/1 of 2 packed/.test(${text('.pack-progress')}) && document.querySelectorAll('.pack-row.packed').length === 1`), 'and counted');
   await keeper.shot('5-packing');
 
@@ -129,13 +129,13 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await setDate(keeper, '.exp-add .f-date', '2026-08-10');
   await keeper.click('.exp-add .f-desc');
   await keeper.press('Enter');
-  const gas = await untilRows('the cost', 'trip_expenses', (r) => r.find((x) => x.cells.description === 'Gas'));
+  const gas = await untilRows('the cost', '_fdata/trip_expenses', (r) => r.find((x) => x.cells.description === 'Gas'));
   expect(gas?.cells.amount === 40.46 && gas?.cells.category === 'other' && gas?.cells.date === '2026-08-10', 'a cost is kept to the cent, on its day');
   await keeper.fill('.exp-add .f-desc', 'Nothing');
   await keeper.fill('.exp-add .f-amt', '0');
   await keeper.press('Enter');
   await sleep(500);
-  expect((await rows('trip_expenses')).length === 1, 'a cost of nothing is not kept');
+  expect((await rows('_fdata/trip_expenses')).length === 1, 'a cost of nothing is not kept');
   expect(await keeper.until('the total', `${text('.exp-total .amt')} === (40.46).toLocaleString(undefined, { minimumFractionDigits: 2 })`), 'the total adds up');
   await keeper.shot('6-costs');
 
@@ -144,7 +144,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   if (!await keeper.until('the trip dialog', `/Trip details/.test(document.body.textContent) && !!document.querySelector('.ed textarea')`)) return;
   await keeper.fill('.ed textarea', 'Fog likely');
   await keeper.inFrame(`document.querySelector('.ed textarea').blur(); return true;`);
-  const noted = await untilRows('the notes', 'trips', (r) => r.find((x) => x.id === trip?.id && x.cells.notes === 'Fog likely'));
+  const noted = await untilRows('the notes', '_fdata/trips', (r) => r.find((x) => x.id === trip?.id && x.cells.notes === 'Fog likely'));
   expect(noted?.cells.name === 'Big Sur' && noted?.cells.created_ms === trip?.cells.created_ms, 'notes land over the trip as it was');
   await keeper.click('.ed-del + button');
   await keeper.until('the dialog to close', `!document.querySelector('.ed')`);
@@ -170,7 +170,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   expect(await visitor.inFrame(`return [...document.querySelectorAll('.pack-row input')].every((c) => c.disabled) && !document.querySelector('.pack-add, .trash')`), 'and ticks nothing');
   await visitor.click('.pack-row:not(.packed) .pi');
   await sleep(500);
-  expect((await rows('trip_packing')).filter((x) => x.cells.packed === 1).length === 1, 'a stranger clicking an item packs nothing');
+  expect((await rows('_fdata/trip_packing')).filter((x) => x.cells.packed === 1).length === 1, 'a stranger clicking an item packs nothing');
 
   // ----- the trip goes
   await keeper.click('button.trip-edit');
@@ -178,10 +178,10 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('.ed-del');
   expect(await keeper.until('the delete to arm', `${text('.ed-del')} === 'Click again to delete'`), 'Delete trip asks once more');
   await keeper.click('.ed-del');
-  expect(await untilRows('the trip to go', 'trips', (r) => r.length === 0 && [])
-    && await untilRows('its stops to go', 'trip_itinerary', (r) => r.length === 0 && [])
-    && await untilRows('its packing to go', 'trip_packing', (r) => r.length === 0 && [])
-    && await untilRows('its costs to go', 'trip_expenses', (r) => r.length === 0 && []), 'a trip deleted takes everything of it');
+  expect(await untilRows('the trip to go', '_fdata/trips', (r) => r.length === 0 && [])
+    && await untilRows('its stops to go', '_fdata/trip_itinerary', (r) => r.length === 0 && [])
+    && await untilRows('its packing to go', '_fdata/trip_packing', (r) => r.length === 0 && [])
+    && await untilRows('its costs to go', '_fdata/trip_expenses', (r) => r.length === 0 && []), 'a trip deleted takes everything of it');
   expect(await keeper.until('the list again', `/Plan your first trip/.test(document.body.textContent)`), 'the keeper is back at the first-trip form');
   expect(await visitor.until('the stranger to follow', `/Nothing here yet/.test(document.body.textContent)`), "and the stranger's page follows");
   await visitor.shot('8-gone');

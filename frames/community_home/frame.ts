@@ -6,9 +6,10 @@
 //   - Space editor — sees an admin builder UI (title, sections, links)
 //     with a "preview" toggle that renders the same public view.
 //
-// The page's blocks are the space's table community_home_blocks and its title/tagline are
-// settings rows, so each space has one page, synced with it. A visitor reads no table: the
-// page asks GET /api/page, and every write route decides on ctx.peer.
+// The page's blocks are the table community_blocks in the space's frame data folder
+// (_fdata/), so each space has one page, synced with it; its title and tagline are rows of
+// _fdata/community_settings beside it. A visitor reads no table: the page asks GET /api/page, and
+// every write route decides on ctx.peer.
 //
 // Realtime: a push says that the page changed and never what it holds. Every open page of
 // the frame hears it and reads again as whoever it is.
@@ -17,10 +18,10 @@ import type { Ctx } from "@frame-core";
 import { declareTables } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
-// THE SPACE'S TABLE — named for this frame, so no other frame's rows land in it.
+// THE SPACE'S TABLE, in its frame data folder, named for what it holds.
 // ----------------------------------------------------------------------------------------
-const BLOCKS = "community_home_blocks";
-const SETTINGS = "__fc_settings";
+const BLOCKS = "community_blocks";
+const SETTINGS = "community_settings";
 
 // Unified page-content table. Lets admins mix sections, links, and pub_frame embeds
 // in any order. The per-kind columns stay empty for kinds that don't use them.
@@ -55,7 +56,9 @@ const BLOCK_DEFAULTS: Record<string, unknown> = Object.fromEntries(
 // ----------------------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+// Every table, the settings included, is the space's frame data (`_fdata/`), shared with
+// every frame and member.
+const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
 
 /** Write a row over what it held, stamped when it was made and when it changed.
  *  A row that was not there starts from `fresh`. */
@@ -107,10 +110,11 @@ function clampStr(v: unknown, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-// Page-level settings (title / tagline / updated_at) are rows of a store every frame in
-// the space shares, so each key carries this frame's name. Each value is JSON under `v`.
-// The default page is seeded once, by the first editor to open it; until then a reader is
-// shown the same default, unwritten.
+// Page-level settings (title / tagline / updated_at) are rows of the space's
+// community_settings table, each value JSON under `v`. The default page is seeded once, by
+// the first editor to open it, and the marker sits in that table too, so no other session
+// or device seeds it again after an editor removed it; until then a reader is shown the same
+// default, unwritten.
 const SEED_BLOCK_ROW = "seed_about"; // fixed id so a concurrent first-load can't duplicate it
 const K = (k: string) => `community_home_${k}`;
 const SEED = {

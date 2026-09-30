@@ -33,8 +33,8 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep, s
   // this session writes no keys of its own, so its space is the one whose sessions name it
   const space = readdirSync(spaces).map((d) => join(spaces, d))
     .find((d) => { try { return JSON.parse(readFileSync(join(d, '_meta/space.json'), 'utf8')).sessions.some((x) => x.id === session); } catch { return false; } });
-  const deck = () => { try { return JSON.parse(readFileSync(join(space, 'Slideshow/slides.json'), 'utf8')); } catch { return null; } };
-  const images = () => { try { return readdirSync(join(space, 'Slideshow/images')); } catch { return []; } };
+  const deck = () => { try { return JSON.parse(readFileSync(join(space, '_fdata/slideshow/slides.json'), 'utf8')); } catch { return null; } };
+  const images = () => { try { return readdirSync(join(space, '_fdata/slideshow/images')); } catch { return []; } };
   const until = async (what, test, tries = 60) => {
     for (let i = 0; i < tries; i++) { const v = test(); if (v) return v; await sleep(250); }
     expect(false, `the daemon came to hold ${what}`);
@@ -61,7 +61,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep, s
 
   await keeper.click('.cta button');
   const one = await until('a first slide', () => deck()?.slides?.length === 1 && deck());
-  expect(one?.settings?.aspect === '16:9' && one?.slides[0].background === 'inherit' && els(one).length === 0, 'Add a slide keeps a blank slide in Slideshow/slides.json');
+  expect(one?.settings?.aspect === '16:9' && one?.slides[0].background === 'inherit' && els(one).length === 0, 'Add a slide keeps a blank slide in the deck');
 
   // a heading, typed into the inspector
   await keeper.click('.topbar button[title="Add heading"]');
@@ -93,7 +93,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep, s
   // a picture, chosen
   await keeper.choose('input[type="file"]', picture);
   const pic = await until('the picture placed', () => els(deck()).find((e) => e.type === 'image' && e.imageId));
-  expect(pic && images().includes(`${pic.imageId}.png`) && readFileSync(join(space, `Slideshow/images/${pic.imageId}.png`)).equals(readFileSync(picture)), 'a picture chosen is a file of the space, byte for byte, and on the slide');
+  expect(pic && images().includes(`${pic.imageId}.png`) && readFileSync(join(space, `_fdata/slideshow/images/${pic.imageId}.png`)).equals(readFileSync(picture)), 'a picture chosen is a file of the space, byte for byte, and on the slide');
   expect(await keeper.until('the picture to draw', `${main}.querySelector('img')?.naturalWidth === 64`), 'the slide draws it, from bytes the worker handed over');
   expect(await keeper.until('the thumbnail to draw', `document.querySelector('.thumb img')?.naturalWidth === 64`), 'and so does its thumbnail');
   await keeper.click('.inspector button[title="Close"]');
@@ -130,7 +130,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep, s
   expect(await keeper.until('present mode', `/1 \\/ 2/.test(document.querySelector('.pcount-fixed')?.textContent ?? '') && /1 watching/.test(document.querySelector('.pcount-fixed').textContent)`), 'Present shows the first slide, and who is watching');
   await keeper.shot('5-present');
   await keeper.click('.pnav.right');
-  expect(await untilRows('the presenter\'s slide', '__fc_settings', (r) => r.find((x) => x.id === 'slideshow_present' && x.cells.v === '1' && x.cells._created_at && x.cells._modified_at)), 'the next slide is the presenter\'s, kept where it was, as a setting');
+  expect(await untilRows('the presenter\'s slide', '_settings', (r) => r.find((x) => x.id === 'slideshow_present' && x.cells.v === '1' && x.cells._created_at && x.cells._modified_at)), 'the next slide is the presenter\'s, kept where it was, as a setting');
   expect(await keeper.until('the second slide presented', `/2 \\/ 2/.test(document.querySelector('.pcount-fixed').textContent) && /Thanks for coming/.test(document.querySelector('.present .stage').textContent)`), 'the keeper is on the second slide');
   expect(await visitor.until('the stranger to follow', `/2 \\/ 2 · following presenter/.test(document.querySelector('.viewerbar')?.textContent ?? '') && /Thanks for coming/.test(document.querySelector('.stage').textContent)`), "and the stranger's open page follows");
 
@@ -161,6 +161,6 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep, s
   await keeper.click('.inspector button[title="Delete"]');
   expect(await until('the picture gone', () => !els(deck()).some((e) => e.type === 'image') && !images().includes(`${pic?.imageId}.png`)), 'deleting the picture takes it off the slide and out of the space');
   expect(await visitor.until('the stranger without it', `!document.querySelector('.stage img')`), "and off the stranger's page");
-  expect((await text(visitor)).includes('Year in review') && (await rows('__fc_settings')).length === 1, 'the rest is as it was, and nothing else was kept as a setting');
+  expect((await text(visitor)).includes('Year in review') && (await rows('_settings')).length === 1, 'the rest is as it was, and nothing else was kept as a setting');
   await keeper.shot('7-after');
 };

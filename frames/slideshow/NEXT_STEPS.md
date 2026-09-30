@@ -18,7 +18,7 @@ within limits and of a known type are uploaded untouched to preserve animated GI
 transparency), then sent as an in-memory `ArrayBuffer` body — NOT a `File` object. The backend re-checks the extension,
 byte size, and a magic-byte signature before writing.
 
-**Image storage & GC.** The deck is a file of the space, `Slideshow/slides.json`, and uploaded images are `Slideshow/images/<uuid>.<ext>` beside it (synced with the space, served by the worker to whoever sees the deck). On every save, images no longer referenced by any element are deleted — except an upload this worker received in the last 5 minutes that no saved deck has placed yet, so an image uploaded just before its element is saved isn't swept out from under a concurrent editor. The live present position is the `slideshow_present` row of `__fc_settings`, its value JSON under `v`.
+**Image storage & GC.** The deck is a file in the space's frame data folder, `_fdata/slideshow/slides.json`, and uploaded images are `_fdata/slideshow/images/<uuid>.<ext>` beside it (synced with the space, served by the worker to whoever sees the deck). On every save, images no longer referenced by any element are deleted — except an upload this worker received in the last 5 minutes that no saved deck has placed yet, so an image uploaded just before its element is saved isn't swept out from under a concurrent editor. The live present position is the `slideshow_present` row of the session's own settings table (`ctx.own.table("settings")`), its value JSON under `v`.
 
 **Present mode & fullscreen.** Entering present mode attempts `requestFullscreen()` on the
 document; if the sandboxed iframe isn't granted fullscreen it falls back to filling the frame

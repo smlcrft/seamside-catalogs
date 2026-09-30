@@ -55,12 +55,12 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.shot('4-compose');
   await keeper.click('.send--email');
   expect((await handed()).join() === 'mailto:?bcc=ann%40example.com,bob%40example.com&subject=Bake%20sale&body=Bring%20cakes.', 'one email is handed to the mail app, everyone in bcc');
-  const mail = await untilRows('the email', 'reachout_sent', (r) => r.find((x) => x.cells.message === 'Bring cakes.'));
+  const mail = await untilRows('the email', '_fdata/reachout_sent', (r) => r.find((x) => x.cells.message === 'Bring cakes.'));
   expect(mail?.cells.list === 'members' && mail.cells.method === 'email' && mail.cells.subject === 'Bake sale'
     && mail.cells.to_all === false && JSON.stringify(mail.cells.roles) === '["Parent"]'
     && mail.cells.recipient_count === 2 && mail.cells.attempted_count === 2
     && String(mail.cells.sent_by).startsWith('did:') && mail.cells._created_at > 0 && mail.cells._modified_at > 0,
-  'the send is a row of the space, in the shape installed copies hold');
+  'the send is a row of the space\'s frame data');
   expect(await keeper.until('the send to list', `/Bake sale — Bring cakes\\./.test(${text('.entry__preview')}) && !document.querySelector('.overlay')`), 'the sheet closes and the log shows the send');
   expect(await keeper.inFrame(`return ${text('.badge')}`) === '1', 'and counts it');
   expect(await visitor.inFrame(`return ${said(/Nothing has been shared publicly yet/)} && !${said(/Bring cakes/)}`), 'a stranger is still shown nothing');
@@ -96,7 +96,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   expect(await keeper.until('the tap to mark', `/1\\/2 texted/.test(${text('.sheet-footer .reach')}) && !!document.querySelector('.runner-row.is-done')`), 'a tapped person is marked');
   await keeper.shot('7-texting');
   await keeper.click('.sheet-footer .send--text');
-  const sms = await untilRows('the texts', 'reachout_sent', (r) => r.find((x) => x.cells.message === 'Practice moved.'));
+  const sms = await untilRows('the texts', '_fdata/reachout_sent', (r) => r.find((x) => x.cells.message === 'Practice moved.'));
   expect(sms?.cells.method === 'text' && sms.cells.subject === '' && sms.cells.recipient_count === 2 && sms.cells.attempted_count === 1
     && JSON.stringify(sms.cells.roles) === '["Coach"]', 'the run is logged with how many were tapped');
   expect(await keeper.until('both sends', `document.querySelectorAll('.entry').length === 2 && /Coach/.test(${text('.entry__audience')})`), 'the log shows it first');
@@ -111,7 +111,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.click('.entry__tools .danger');
   await keeper.until('the ask', `!!document.querySelector('.framelib-btn-danger')`);
   await keeper.click('.framelib-btn-danger');
-  expect(await untilRows('the send to go', 'reachout_sent', (r) => r.length === 1 && r[0].cells.message === 'Practice moved.'), 'a removed send is gone from the table, the other kept');
+  expect(await untilRows('the send to go', '_fdata/reachout_sent', (r) => r.length === 1 && r[0].cells.message === 'Practice moved.'), 'a removed send is gone from the table, the other kept');
   expect(await keeper.until('the log to follow', `document.querySelectorAll('.entry').length === 1`), 'and from the log');
   expect(await visitor.until('the stranger to follow', said(/Nothing has been shared publicly yet/)), "and from the stranger's page, by itself");
   await visitor.shot('9-stranger-after');

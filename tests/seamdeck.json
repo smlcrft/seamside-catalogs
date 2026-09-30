@@ -2,17 +2,17 @@
   "tier": "members",
   "publish": "open",
   "steps": [
-    { "why": "a best an installed copy left behind", "as": "collaborator", "at": "space", "do": "KV.PUT t/seamdeck_scores/old1", "body": { "initials": "ANA", "game_id": "shotput", "points": 90, "scored_at": 5, "client_id": "c-ana", "_created_at": 5, "_modified_at": 5 }, "status": 200 },
-    { "why": "and a score still waiting for its initials", "as": "collaborator", "at": "space", "do": "KV.PUT t/seamdeck_scores/old2", "body": { "initials": "???", "game_id": "regatta", "points": 40, "scored_at": 6, "client_id": "c-sam", "_created_at": 6, "_modified_at": 6 }, "status": 200 },
+    { "why": "a best already on the board, in the space's frame data", "as": "collaborator", "at": "space", "do": "KV.PUT t/_fdata%2Fseamdeck_scores/old1", "body": { "initials": "ANA", "game_id": "shotput", "points": 90, "scored_at": 5, "client_id": "c-ana", "_created_at": 5, "_modified_at": 5 }, "status": 200 },
+    { "why": "and a score still waiting for its initials", "as": "collaborator", "at": "space", "do": "KV.PUT t/_fdata%2Fseamdeck_scores/old2", "body": { "initials": "???", "game_id": "regatta", "points": 40, "scored_at": 6, "client_id": "2569a8692f2fc493", "_created_at": 6, "_modified_at": 6 }, "status": 200 },
 
     { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["/dyn/frame-prefs.css", "console.js"] },
     { "why": "and its console", "do": "GET {frame}/console.js", "status": 200, "has": ["/lib/js/framelib.js", "seamside.fetch", "seamside.prefs"], "lacks": ["busSend", "frame.api", "localStorageGetItem"] },
     { "why": "and its cartridges", "do": "GET {frame}/games/shotput.js", "status": 200, "has": ["/lib/js/framelib.js"] },
     { "why": "the worker's own code is not a page", "do": "GET {frame}/frame.ts", "status": 404, "lacks": ["seamdeck_scores"] },
 
-    { "why": "a stranger sees the board the copy left, highest first, and no one's player token", "do": "GET {api}/state", "status": 200, "is": { "/sessions": [], "/leaderboard/0": { "initials": "ANA", "game_id": "shotput", "points": 90 }, "/leaderboard/1": { "initials": "???", "game_id": "regatta", "points": 40 }, "/me/user_name": "" }, "lacks": ["c-ana", "c-sam", "_created_at"] },
-    { "why": "a stranger writes no row at the door", "do": "KV.PUT t/seamdeck_scores/x", "body": { "initials": "ZZZ", "game_id": "shotput", "points": 999 }, "status": 403 },
-    { "why": "and reads no table there", "do": "KV.LIST t/seamdeck_scores/", "lacks": ["ANA"] },
+    { "why": "a stranger sees the board as it stands, highest first, and no one's player token", "do": "GET {api}/state", "status": 200, "is": { "/sessions": [], "/leaderboard/0": { "initials": "ANA", "game_id": "shotput", "points": 90 }, "/leaderboard/1": { "initials": "???", "game_id": "regatta", "points": 40 }, "/me/user_name": "" }, "lacks": ["c-ana", "c-sam", "_created_at"] },
+    { "why": "a stranger writes no row at the door", "do": "KV.PUT t/_fdata%2Fseamdeck_scores/x", "body": { "initials": "ZZZ", "game_id": "shotput", "points": 999 }, "status": 403 },
+    { "why": "and reads no table there", "do": "KV.LIST t/_fdata%2Fseamdeck_scores/", "lacks": ["ANA"] },
 
     { "why": "a create names its game and its player", "do": "POST {api}/create_session", "body": { "game_id": "shotput" }, "status": 400 },
     { "why": "and a game there is", "do": "POST {api}/create_session", "body": { "game_id": "tetris", "client_id": "c-sam" }, "status": 400, "is": { "/error": "unknown game" } },
@@ -42,16 +42,16 @@
     { "why": "Sam's last", "do": "POST {api}/turn", "body": { "session_id": "{lobby}", "client_id": "c-sam", "payload": { "charge": 0.8 } }, "status": 200 },
     { "why": "Gil's last ends the round", "as": "signed", "do": "POST {api}/turn", "body": { "session_id": "{lobby}", "client_id": "c-gil", "payload": { "charge": 1 } }, "status": 200 },
     { "why": "the round is over", "do": "GET {api}/state", "is": { "/sessions/0/phase": "results" } },
-    { "why": "Sam's best is a row of the space, in the shape installed copies hold, and Gil's fouls are none", "table": "seamdeck_scores", "has": ["\"client_id\":\"2569a8692f2fc493\"", "\"game_id\":\"shotput\",\"initials\":\"???\"", "\"scored_at\":", "_created_at", "_modified_at", "\"initials\":\"ANA\""], "lacks": ["c-gil"] },
+    { "why": "Sam's best is a row of the space's frame data, in the shape the others hold, and Gil's fouls are none", "table": "_fdata/seamdeck_scores", "has": ["\"client_id\":\"2569a8692f2fc493\"", "\"game_id\":\"shotput\",\"initials\":\"???\"", "\"scored_at\":", "_created_at", "_modified_at", "\"initials\":\"ANA\""], "lacks": ["c-gil"] },
 
     { "why": "initials name nothing without a player", "do": "POST {api}/initials", "body": { "initials": "sam" }, "status": 400 },
     { "why": "nobody names Sam's scores by Sam's public id", "do": "POST {api}/initials", "body": { "client_id": "2569a8692f2fc493", "game_id": "shotput", "initials": "BAD" }, "status": 400 },
-    { "why": "Sam's score still waits", "table": "seamdeck_scores", "has": ["\"client_id\":\"2569a8692f2fc493\",\"game_id\":\"shotput\",\"initials\":\"???\""], "lacks": ["BAD"] },
+    { "why": "Sam's score still waits", "table": "_fdata/seamdeck_scores", "has": ["\"client_id\":\"2569a8692f2fc493\",\"game_id\":\"shotput\",\"initials\":\"???\""], "lacks": ["BAD"] },
     { "why": "Sam puts initials on this game's waiting scores", "do": "POST {api}/initials", "body": { "client_id": "c-sam", "game_id": "shotput", "initials": "s-a-m!" }, "status": 200, "is": { "/initials": "SAM" } },
     { "why": "the seat carries them", "do": "GET {api}/state", "is": { "/sessions/0/seats/0/initials": "SAM" } },
-    { "why": "the row took them, and the score the copy left for another game still waits", "table": "seamdeck_scores", "has": ["\"initials\":\"SAM\"", "\"initials\":\"???\",\"points\":40"] },
+    { "why": "the row took them, and Sam's waiting score for another game still waits", "table": "_fdata/seamdeck_scores", "has": ["\"initials\":\"SAM\"", "\"initials\":\"???\",\"points\":40"] },
     { "why": "and on the regatta board it is theirs too, over the row as it was", "do": "POST {api}/initials", "body": { "client_id": "c-sam", "game_id": "regatta", "initials": "SAM" }, "status": 200 },
-    { "why": "the old row kept what it held", "table": "seamdeck_scores", "has": ["\"_created_at\":6", "\"client_id\":\"c-sam\",\"game_id\":\"regatta\",\"initials\":\"SAM\",\"points\":40,\"scored_at\":6"], "lacks": ["???"] },
+    { "why": "the old row kept what it held", "table": "_fdata/seamdeck_scores", "has": ["\"_created_at\":6", "\"client_id\":\"2569a8692f2fc493\",\"game_id\":\"regatta\",\"initials\":\"SAM\",\"points\":40,\"scored_at\":6"], "lacks": ["???"] },
 
     { "why": "only the host plays again", "as": "signed", "do": "POST {api}/next", "body": { "session_id": "{lobby}", "client_id": "c-gil" }, "status": 403, "is": { "/error": "only the host can continue" } },
     { "why": "a collaborator is no host either", "as": "collaborator", "do": "POST {api}/next", "body": { "session_id": "{lobby}", "client_id": "c-col" }, "status": 403 },
@@ -70,7 +70,7 @@
     { "why": "one finish is all a racer has", "as": "viewer", "do": "POST {api}/turn", "body": { "session_id": "{race}", "client_id": "c-vic", "payload": { "events": [] } }, "status": 200, "is": { "/duplicate": true } },
     { "why": "the collaborator's finish ends the race", "as": "collaborator", "do": "POST {api}/turn", "body": { "session_id": "{race}", "client_id": "c-col", "payload": {} }, "status": 200 },
     { "why": "results, and a score of nothing is no row", "do": "GET {api}/state", "is": { "/sessions/1/phase": "results", "/sessions/1/racers": [] } },
-    { "why": "no row for either racer", "table": "seamdeck_scores", "lacks": ["c-vic", "c-col", "hotslice"] },
+    { "why": "no row for either racer", "table": "_fdata/seamdeck_scores", "lacks": ["c-vic", "c-col", "hotslice"] },
 
     { "why": "a player who leaves stands up", "as": "signed", "do": "POST {api}/leave", "body": { "client_id": "c-gil" }, "status": 200 },
     { "why": "the last player out ends the lobby", "do": "POST {api}/leave", "body": { "client_id": "c-sam" }, "status": 200 },

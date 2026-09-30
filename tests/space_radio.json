@@ -2,28 +2,29 @@
   "tier": "members",
   "publish": "open",
   "steps": [
-    { "why": "a playstate an installed copy kept in the session, missing a field it never wrote", "as": "collaborator", "at": "space", "do": "KV.PUT playstate f:{id}", "body": "{\"station_id\":\"kexp\",\"playing\":true,\"updated_by_name\":\"Old Kay\"}", "status": 200 },
-
     { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["Space Radio", "index.js", "/dyn/frame-prefs.css"] },
     { "why": "and at the root", "do": "GET {frame}/", "status": 200, "has": ["Space Radio"] },
     { "why": "its script", "do": "GET {frame}/index.js", "status": 200, "has": ["api/state", "space_radio"] },
     { "why": "its style", "do": "GET {frame}/index.css", "status": 200, "has": ["sr-root"] },
     { "why": "the worker's own code is not a page", "do": "GET {frame}/frame.ts", "status": 404, "lacks": ["mutSet"] },
 
-    { "why": "a stranger hears what an installed copy kept, the rest read as the defaults", "do": "GET {api}/state", "status": 200, "is": { "/playstate/station_id": "kexp", "/playstate/playing": true, "/playstate/updated_by_name": "Old Kay", "/playstate/updated_at": 0, "/can_edit": false, "/stations/0/id": "somafm-groovesalad", "/stations/0/url": "https://ice1.somafm.com/groovesalad-128-mp3", "/me/user_id": "" } },
+    { "why": "a stranger finds the radio off, nothing chosen yet", "do": "GET {api}/state", "status": 200, "is": { "/playstate/station_id": null, "/playstate/playing": false, "/playstate/updated_by_name": "", "/playstate/updated_at": 0, "/can_edit": false, "/stations/0/id": "somafm-groovesalad", "/stations/0/url": "https://ice1.somafm.com/groovesalad-128-mp3", "/me/user_id": "" } },
     { "why": "a stranger changes no station", "do": "POST {api}/set", "body": { "station_id": "fip" }, "status": 403, "is": { "/error": "editors only" } },
     { "why": "nor pauses", "do": "POST {api}/set", "body": { "playing": false }, "status": 403 },
     { "why": "a stranger writes no key at the door", "do": "KV.PUT playstate f:{id}", "body": "{\"station_id\":\"fip\",\"playing\":true}", "status": 403 },
     { "why": "someone signed in and on no roster only listens too", "as": "signed", "do": "POST {api}/set", "body": { "station_id": "fip" }, "status": 403 },
-    { "why": "and is told they cannot edit", "as": "signed", "do": "GET {api}/state", "status": 200, "is": { "/can_edit": false, "/playstate/station_id": "kexp" } },
+    { "why": "and is told they cannot edit", "as": "signed", "do": "GET {api}/state", "status": 200, "is": { "/can_edit": false, "/playstate/station_id": null } },
 
-    { "why": "a viewer is a member who may not touch the dial", "as": "viewer", "do": "GET {api}/state", "status": 200, "is": { "/can_edit": false, "/playstate/station_id": "kexp" } },
+    { "why": "a viewer is a member who may not touch the dial", "as": "viewer", "do": "GET {api}/state", "status": 200, "is": { "/can_edit": false, "/playstate/station_id": null } },
     { "why": "a viewer changes no station", "as": "viewer", "do": "POST {api}/set", "body": { "station_id": "fip", "playing": true }, "status": 403, "is": { "/error": "editors only" } },
     { "why": "nor pauses", "as": "viewer", "do": "POST {api}/set", "body": { "playing": false }, "status": 403 },
-    { "why": "nothing was written by any of that", "as": "collaborator", "at": "space", "do": "KV.GET playstate f:{id}", "has": ["Old Kay", "kexp"], "lacks": ["fip"] },
+    { "why": "nothing was written by any of that", "as": "collaborator", "do": "GET {api}/state", "status": 200, "is": { "/playstate/station_id": null, "/playstate/playing": false, "/playstate/updated_at": 0, "/playstate/updated_by_name": "" } },
+    { "why": "the play state is the session's own: the door hands it to nobody, a member included", "as": "collaborator", "at": "space", "do": "KV.GET playstate f:{id}", "status": 403 },
+    { "why": "nor takes a member's write to it", "as": "collaborator", "at": "space", "do": "KV.PUT playstate f:{id}", "body": "{\"station_id\":\"fip\",\"playing\":true}", "status": 403 },
 
     { "why": "a collaborator may", "as": "collaborator", "do": "GET {api}/state", "status": 200, "is": { "/can_edit": true } },
     { "why": "a station there is none of", "as": "collaborator", "do": "POST {api}/set", "body": { "station_id": "pirate-radio" }, "status": 400, "is": { "/error": "unknown station" } },
+    { "why": "a station, playing", "as": "collaborator", "do": "POST {api}/set", "body": { "station_id": "kexp", "playing": true }, "status": 200, "is": { "/playstate/station_id": "kexp", "/playstate/playing": true } },
     { "why": "pausing keeps the station, under the changer's name", "as": "collaborator", "do": "POST {api}/set", "body": { "playing": false }, "status": 200, "is": { "/ok": true, "/playstate/station_id": "kexp", "/playstate/playing": false, "/playstate/updated_by_name": "Collaborator" } },
     { "why": "a new station, playing", "as": "collaborator", "do": "POST {api}/set", "body": { "station_id": "fip", "playing": true }, "status": 200, "is": { "/playstate/station_id": "fip", "/playstate/playing": true } },
     { "why": "a playing flag that is not true is false", "as": "collaborator", "do": "POST {api}/set", "body": { "playing": "yes" }, "status": 200, "is": { "/playstate/station_id": "fip", "/playstate/playing": false } },
@@ -36,7 +37,7 @@
     { "why": "a route there is none of", "do": "GET {api}/nope", "status": 404, "is": { "/code": "NOT_FOUND" } },
     { "why": "a write there is none of", "as": "collaborator", "do": "POST {api}/nope", "body": {}, "status": 404 },
 
-    { "why": "kept as the session's playstate key, in the shape installed copies hold", "as": "collaborator", "at": "space", "do": "KV.GET playstate f:{id}", "has": ["\\\"station_id\\\":\\\"wbgo\\\"", "\\\"playing\\\":true", "\\\"updated_by_name\\\":\\\"user\\\"", "\\\"updated_at\\\":"] },
+    { "why": "the owner reads the play state only through the frame too", "as": "owner", "at": "space", "do": "KV.GET playstate f:{id}", "status": 403 },
     { "why": "and a viewer hears what the owner put on", "as": "viewer", "do": "GET {api}/state", "is": { "/playstate/station_id": "wbgo", "/playstate/playing": true } }
   ]
 }

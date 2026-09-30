@@ -29,15 +29,14 @@ export default async ({ keeper, visitor: open, expect, sleep }) => {
   expect(await keeper.inFrame(`return getComputedStyle(document.querySelector('.page-header')).display !== 'block' && document.styleSheets.length >= 2`), 'the page has its style');
   await keeper.shot('1-not-set-up');
 
-  // ----- a garden an installed copy kept, with a plant there is no such thing as
-  await keeper.inFrame(`await window.seamside.kv.put('prefs', JSON.stringify({ location: '', soil: 'clay', plants: ['corn', 'weeds'] })); return true;`);
+  // ----- a garden saved through the worker, with a plant there is no such thing as
+  await keeper.inFrame(`await window.seamside.fetch('/api/save', { method: 'POST', body: JSON.stringify({ location: '', soil: 'clay', plants: ['corn', 'weeds'] }) }); return true;`);
   await reload(keeper);
   if (!await keeper.until('the page again', shown('#settings-btn'))) return;
   await keeper.click('#settings-btn');
   expect(await keeper.until('the settings', shown('#settings-overlay')), 'settings open');
-  expect(await keeper.inFrame(`return document.getElementById('cfg-soil').value === 'clay' && /holds onto water/.test(${text('#cfg-soil-desc')}) && document.getElementById('cfg-location').value === ''`), 'the settings open on the soil an installed copy kept');
+  expect(await keeper.inFrame(`return document.getElementById('cfg-soil').value === 'clay' && /holds onto water/.test(${text('#cfg-soil-desc')}) && document.getElementById('cfg-location').value === ''`), 'the settings open on the soil the worker kept');
   expect(await checked(keeper) === 'corn', 'and its plants, the one there is none of left out');
-  expect(await keeper.inFrame(`return (await window.seamside.kv.get('prefs'))?.value ?? null`) == null, 'and the old key is gone from the door');
   await keeper.click('#settings-close');
   expect(await keeper.until('the settings to close', `!(${shown('#settings-overlay')})`), 'the close button closes the settings');
 

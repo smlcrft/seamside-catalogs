@@ -6,11 +6,12 @@
 // keyless) for the configured location and computes a per-plot natural stress level via
 // a plant-profile lookup table. Stress is rendered as a radial gradient on each plot:
 // vibrant green at the edges (low stress), soft yellow mid-band (avg), red at the center
-// (high). Plots are the space's `garden_plots` table; a plot can be assigned to someone on
+// (high). Plots are the `garden_plots` table in the space's frame data folder
+// (`_fdata/garden_plots.table.jsonl`); a plot can be assigned to someone on
 // a `members` list of the space (Member Manager's roster: `members.table.jsonl` or a
 // subtype such as `club.members.table.jsonl`), the one this session is bound to
 // (ctx.kv `bound/members`). The garden's settings are this session's own: the `prefs` row of
-// `__fc_settings`, which no wire serves.
+// its own `settings` table (`ctx.own`), which no wire serves.
 //
 // Who is asking is ctx.peer, what the door proved. Someone not on the space's roster is
 // handed the layout only while the owner allows public viewing, and never a name or a note.
@@ -21,7 +22,7 @@ import type { Ctx } from "@frame-core";
 import { declareTables, sanitizeText, toIntOrNull, clampInt } from "@frame-core";
 
 // ----- The space's tables -----------------------------------------------------------------
-// PLOTS are this frame's own rows. The members list is Member Manager's roster (name, role
+// PLOTS are rows of the frame data folder. The members list is Member Manager's roster (name, role
 // read here): bound to one, plots can be assigned to real people; with none the planner
 // works as well, plots just take typed-in names.
 
@@ -210,32 +211,20 @@ const DEFAULT_PREFS: Prefs = {
   allow_public_viewing: false,
 };
 
-const SETTINGS = "__fc_settings";
-
 /** The row stamped when it was made and when it changed. */
 async function keepPrefs(ctx: Ctx, v: string): Promise<void> {
-  const table = ctx.table<Record<string, unknown>>(SETTINGS);
+  const table = ctx.own.table<Record<string, unknown>>("settings");
   const was = await table.get("prefs");
   const now = Date.now();
   await table.upsert({ ...(was ?? { _created_at: now }), v, id: "prefs", _modified_at: now });
 }
 
-/** The stored JSON: the settings row, else what an older copy kept in the session key,
- *  which a stranger could read and a collaborator write, moved into the row once. The row
- *  is written on the first read either way, so a key written at the door later is ignored. */
-async function storedPrefs(ctx: Ctx): Promise<string> {
-  const row = await ctx.table<Record<string, unknown>>(SETTINGS).get("prefs");
-  if (row?.v != null) return String(row.v);
-  const old = (await ctx.kv.get("prefs"))?.value;
-  const v = old ?? JSON.stringify(DEFAULT_PREFS);
-  await keepPrefs(ctx, v);
-  if (old != null) await ctx.kv.del("prefs");
-  return v;
-}
-
 async function getPrefs(ctx: Ctx): Promise<Prefs> {
   let p: Partial<Prefs> | null = null;
-  try { p = JSON.parse(await storedPrefs(ctx)); } catch { /* defaults */ }
+  try {
+    const row = await ctx.own.table<Record<string, unknown>>("settings").get("prefs");
+    p = row?.v == null ? null : JSON.parse(String(row.v));
+  } catch { /* defaults */ }
   if (!p) return { ...DEFAULT_PREFS };
   const cols = Number.isFinite(Number(p.grid_cols)) ? Math.max(4, Math.min(80, Math.trunc(Number(p.grid_cols)))) : DEFAULT_PREFS.grid_cols;
   const rows = Number.isFinite(Number(p.grid_rows)) ? Math.max(4, Math.min(80, Math.trunc(Number(p.grid_rows)))) : DEFAULT_PREFS.grid_rows;
@@ -375,7 +364,7 @@ function serializePlantEntries(entries: PlantEntry[]): string {
 type PlotRow = Record<string, unknown> & { id: string };
 
 const PLOTS = "garden_plots";
-const plotRows = (ctx: Ctx) => ctx.table<Record<string, unknown>>(PLOTS);
+const plotRows = (ctx: Ctx) => ctx.shared.table<Record<string, unknown>>(PLOTS);
 
 /** Write a plot over what it held, stamped when it was made and when it changed; a new
  *  row starts from the schema's defaults. */

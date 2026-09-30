@@ -2,16 +2,16 @@
 // Watercolor Studio — a collaborative, deterministic watercolor painting surface.
 //
 // Storage model (one sheet per session of the frame):
-//   - The painting is files of the space, in a folder of its own under "Watercolor Studio/"
-//     (the session's key `sheet` names it; made at the first stroke): `strokes.json` is what
+//   - The painting is files in the space's frame data folder, in a folder of its own under
+//     `_fdata/paintings/` (the session's key `sheet` names it; made at the first stroke): `strokes.json` is what
 //     the frame keeps editing, `painting.png` the picture a person opens anywhere.
 //   - strokes.json holds an ordered `strokes` array. Each stroke is a *vector* record — a
 //     brush, a resolved pigment color, a dilution amount, a list of normalized [x,y,width]
 //     points, and an integer `seed`. Every client replays the strokes through the same
 //     seeded watercolor renderer, so the painting is identical on every peer while the wire
 //     payload stays tiny. The page that made a change renders the PNG and hands it back.
-//   - Prefs (title, paper, guide, sheet aspect) are this session's own `__fc_settings` row
-//     `prefs`, its value JSON under `v`: owner-only, so never a key a collaborator writes.
+//   - Prefs (title, paper, guide, sheet aspect) are the `prefs` row of this session's own
+//     settings table, its value JSON under `v`: owner-only, and no page reaches it.
 //
 // Auth model (decided on ctx.peer, who the door proved is asking):
 //   - Anonymous link visitors and Viewer-role members are read-only — they replay the
@@ -67,30 +67,22 @@ const DEFAULT_PREFS: Prefs = {
 // ----------------------------------------------------------------------------------------
 // This session's prefs and sheet
 // ----------------------------------------------------------------------------------------
-const SETTINGS = "__fc_settings";
+const settingsOf = (ctx: Ctx) => ctx.own.table<Record<string, unknown>>("settings");
 
 async function setPrefs(ctx: Ctx, prefs: Prefs) {
-  const t = ctx.table<Record<string, unknown>>(SETTINGS);
+  const t = settingsOf(ctx);
   const was = await t.get("prefs"), now = Date.now();
   await t.upsert({ ...(was ?? { _created_at: now }), id: "prefs", v: JSON.stringify(prefs), _modified_at: now });
 }
 
-// A missing row is written on first read, from the `prefs` key an older copy kept or else
-// the defaults, and the key goes: a key written at the door later is never taken up.
 async function getPrefs(ctx: Ctx): Promise<Prefs> {
-  const row = await ctx.table<Record<string, unknown>>(SETTINGS).get("prefs");
-  if (row?.v != null) {
-    try { return { ...DEFAULT_PREFS, ...JSON.parse(String(row.v)) }; } catch { return { ...DEFAULT_PREFS }; }
-  }
-  const old = await ctx.kv.get("prefs");
-  let prefs = { ...DEFAULT_PREFS };
-  try { prefs = { ...DEFAULT_PREFS, ...JSON.parse(old?.value || "{}") }; } catch { /* defaults */ }
-  await setPrefs(ctx, prefs);
-  if (old) await ctx.kv.del("prefs");
-  return prefs;
+  const row = await settingsOf(ctx).get("prefs");
+  if (row?.v == null) return { ...DEFAULT_PREFS };
+  try { return { ...DEFAULT_PREFS, ...JSON.parse(String(row.v)) }; } catch { return { ...DEFAULT_PREFS }; }
 }
 
-const FOLDER = "Watercolor Studio";
+// Within the frame data folder (`ctx.shared.files`), so `_fdata/paintings/<sheet>/`.
+const FOLDER = "paintings";
 const STROKES = "strokes.json";
 const PICTURE = "painting.png";
 // strokes.json must fit in one file a frame may write.
@@ -105,7 +97,7 @@ async function sheetDir(ctx: Ctx, make = false): Promise<string | null> {
   const { title } = await getPrefs(ctx);
   const base = (title !== DEFAULT_PREFS.title ? title : "Painting")
     .replace(/[\/\x00-\x1f]/g, " ").replace(/^[.\s]+/, "").trim().slice(0, 60) || "Painting";
-  const taken = new Set((await ctx.files.list(FOLDER).catch(() => [])).map((e) => e.name));
+  const taken = new Set((await ctx.shared.files.list(FOLDER).catch(() => [])).map((e) => e.name));
   let name = base;
   for (let i = 2; taken.has(name); i++) name = `${base} ${i}`;
   const dir = `${FOLDER}/${name}`;
@@ -115,7 +107,7 @@ async function sheetDir(ctx: Ctx, make = false): Promise<string | null> {
 
 async function loadPainting(ctx: Ctx): Promise<Painting> {
   const dir = await sheetDir(ctx);
-  const raw = dir ? await ctx.files.read(`${dir}/${STROKES}`).catch(() => null) : null;
+  const raw = dir ? await ctx.shared.files.read(`${dir}/${STROKES}`).catch(() => null) : null;
   if (!raw) return { strokes: [] };
   try {
     const parsed = JSON.parse(new TextDecoder().decode(raw));
@@ -127,7 +119,7 @@ async function loadPainting(ctx: Ctx): Promise<Painting> {
 async function savePainting(ctx: Ctx, p: Painting): Promise<boolean> {
   const text = JSON.stringify(p);
   if (text.length > MAX_FILE_BYTES) return false;
-  await ctx.files.write(`${await sheetDir(ctx, true)}/${STROKES}`, text);
+  await ctx.shared.files.write(`${await sheetDir(ctx, true)}/${STROKES}`, text);
   return true;
 }
 
@@ -248,7 +240,7 @@ function mutDeleteStrokes(ctx: Ctx, v: { ids?: unknown } | null): Promise<MutRes
     if (deleted.length > 0) {
       await savePainting(ctx, painting);
       // An emptied sheet has no picture; any other is sent again by the page that undid.
-      if (!painting.strokes.length) await ctx.files.remove(`${await sheetDir(ctx)}/${PICTURE}`).catch(() => {});
+      if (!painting.strokes.length) await ctx.shared.files.remove(`${await sheetDir(ctx)}/${PICTURE}`).catch(() => {});
       tell(ctx, "strokes");
     }
     return { status: 200, body: { ok: true, deleted } };
@@ -260,7 +252,7 @@ function mutClear(ctx: Ctx): Promise<MutResult> {
   if (!ctx.peer.is_owner) return Promise.resolve({ status: 403, body: { error: "owner only" } });
   return serial(ctx, async () => {
     const dir = await sheetDir(ctx);
-    if (dir) for (const f of [STROKES, PICTURE]) await ctx.files.remove(`${dir}/${f}`).catch(() => {});
+    if (dir) for (const f of [STROKES, PICTURE]) await ctx.shared.files.remove(`${dir}/${f}`).catch(() => {});
     tell(ctx, "strokes");
     return { status: 200, body: { ok: true } };
   });
@@ -298,7 +290,7 @@ function mutPicture(ctx: Ctx, last: string, bytes: Uint8Array): Promise<MutResul
     const { strokes } = await loadPainting(ctx);
     const now = strokes.length ? strokes[strokes.length - 1].id : "";
     if (!now || now !== last) return { status: 409, body: { error: "the sheet has moved on" } };
-    await ctx.files.write(`${await sheetDir(ctx, true)}/${PICTURE}`, bytes);
+    await ctx.shared.files.write(`${await sheetDir(ctx, true)}/${PICTURE}`, bytes);
     return { status: 200, body: { ok: true } };
   });
 }
@@ -338,7 +330,7 @@ export default {
     // The picture, for anyone who can see the painting.
     if (pathname === "/api/picture" && method === "GET") {
       const dir = await sheetDir(ctx);
-      const png = dir ? await ctx.files.read(`${dir}/${PICTURE}`).catch(() => null) : null;
+      const png = dir ? await ctx.shared.files.read(`${dir}/${PICTURE}`).catch(() => null) : null;
       if (!png) return json({ error: "no picture yet" }, 404);
       return new Response(png as Uint8Array<ArrayBuffer>, { headers: { "content-type": "image/png" } });
     }

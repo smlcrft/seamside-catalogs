@@ -1,6 +1,6 @@
 {
     "name": "Space Radio",
-    "description": "A synced web radio player for everyone in a space. Editors pick a station from a list of public web stations \u2014 rock, pop, ambient, jazz, French, Italian, Australian, NPR, chiptune and more \u2014 and everyone else, including anyone the frame is shared with publicly, listens along to the same station at the same time. Play/pause and the station are shared; each listener's volume and mute are their own. The stations' stream origins are declared in permissions_media, so the page may play audio from them and reach nothing else. The play state is the session's own state in the space, so two radios in one space play apart.",
+    "description": "A synced web radio player for everyone in a space. Editors pick a station from a list of public web stations \u2014 rock, pop, ambient, jazz, French, Italian, Australian, NPR, chiptune and more \u2014 and everyone else, including anyone the frame is shared with publicly, listens along to the same station at the same time. Play/pause and the station are shared; each listener's volume and mute are their own. The stations' stream origins are declared in permissions_media, so the page may play audio from them and reach nothing else. The play state is the session's own, kept by its server half, so two radios in one space play apart.",
     "frame_type": "Tandem",
     "tags": ["media", "music"],
     "permissions_media": [
@@ -29,8 +29,8 @@
         "https://wbgo.streamguys1.com"
     ],
     "created_at": "2026-05-18T00:00:00Z",
-    "modified_at": "2026-09-29T23:00:00Z",
-    "app_version_min": "1.0.11",
+    "modified_at": "2026-09-30T22:00:00Z",
+    "app_version_min": "1.0.12",
     "licensed_under_cc0": true,
     "attribution_log": [],
     "icon": "ph:radio",

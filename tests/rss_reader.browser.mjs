@@ -37,9 +37,9 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
     await keeper.until('the prompt', `!!document.querySelector('.framelib-dialog-host .framelib-prompt-input')`);
     await keeper.fill('.framelib-dialog-host .framelib-prompt-input', `${site}/`);
     await keeper.press('Enter');
-    const added = await untilRows('the feed', 'rss_feeds', (r) => r.find((x) => x.cells.url === `${site}/feed.xml` && x.cells.last_fetched));
+    const added = await untilRows('the feed', '_fdata/rss_feeds', (r) => r.find((x) => x.cells.url === `${site}/feed.xml` && x.cells.last_fetched));
     expect(added?.cells.site_url === `${site}/` && added?.cells.title === 'Loopback Log' && added?.cells.last_error === null && added?.cells.last_fetched > 0 && added?.cells._created_at && added?.cells.added_by, 'a site pasted is followed through to its feed, a row of the space');
-    const items = await untilRows('its items', 'rss_items', (r) => r.length === 2 && r);
+    const items = await untilRows('its items', '_fdata/rss_items', (r) => r.length === 2 && r);
     expect(items && items.every((i) => i.cells.feed_id === added?.id && i.cells.fetched_at > 0 && /^[0-9a-f]{32}$/.test(i.id)), 'its items are rows of the space, named for the feed and the guid');
     expect(await keeper.until('the items to draw', `[...document.querySelectorAll('.item .it-title')].map((t) => t.textContent).join('|') === 'Second post|First post'`), 'and drawn newest first');
     expect(await keeper.inFrame(`return [...document.querySelectorAll('.sidebar .navrow')].some((r) => /Loopback Log/.test(r.textContent) && /2/.test(r.querySelector('.n').textContent))`), 'the feed is listed with two unread');
@@ -54,38 +54,38 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
     await keeper.shot('3-refused');
     await keeper.click('.framelib-dialog-host .framelib-btn-primary');
     await sleep(300);
-    expect((await rows('rss_feeds')).length === 1, 'and nothing is added');
+    expect((await rows('_fdata/rss_feeds')).length === 1, 'and nothing is added');
 
     // reading: an item opens and is marked read
     await keeper.inFrame(`[...document.querySelectorAll('.item')].find((i) => /First post/.test(i.textContent)).setAttribute('data-pick', '1'); return true;`);
     await keeper.click('.item[data-pick]');
     expect(await keeper.until('the reader pane', `document.querySelector('.reader h1')?.textContent === 'First post'`), 'the item opens beside the list');
     const first = items?.find((i) => i.cells.guid === 'post-1');
-    expect(await untilRows('the read mark', 'rss_reads', (r) => r.find((x) => x.cells.item_id === first?.id && x.cells.read_at > 0)), 'opening it marks it read, a row of the space');
+    expect(await untilRows('the read mark', '_fdata/rss_reads', (r) => r.find((x) => x.cells.item_id === first?.id && x.cells.read_at > 0)), 'opening it marks it read, a row of the space');
     expect(await keeper.inFrame(`return /Hello readers\\./.test(document.querySelector('.reader .content').textContent) && !document.querySelector('.reader .content img') && /picture: a cat/.test(document.querySelector('.reader .content .imglink')?.textContent ?? '')`), 'its words are shown, and its outside picture is a link, never loaded');
     expect(await keeper.until('the count to follow', `[...document.querySelectorAll('.sidebar .navrow')].find((r) => /Loopback Log/.test(r.textContent))?.querySelector('.n').textContent === '1'`), 'and the feed counts one unread');
 
     // boost, comment, reply, delete
     await keeper.click('.reader .boostbtn');
-    expect(await untilRows('the boost', 'rss_boosts', (r) => r.find((x) => x.cells.item_id === first?.id && x.cells.user_id && x.cells.created_at > 0)), 'a boost is a row of the space');
+    expect(await untilRows('the boost', '_fdata/rss_boosts', (r) => r.find((x) => x.cells.item_id === first?.id && x.cells.user_id && x.cells.created_at > 0)), 'a boost is a row of the space');
     expect(await keeper.until('the boost to draw', `document.querySelector('.reader .boostbtn.on')?.textContent.trim() === '↑ 1' && /boosted by/.test(document.querySelector('.reader').textContent)`), 'and the button says so');
     await keeper.fill('.cmt-form input', 'Worth a read.');
     await keeper.press('Enter');
-    const said = await untilRows('the comment', 'rss_comments', (r) => r.find((x) => x.cells.body === 'Worth a read.'));
+    const said = await untilRows('the comment', '_fdata/rss_comments', (r) => r.find((x) => x.cells.body === 'Worth a read.'));
     expect(said?.cells.item_id === first?.id && said?.cells.parent_id === null && said?.cells._created_at, 'Enter posts a comment, a row of the space');
     expect(await keeper.until('the comment to draw', `document.querySelector('.cmt .body')?.textContent === 'Worth a read.' && document.querySelector('.cmt-form input').value === ''`), 'drawn, and the field emptied');
     await keeper.click('.cmt .acts button');
     expect(await keeper.until('the reply field', `document.querySelector('.cmt-form input').placeholder === 'Reply…'`), 'Reply turns the field to a reply');
     await keeper.fill('.cmt-form input', 'Agreed.');
     await keeper.press('Enter');
-    expect(await untilRows('the reply', 'rss_comments', (r) => r.find((x) => x.cells.body === 'Agreed.' && x.cells.parent_id === said?.id)), 'a reply is kept under its comment');
+    expect(await untilRows('the reply', '_fdata/rss_comments', (r) => r.find((x) => x.cells.body === 'Agreed.' && x.cells.parent_id === said?.id)), 'a reply is kept under its comment');
     expect(await keeper.until('the reply to draw', `document.querySelector('.cmt-children .cmt .body')?.textContent === 'Agreed.'`), 'and drawn nested');
     await keeper.shot('4-discussion');
     await keeper.inFrame(`[...document.querySelectorAll('.cmt .acts button')].find((b) => b.textContent === 'Delete').setAttribute('data-del', '1'); return true;`);
     await keeper.click('[data-del]');
     await keeper.until('the question', `!!document.querySelector('.framelib-dialog-host .framelib-btn-danger')`);
     await keeper.click('.framelib-dialog-host .framelib-btn-danger');
-    expect(await untilRows('the thread to go', 'rss_comments', (r) => r.length === 0 || null), 'deleting a comment takes its reply with it');
+    expect(await untilRows('the thread to go', '_fdata/rss_comments', (r) => r.length === 0 || null), 'deleting a comment takes its reply with it');
     expect(await keeper.until('the thread to clear', `!document.querySelector('.cmt')`), 'and the page follows');
 
     // a group
@@ -93,7 +93,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
     await keeper.until('the prompt', `!!document.querySelector('.framelib-dialog-host .framelib-prompt-input')`);
     await keeper.fill('.framelib-dialog-host .framelib-prompt-input', 'Blogs');
     await keeper.press('Enter');
-    expect(await untilRows('the group', 'rss_groups', (r) => r.find((x) => x.cells.name === 'Blogs' && x.cells.sort === 0)), 'a group is a row of the space');
+    expect(await untilRows('the group', '_fdata/rss_groups', (r) => r.find((x) => x.cells.name === 'Blogs' && x.cells.sort === 0)), 'a group is a row of the space');
     expect(await keeper.until('the group to list', `[...document.querySelectorAll('.sidebar .label span')].some((s) => s.textContent === 'Blogs')`), 'and listed');
 
     // keys: j opens the next item and marks it, b boosts it (and reads the list again), m marks it unread
@@ -102,12 +102,12 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
     await keeper.press('j');
     const second = items?.find((i) => i.cells.guid === 'post-2');
     expect(await keeper.until('j to open an item', `document.querySelector('.reader h1')?.textContent === 'Second post'`), 'j opens the first item in the list');
-    expect(await untilRows('its read mark', 'rss_reads', (r) => r.find((x) => x.cells.item_id === second?.id)), 'and marks it read');
+    expect(await untilRows('its read mark', '_fdata/rss_reads', (r) => r.find((x) => x.cells.item_id === second?.id)), 'and marks it read');
     await keeper.press('b');
-    expect(await untilRows('the boost', 'rss_boosts', (r) => r.find((x) => x.cells.item_id === second?.id)), 'b boosts it');
+    expect(await untilRows('the boost', '_fdata/rss_boosts', (r) => r.find((x) => x.cells.item_id === second?.id)), 'b boosts it');
     expect(await keeper.until('the list to read again', `document.querySelector('.item.sel')?.classList.contains('read')`), 'and the list shows it read');
     await keeper.press('m');
-    expect(await untilRows('the mark to go', 'rss_reads', (r) => !r.some((x) => x.cells.item_id === second?.id)), 'm marks it unread again');
+    expect(await untilRows('the mark to go', '_fdata/rss_reads', (r) => !r.some((x) => x.cells.item_id === second?.id)), 'm marks it unread again');
 
     // search
     await keeper.fill('.search', 'gardens');
@@ -118,8 +118,8 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
     // refresh brings what the site added, and never an item twice
     entries.push({ guid: 'post-3', title: 'Third post', body: '<p>New today.</p>', date: 'Wed, 03 Sep 2026 10:00:00 GMT' });
     await keeper.click('.iconbtn[title="Refresh (r)"]');
-    const third = await untilRows('the new item', 'rss_items', (r) => r.length === 3 && r.find((x) => x.cells.guid === 'post-3'));
-    expect(third && (await rows('rss_items')).filter((x) => x.cells.guid === 'post-1').length === 1, 'Refresh brings the new item and not the old ones again');
+    const third = await untilRows('the new item', '_fdata/rss_items', (r) => r.length === 3 && r.find((x) => x.cells.guid === 'post-3'));
+    expect(third && (await rows('_fdata/rss_items')).filter((x) => x.cells.guid === 'post-1').length === 1, 'Refresh brings the new item and not the old ones again');
     expect(await keeper.until('the new item to draw', `document.querySelector('.item .it-title')?.textContent === 'Third post'`), 'and it is drawn first');
     await keeper.shot('5-refreshed');
 

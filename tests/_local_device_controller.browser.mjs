@@ -16,5 +16,5 @@ export default async ({ keeper, visitor: open, rows, expect }) => {
   expect(await visitor.inFrame(`return !document.querySelector('#root .fh-gear, #root .grid, #root .err')`), 'and offered nothing to press');
   await visitor.shot('2-visitor-no-device');
 
-  expect((await rows('__fc_settings')).length === 0, 'opening the page writes no setting');
+  expect((await rows('_settings')).length === 0, 'opening the page writes no setting');
 };

@@ -23,6 +23,8 @@
     { "why": "which a viewer sees as the next roll", "as": "viewer", "do": "GET {api}/state", "is": { "/n": 2, "/sides": 6 }, "lacks": ["\"value\":0"] },
     { "why": "a roll is a POST", "as": "collaborator", "do": "GET {api}/roll", "status": 404 },
     { "why": "a route there is none of", "as": "collaborator", "do": "POST {api}/nope", "status": 404, "is": { "/code": "NOT_FOUND" } },
-    { "why": "nothing is kept in the session's keys", "as": "collaborator", "at": "space", "do": "KV.GET roll f:{id}", "lacks": ["6"] }
+    { "why": "a page reaches no key of the session's own, a member's included: the door refuses it", "as": "collaborator", "at": "space", "do": "KV.GET roll f:{id}", "status": 403 },
+    { "why": "nor takes a member's write to one", "as": "collaborator", "at": "space", "do": "KV.PUT roll f:{id}", "body": "6", "status": 403 },
+    { "why": "so the die is as the rolls left it, and nothing but the worker keeps it", "do": "GET {api}/state", "is": { "/n": 2, "/sides": 6 } }
   ]
 }

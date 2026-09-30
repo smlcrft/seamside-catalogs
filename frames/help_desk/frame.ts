@@ -8,9 +8,10 @@
 //   - A member of the space: sees the inbox. Every member reads it — the submissions are
 //     a table file of the space, which every member can read anyway — and only editors
 //     (collaborator and up) change status, add notes, or edit the form.
-//   - Submissions, fields and notes are the space's tables (help_desk_submissions,
-//     help_desk_fields, help_desk_notes). A stranger reaches none of them: the page reads
-//     no table, and every route below decides on ctx.peer, who the door proved is asking.
+//   - Submissions, fields and notes are tables in the space's frame data folder
+//     (_fdata/help_desk_submissions, _fdata/help_desk_fields, _fdata/help_desk_notes).
+//     A stranger reaches none of them: the page reads no table, and every route below
+//     decides on ctx.peer, who the door proved is asking.
 //
 // Realtime: a push says what changed and never what it holds. Every open page of the
 // frame hears it, the public form included, and each reads again as whoever it is.
@@ -19,14 +20,14 @@ import type { Ctx } from "@frame-core";
 import { declareTables } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
-// THE SPACE'S TABLES — named for this frame, so no other frame's rows land in them.
+// THE SPACE'S TABLES, in its frame data folder.
 // ----------------------------------------------------------------------------------------
 const SUBMISSIONS = "help_desk_submissions";
 const FIELDS = "help_desk_fields";
 const NOTES = "help_desk_notes";
-// Settings (title, one-time seed marker) are rows of a store every frame in the space
-// shares, so the keys carry this frame's name. Each value is JSON under `v`.
-const SETTINGS = "__fc_settings";
+// Settings (title, one-time seed marker) are rows of the space's help_desk_settings table,
+// beside the fields the marker guards. Each value is JSON under `v`.
+const SETTINGS = "help_desk_settings";
 
 declareTables([
   {
@@ -71,7 +72,9 @@ declareTables([
 // ----------------------------------------------------------------------------------------
 type Row = Record<string, unknown> & { id: string };
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+// Every table, the settings included, is the space's frame data (`_fdata/`), shared with
+// every frame and member.
+const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
 
 /** Write a row over what it held, stamped when it was made and when it changed. */
 async function keep(ctx: Ctx, name: string, id: string | null, values: Record<string, unknown>): Promise<Row> {
@@ -164,7 +167,7 @@ const DEFAULT_FIELD_ROW = "default_message";
 
 // Seed a default "Message" field the first time the desk is opened. The "seeded" setting
 // is the one-time marker — after the initial seed the admin can delete or replace the
-// field and subsequent requests won't re-seed.
+// field and subsequent requests, from any session or device, won't re-seed.
 async function ensureDefaultFields(ctx: Ctx): Promise<void> {
   if (await setting(ctx, "help_desk_seeded", false)) return;
   await setSetting(ctx, "help_desk_seeded", true);

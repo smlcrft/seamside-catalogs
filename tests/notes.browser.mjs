@@ -28,7 +28,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await visitor.shot('2-visitor-empty');
 
   await post(keeper, 'Buy milk #Home #errands.');
-  const milk = await untilRows('the note', 'notes', (r) => r.find((x) => x.cells.body === 'Buy milk #Home #errands.'));
+  const milk = await untilRows('the note', '_fdata/notes', (r) => r.find((x) => x.cells.body === 'Buy milk #Home #errands.'));
   expect(milk?.cells.tags === 'home,errands' && milk?.cells.pinned === 0 && milk?.cells.edited_ms === 0 && milk?.cells.created_ms > 0 && milk?.cells._created_at > 0, 'a posted note is a row of the space, tags derived from its body');
   expect(await keeper.until('the note to draw', `${bodies}[0] === 'Buy milk #Home #errands.' && !!document.querySelector('.n-body .hash')`), 'and drawn, its tags in the channel colour');
   expect(await keeper.inFrame(`return document.querySelector('.composer textarea').value === ''`), 'the composer is emptied for the next thought');
@@ -37,9 +37,9 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.fill('.composer textarea', 'Call the plumber #work');
   await keeper.press('Enter');
   await sleep(400);
-  expect((await rows('notes')).length === 1, 'Enter alone posts nothing: it is a new line');
+  expect((await rows('_fdata/notes')).length === 1, 'Enter alone posts nothing: it is a new line');
   await keeper.click('.composer .btn-primary');
-  await untilRows('the second note', 'notes', (r) => r.find((x) => x.cells.body === 'Call the plumber #work'));
+  await untilRows('the second note', '_fdata/notes', (r) => r.find((x) => x.cells.body === 'Call the plumber #work'));
   expect(await keeper.until('the tag bar', `[...document.querySelectorAll('button.tag')].map((t) => t.textContent).join(' ') === '#errands #home #work'`), 'every tag is offered as a filter');
   await keeper.shot('3-two-notes');
 
@@ -51,8 +51,8 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
 
   await mark(keeper, /milk/, 0);
   await keeper.click('[data-t]');
-  expect(await untilRows('the pin', 'notes', (r) => r.find((x) => x.cells.body === 'Buy milk #Home #errands.' && x.cells.pinned === 1)), 'a pin is kept on the row');
-  const pinned = await rows('notes').then((r) => r.find((x) => x.id === milk?.id));
+  expect(await untilRows('the pin', '_fdata/notes', (r) => r.find((x) => x.cells.body === 'Buy milk #Home #errands.' && x.cells.pinned === 1)), 'a pin is kept on the row');
+  const pinned = await rows('_fdata/notes').then((r) => r.find((x) => x.id === milk?.id));
   expect(pinned?.cells.tags === 'home,errands' && pinned?.cells.created_ms === milk?.cells.created_ms && pinned?.cells._created_at === milk?.cells._created_at, 'over what the row held');
   expect(await keeper.until('the pinned group', `document.querySelector('.stream .day')?.textContent === 'pinned' && document.querySelector('.note.pinned .n-body')?.textContent === 'Buy milk #Home #errands.'`), 'the pinned note is lifted to the top');
   expect(await visitor.until('the pin to reach the stranger', `!!document.querySelector('.note.pinned')`), 'and the stranger sees it pinned');
@@ -64,24 +64,24 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   await keeper.fill('.edit-area', 'Buy oat milk #shopping');
   await keeper.shot('4-editing');
   await keeper.click('.edit-foot .btn-primary');
-  const edited = await untilRows('the edit', 'notes', (r) => r.find((x) => x.cells.body === 'Buy oat milk #shopping'));
+  const edited = await untilRows('the edit', '_fdata/notes', (r) => r.find((x) => x.cells.body === 'Buy oat milk #shopping'));
   expect(edited?.id === milk?.id && edited?.cells.tags === 'shopping' && edited?.cells.edited_ms > 0 && edited?.cells.pinned === 1, 'an edit re-derives the tags and keeps the pin');
   expect(await keeper.until('the edit to draw', `/edited/.test(document.querySelector('.note.pinned .n-meta')?.textContent ?? '') && ![...document.querySelectorAll('button.tag')].some((t) => t.textContent === '#home')`), 'the note says it was edited, and the old tags are gone');
 
   await mark(keeper, /plumber/, 2);
   await keeper.click('[data-t]');
   expect(await keeper.inFrame(`return document.querySelector('[data-t]')?.classList.contains('armed')`), 'the first press arms delete');
-  expect((await rows('notes')).length === 2, 'and deletes nothing yet');
+  expect((await rows('_fdata/notes')).length === 2, 'and deletes nothing yet');
   await keeper.click('[data-t]');
-  expect(await untilRows('the delete', 'notes', (r) => r.length === 1 && r[0].id === milk?.id), 'the second press deletes the row');
+  expect(await untilRows('the delete', '_fdata/notes', (r) => r.length === 1 && r[0].id === milk?.id), 'the second press deletes the row');
   expect(await visitor.until('the delete to reach the stranger', `${bodies}.length === 1`), "and the stranger's page follows");
   await keeper.shot('5-after-delete');
 
-  await seed('notes', 'old1', { body: 'An old thought #Idea', tags: 'idea', author_name: 'Collaborator', author_id: 'did:dht:x', created_ms: Date.now() - 3 * 86400000, edited_ms: 0, pinned: 0, _created_at: 5, _modified_at: 5 });
+  await seed('_fdata/notes', 'old1', { body: 'An old thought #Idea', tags: 'idea', author_name: 'Collaborator', author_id: 'did:dht:x', created_ms: Date.now() - 3 * 86400000, edited_ms: 0, pinned: 0, _created_at: 5, _modified_at: 5 });
   await visitor.send('Page.reload');
   visitor.child = null;
   for (let i = 0; i < 60 && !visitor.child; i++) await sleep(250);
-  expect(await visitor.until('the old note', `${bodies}.includes('An old thought #Idea')`), 'a note an installed copy left is read');
+  expect(await visitor.until('the old note', `${bodies}.includes('An old thought #Idea')`), 'a note already in the frame data is read');
   expect(await visitor.inFrame(`return [...document.querySelectorAll('.stream .day')].length === 2 && /Collaborator/.test(${text})`), 'under its own day, and by name once two people have written');
   await visitor.shot('6-visitor');
 };

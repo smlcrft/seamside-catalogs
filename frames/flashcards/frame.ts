@@ -5,7 +5,7 @@
 //   privacy:        privacy-space-users  — anyone in the space can study; space editors
 //                                           write the cards.
 //   data_storage:   the space's tables   — `flashcards_decks`, `flashcards` (the cards) and
-//                                           `flashcards_reviews`, files at the space's root,
+//                                           `flashcards_reviews`, in the frame data folder `_fdata/`,
 //                                           synced with it; no contract (docs/schema-contracts.md).
 //   view_realtime:  view-collaborative    — deck and card edits push `{ flashcards: "decks" }`,
 //                                           which says to read again and never what changed,
@@ -67,7 +67,7 @@ type Row = Record<string, unknown> & { id: string };
 type Schema = ReadonlyArray<{ name: string; col_type: "text" | "integer" | "real"; default_val: string }>;
 type WriteResult = { status: number; body: unknown };
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
 
 const defaultsOf = (schema: Schema): Record<string, unknown> => Object.fromEntries(
   schema.map((c) => [c.name, c.col_type === "text" ? c.default_val : Number(c.default_val)]),

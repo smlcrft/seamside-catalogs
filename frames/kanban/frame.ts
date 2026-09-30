@@ -7,8 +7,8 @@
 //                                           The page reads no table: the board comes
 //                                           from this worker, and every write is a
 //                                           route here that decides on ctx.peer.
-//   data_storage:   the space's tables   — `kanban_columns` and `kanban_cards`
-//                                           (`<name>.table.jsonl` at the space's root),
+//   data_storage:   the space's frame data — `kanban_columns` and `kanban_cards`
+//                                           (`_fdata/<name>.table.jsonl`),
 //                                           synced with the space; one board per space.
 //   view_realtime:  view-collaborative    — every mutation pushes { kanban: "board" },
 //                                           and every open page reads the board again.
@@ -34,7 +34,7 @@ const CARDS_SCHEMA = [
   { name: "created_ms",  col_type: "integer" as const, nullable: false, default_val: "0" },
 ];
 
-// ----- The space's tables, named for this frame (`cards` alone is also Flashcards') ------
+// ----- The space's frame data tables, named for this frame (`cards` alone is also Flashcards') ------
 const COLUMNS = "kanban_columns";
 const CARDS = "kanban_cards";
 declareTables([
@@ -47,7 +47,7 @@ const SCHEMAS: Record<string, Array<{ name: string; col_type: string; default_va
 
 type Row = Record<string, unknown> & { id: string };
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
 
 /** A new row: the schema's defaults, stamped when it was made. */
 function fresh(name: string, now: number): Record<string, unknown> {

@@ -34,8 +34,8 @@
 import type { Ctx, PeerInfo } from "@frame-core";
 import { declareLocalDevices, ensureLocalDevices, localDevice } from "@frame-core";
 
-// Settings: rows of `__fc_settings`, one per key, the value as JSON under `v`.
-const SETTINGS = "__fc_settings";
+// Settings: rows of the session's own `settings` table, one per key, the value as JSON
+// under `v`. Only this worker reads them.
 
 // May viewers who are NOT space members drive this device?
 //
@@ -87,7 +87,7 @@ const sensor = (ctx: Ctx) => localDevice("sensor", ctx.frame) as unknown as Devi
 
 type Row = Record<string, unknown> & { id: string };
 
-const settingsTable = (ctx: Ctx) => ctx.table<Record<string, unknown>>(SETTINGS);
+const settingsTable = (ctx: Ctx) => ctx.own.table<Record<string, unknown>>("settings");
 
 async function allSettings(ctx: Ctx): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};

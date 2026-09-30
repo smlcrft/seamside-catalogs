@@ -3,8 +3,8 @@
 //
 // Design axes:
 //   privacy:        privacy-public-view  — non-members watch the grid; space editors mark.
-//   data_storage:   the space's tables   — `habits` and `habit_marks` (`<name>.table.jsonl`
-//                                           at the space's root), synced with the space. No
+//   data_storage:   the space's frame data — `habits` and `habit_marks`
+//                                           (`_fdata/<name>.table.jsonl`), synced with the space. No
 //                                           contract: nothing else acts on these rows
 //                                           (docs/schema-contracts.md, "When NOT to write a
 //                                           contract").
@@ -50,7 +50,7 @@ declareTables([
 type Row = Record<string, unknown> & { id: string };
 type Schema = typeof HABITS_SCHEMA;
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+const rows = (ctx: Ctx, name: string) => ctx.shared.table<Record<string, unknown>>(name);
 
 const defaults = (schema: Schema) => Object.fromEntries(
   schema.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),

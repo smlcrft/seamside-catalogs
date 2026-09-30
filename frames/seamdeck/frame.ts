@@ -8,8 +8,9 @@
 // frame, and every player's requests reach it, so plain worker memory —
 // keyed by ctx.frame, the session — is already shared state for all players.
 // Sessions/seats/turns/beacons live in memory — ephemeral by design. High
-// scores are the one thing that should outlive a restart: the space's
-// `seamdeck_scores` table, a row per score, one board per space.
+// scores are the one thing that should outlive a restart: the
+// `seamdeck_scores` table in the space's frame data (`_fdata/`), a row per
+// score, one board per space.
 // A live update is ctx.push({ seamdeck: "state" }): it carries nothing, and
 // every open page reads /api/state again.
 //
@@ -49,7 +50,7 @@ type Session = {
 
 // Ephemeral: gone on worker restart, which is fine — games are one-more-go toys.
 const sessionsByFrame: Record<string, Session[]> = {};
-// Durable: the arcade high-score board is the space's table.
+// Durable: the arcade high-score board is a table of the space's frame data.
 const SCORES = "seamdeck_scores";
 const SCORES_TABLE: FrameTableDecl & { schema: { name: string; col_type?: string; default_val?: string }[] } = {
   key: SCORES,
@@ -61,7 +62,7 @@ const SCORES_TABLE: FrameTableDecl & { schema: { name: string; col_type?: string
     { name: "game_id",   col_type: "text",    nullable: false, default_val: "" },
     { name: "points",    col_type: "integer", nullable: false, default_val: "0" },
     { name: "scored_at", col_type: "integer", nullable: false, default_val: "0" },
-    // the player's public id (rows an older copy wrote hold the client_id itself)
+    // the player's public id
     { name: "client_id", col_type: "text",    nullable: false, default_val: "" },
   ],
 };
@@ -72,7 +73,7 @@ type Score = {
   _created_at?: number; _modified_at?: number;
 };
 type ScoreRow = Score & { id: string };
-const scores = (ctx: Ctx) => ctx.table<Score>(SCORES);
+const scores = (ctx: Ctx) => ctx.shared.table<Score>(SCORES);
 
 // What a fresh row holds before anything is written over it.
 const DEFAULTS: Record<string, unknown> = Object.fromEntries(
@@ -359,7 +360,7 @@ async function handleWrite(ctx: Ctx, op: string, b: any): Promise<MutResult> {
     if (game) {
       const pid = await publicId(client_id);
       const rows = (await scores(ctx).all())
-        .filter((r) => r.game_id === game && (r.client_id === pid || r.client_id === client_id) && r.initials === "???");
+        .filter((r) => r.game_id === game && r.client_id === pid && r.initials === "???");
       for (const row of rows) await keep(ctx, row.id, { initials });
     }
     pushState(ctx);

@@ -2,9 +2,10 @@
 
 Outpost is a lightweight public posting board: editors publish short posts (thought /
 question / status / announcement, with optional media or a poll) and anyone with the
-frame's share link reads them. Posts, media rows and votes are the space's tables
-(`outpost_posts`, `outpost_media`, `outpost_votes`); attached media are files of the space under
-`Outpost/<post_id>/` (the media row's `path`), synced with it and served by the worker to every reader.
+frame's share link reads them. Posts, media rows and votes are tables in the space's frame data folder
+(`_fdata/posts`, `_fdata/post_media`, `_fdata/post_votes`); attached media are files beside them under
+`_fdata/posts/<post_id>/` (the media row's `path`, within `_fdata`), synced with the space and served by the worker to every reader.
+The heading and tagline describe the board, so they are rows of the shared `_fdata/board_settings` beside it, one heading for every outpost session in the space; who may post decides who may act, so it stays a row of the session's own settings table, where no collaborator can widen it at the door.
 
 Ideas, roughly in order of value:
 

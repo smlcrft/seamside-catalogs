@@ -6,7 +6,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
     await sleep(250);
   };
   const row = (n) => `.ch-blocks-editor > .ch-row:nth-child(${n})`;
-  // a setting is the session's own: read it back through the frame
+  // read what the frame says back through the frame
   const viaFrame = async (path, test) => {
     for (let i = 0; i < 60; i++) {
       const v = await keeper.inFrame(`const r = await window.seamside.fetch(${JSON.stringify(path)}); return r.ok ? r.json() : null;`);
@@ -20,7 +20,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   expect(await keeper.inFrame(`return !document.querySelector('form') && !!document.querySelector('.ch-editor[data-form]')`), 'the builder is no form');
   expect(await keeper.inFrame(`return getComputedStyle(document.querySelector('.ch-editor')).display === 'flex' && getComputedStyle(document.querySelector('.ch-admin-header')).display === 'flex'`), 'the page has its style');
   expect(await keeper.inFrame(`return document.querySelector('#ch-title').value === 'Welcome to our community' && document.querySelectorAll('.ch-blocks-editor > .ch-row').length === 1`), 'the keeper opens on the seeded page');
-  const seeded = await untilRows('the seeded block', 'community_home_blocks', (r) => r.find((x) => x.id === 'seed_about'));
+  const seeded = await untilRows('the seeded block', '_fdata/community_blocks', (r) => r.find((x) => x.id === 'seed_about'));
   expect(seeded?.cells.heading === 'About us' && seeded?.cells.width === 320 && seeded?.cells._created_at > 0, 'the seeded block is a row of the space');
   await keeper.shot('1-builder');
 
@@ -42,21 +42,21 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
 
   // a section
   await keeper.click('.ch-add-btns button:nth-child(1)');
-  const section = await untilRows('the section', 'community_home_blocks', (r) => r.find((x) => x.cells.heading === 'New section'));
+  const section = await untilRows('the section', '_fdata/community_blocks', (r) => r.find((x) => x.cells.heading === 'New section'));
   expect(section?.cells.kind === 'section' && section?.cells.format === 'text' && section?.cells.sort_order === 1 && section?.cells.url === '', 'Add section makes a row after the last, from the defaults');
   if (!await keeper.until('the section to list', `document.querySelectorAll('.ch-blocks-editor > .ch-row').length === 2`)) return;
   await keeper.fill(`${row(2)} .ch-row-head input`, 'Meetings');
   await enter(keeper);
   await keeper.fill(`${row(2)} textarea`, 'First Tuesday.');
   await keeper.click('.ch-admin-header h1');
-  expect(await untilRows('the section as written', 'community_home_blocks', (r) => r.find((x) => x.id === section?.id && x.cells.heading === 'Meetings' && x.cells.body === 'First Tuesday.' && x.cells.kind === 'section' && x.cells._created_at === section.cells._created_at)), 'a heading and a body land over the row as it was');
+  expect(await untilRows('the section as written', '_fdata/community_blocks', (r) => r.find((x) => x.id === section?.id && x.cells.heading === 'Meetings' && x.cells.body === 'First Tuesday.' && x.cells.kind === 'section' && x.cells._created_at === section.cells._created_at)), 'a heading and a body land over the row as it was');
   await keeper.click(`${row(2)} .ch-fmt:nth-child(2)`);
-  expect(await untilRows('the format', 'community_home_blocks', (r) => r.find((x) => x.id === section?.id && x.cells.format === 'html' && x.cells.body === 'First Tuesday.')), 'HTML chosen is kept');
+  expect(await untilRows('the format', '_fdata/community_blocks', (r) => r.find((x) => x.id === section?.id && x.cells.format === 'html' && x.cells.body === 'First Tuesday.')), 'HTML chosen is kept');
   expect(await keeper.until('the toggle to follow', `document.querySelector(${JSON.stringify(`${row(2)} .ch-fmt.active`)})?.textContent.trim() === 'HTML' && !!document.querySelector(${JSON.stringify(`${row(2)} textarea.ch-code`)})`), 'and the row shows it');
 
   // a link
   await keeper.click('.ch-add-btns button:nth-child(2)');
-  const link = await untilRows('the link', 'community_home_blocks', (r) => r.find((x) => x.cells.kind === 'link'));
+  const link = await untilRows('the link', '_fdata/community_blocks', (r) => r.find((x) => x.cells.kind === 'link'));
   expect(link?.cells.label === 'New link' && link?.cells.url === 'https://example.com' && link?.cells.sort_order === 2, 'Add link makes a link row');
   if (!await keeper.until('the link to list', `!!document.querySelector('.ch-link-row input[type="url"]')`)) return;
   await keeper.fill('.ch-link-row input[type="text"]', 'Minutes');
@@ -64,23 +64,23 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.fill('.ch-link-row input[type="url"]', 'not a link');
   await enter(keeper);
   await sleep(500);
-  expect((await rows('community_home_blocks')).find((x) => x.id === link?.id)?.cells.url === 'https://example.com', 'Enter on an address that is not one keeps nothing');
+  expect((await rows('_fdata/community_blocks')).find((x) => x.id === link?.id)?.cells.url === 'https://example.com', 'Enter on an address that is not one keeps nothing');
   await keeper.fill('.ch-link-row input[type="url"]', 'https://example.com/minutes');
   await enter(keeper);
-  expect(await untilRows('the link as written', 'community_home_blocks', (r) => r.find((x) => x.id === link?.id && x.cells.label === 'Minutes' && x.cells.url === 'https://example.com/minutes')), 'a label and an address are kept');
+  expect(await untilRows('the link as written', '_fdata/community_blocks', (r) => r.find((x) => x.id === link?.id && x.cells.label === 'Minutes' && x.cells.url === 'https://example.com/minutes')), 'a label and an address are kept');
   await keeper.fill('.ch-link-row input[type="url"]', 'ftp://example.com/minutes');
   await enter(keeper);
   expect(await keeper.until('the toast', `/invalid url/.test(document.querySelector('.ch-toast')?.textContent ?? '')`, 12), 'an address the worker refuses is said');
-  expect((await rows('community_home_blocks')).find((x) => x.id === link?.id)?.cells.url === 'https://example.com/minutes', 'and not kept');
+  expect((await rows('_fdata/community_blocks')).find((x) => x.id === link?.id)?.cells.url === 'https://example.com/minutes', 'and not kept');
 
   // a public frame
   await keeper.click('.ch-add-btns button:nth-child(3)');
-  const pub = await untilRows('the public frame', 'community_home_blocks', (r) => r.find((x) => x.cells.kind === 'pub_frame'));
+  const pub = await untilRows('the public frame', '_fdata/community_blocks', (r) => r.find((x) => x.cells.kind === 'pub_frame'));
   expect(pub?.cells.url === 'https://example.com' && pub?.cells.width === 320 && pub?.cells.sort_order === 3, 'Add public frame makes its row');
   if (!await keeper.until('the public frame to list', `!!document.querySelector('.ch-pubframe-row')`)) return;
   await keeper.fill('.ch-pubframe-row .ch-row-head input', 'Sign up');
   await enter(keeper);
-  expect(await untilRows('its label', 'community_home_blocks', (r) => r.find((x) => x.id === pub?.id && x.cells.heading === 'Sign up')), 'its label is kept');
+  expect(await untilRows('its label', '_fdata/community_blocks', (r) => r.find((x) => x.id === pub?.id && x.cells.heading === 'Sign up')), 'its label is kept');
   await keeper.shot('3-builder-filled');
 
   // what visitors see
@@ -96,7 +96,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
 
   // taking a block out
   await keeper.click(`${row(1)} button[title="Remove section"]`);
-  expect(await untilRows('the seeded block to go', 'community_home_blocks', (r) => !r.find((x) => x.id === 'seed_about') && r.length === 3), 'Remove takes the row out');
+  expect(await untilRows('the seeded block to go', '_fdata/community_blocks', (r) => !r.find((x) => x.id === 'seed_about') && r.length === 3), 'Remove takes the row out');
   expect(await keeper.until('the list to follow', `document.querySelectorAll('.ch-blocks-editor > .ch-row').length === 3`), 'and the builder shows it');
   expect(await visitor.until('the page to follow', `document.querySelectorAll('.ch-blocks > *').length === 3 && !/About us/.test(document.body.innerText)`), "and the stranger's page");
 

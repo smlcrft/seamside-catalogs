@@ -1,6 +1,7 @@
 // ----------------------------------------------------------------------------------------
 // Market Weather — a turnout forecaster for outdoor commerce. Each session's location and
-// events are its own `__fc_settings` row `prefs`, so two markets in one space keep their own.
+// events are the `prefs` row of its own settings table (`ctx.own.table("settings")`), which
+// only this worker reads, so two markets in one space keep their own.
 // Open-Meteo is hit at most once every 15 minutes per location, shared by every space
 // pointing at the same place; `start` keeps each session's forecast fresh on that clock
 // with nobody looking at the page.
@@ -34,7 +35,7 @@
 import type { Ctx } from "@frame-core";
 import { sanitizeText } from "@frame-core";
 
-// ----- Per-session preferences (the session's `__fc_settings` row `prefs`) ---------------
+// ----- Per-session preferences (the `prefs` row of the session's own settings) ----------
 // A WeeklyEvent is a recurring window (one day-of-week + a start→end time) for which
 // View A computes turnout stats whenever the next occurrence falls inside the 72-hour
 // forecast horizon. Names are user-given (e.g., "Baking Day").
@@ -71,25 +72,18 @@ function sanitizeEvent(v: unknown): WeeklyEvent | null {
   return { id, name, day_of_week, start_hh, start_mm, end_hh, end_mm };
 }
 
-// The prefs are the `__fc_settings` row `prefs`, JSON under `v`: no wire serves it. An older
-// copy kept them in the session's `prefs` key, which anyone reaching the frame reads at the
-// door; a read that finds no row moves that key into it and deletes the key.
-const SETTINGS = "__fc_settings";
+// The prefs are the settings row `prefs`, JSON under `v`: no wire serves it.
+const settings = (ctx: Ctx) => ctx.own.table("settings");
 
 async function keepPrefs(ctx: Ctx, v: string): Promise<void> {
-  const was = await ctx.table(SETTINGS).get("prefs");
+  const was = await settings(ctx).get("prefs");
   const now = Date.now();
-  await ctx.table(SETTINGS).upsert({ ...(was ?? { _created_at: now }), v, id: "prefs", _modified_at: now });
+  await settings(ctx).upsert({ ...(was ?? { _created_at: now }), v, id: "prefs", _modified_at: now });
 }
 
 async function storedPrefs(ctx: Ctx): Promise<string> {
-  const row = await ctx.table(SETTINGS).get("prefs");
-  if (row) return String(row.v ?? "");
-  const old = await ctx.kv.get("prefs");
-  if (old?.value == null) return "";
-  await keepPrefs(ctx, old.value);
-  await ctx.kv.del("prefs");
-  return old.value;
+  const row = await settings(ctx).get("prefs");
+  return row ? String(row.v ?? "") : "";
 }
 
 async function getPrefs(ctx: Ctx): Promise<Prefs> {

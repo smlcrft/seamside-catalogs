@@ -61,7 +61,7 @@ The backend re-checks the mime, byte size, and a magic-byte signature before wri
 the row *before* the file so a failed byte-write can be undone rather than stranding a row that
 points at nothing.
 
-**Image storage.** Rows are `picture_frame_photos.table.jsonl` at the space's root; each photo is a file of the space at `Picture Frame/<photo_id>/<name>` (the row's `path`, synced with the space) with its grid thumbnail beside it (`thumbnail.jpg|png`, the row's `thumb_path`). Both are served with a long `immutable` cache header — a photo id
+**Image storage.** Rows are `photos.table.jsonl` in the space's frame data folder (`_fdata/`), where any frame of the space may read them; each photo is a file beside it at `_fdata/photos/<photo_id>/<name>` (the row's `path`, written within `_fdata`, synced with the space) with its grid thumbnail beside it (`thumbnail.jpg|png`, the row's `thumb_path`). Both are served with a long `immutable` cache header — a photo id
 is never reused and a photo's bytes never change — and the page asks for each photo once per visit, which is what keeps a looping slideshow from
 re-fetching. A missing thumbnail falls back to the full image, so a failed thumb
 write degrades quietly rather than leaving a hole in the grid. Deleting a photo removes the row

@@ -6,7 +6,7 @@
 //                                           space editors set it. The page reads no table:
 //                                           the week comes from GET /api/list, and every
 //                                           write is a route here, decided on ctx.peer.
-//   data_storage:   the space's table   — `class_schedule.table.jsonl` at the space's root,
+//   data_storage:   the space's table   — `_fdata/class_schedule.table.jsonl`, frame data,
 //                                           synced with it; no contract (docs/schema-contracts.md).
 //   view_realtime:  view-collaborative    — every change pushes `{ class_schedule: "classes" }`,
 //                                           which says what to read again, never what it holds.
@@ -42,7 +42,7 @@ declareTables([
 
 type Row = Record<string, unknown> & { id: string };
 
-const classes = (ctx: Ctx) => ctx.table<Record<string, unknown>>(TABLE);
+const classes = (ctx: Ctx) => ctx.shared.table<Record<string, unknown>>(TABLE);
 
 const DEFAULTS: Record<string, unknown> = Object.fromEntries(
   CLASSES_SCHEMA.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),

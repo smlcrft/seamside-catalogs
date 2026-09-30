@@ -15,6 +15,7 @@
     { "why": "a collaborator plays", "as": "collaborator", "do": "GET {frame}/index.html", "status": 200 },
     { "why": "and the server half keeps nothing for them either", "as": "collaborator", "do": "POST {frame}/score", "body": { "score": 5 }, "status": 405 },
     { "why": "the owner plays", "as": "owner", "do": "GET {frame}/index.css", "status": 200 },
-    { "why": "and nothing is kept in the session's keys", "as": "collaborator", "at": "space", "do": "KV.GET asciiRunnerHighScore f:{id}", "lacks": ["999"] }
+    { "why": "and a page reaches no key of the session's own, a member's included: the door refuses it", "as": "collaborator", "at": "space", "do": "KV.GET asciiRunnerHighScore f:{id}", "status": 403, "lacks": ["999"] },
+    { "why": "nor takes a member's write to one", "as": "collaborator", "at": "space", "do": "KV.PUT asciiRunnerHighScore f:{id}", "body": "999", "status": 403 }
   ]
 }

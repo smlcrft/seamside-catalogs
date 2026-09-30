@@ -6,8 +6,8 @@
 export default async ({ keeper, visitor: open, expect, sleep }) => {
   const text = (sel) => `(document.querySelector('${sel}')?.textContent ?? '').trim()`;
   const sandboxed = !!process.env.CATALOG_CHECK_SANDBOX;
-  // What the door keeps for this session, read as the keeper: the daemon's copy, not the page's.
-  const kept = async () => JSON.parse(await keeper.inFrame(`return (await window.seamside.kv.get('playstate'))?.value ?? 'null';`) ?? 'null');
+  // What the worker keeps for this session, read through its own route: the daemon's copy, not the page's.
+  const kept = async () => JSON.parse(await keeper.inFrame(`const r = await window.seamside.fetch('/api/state'); return JSON.stringify((await r.json()).playstate ?? null);`) ?? 'null');
   const untilKept = async (what, test) => {
     for (let i = 0; i < 40; i++) { const v = await kept(); if (v && test(v)) return v; await sleep(250); }
     expect(false, `the session kept ${what}`);
@@ -87,7 +87,7 @@ export default async ({ keeper, visitor: open, expect, sleep }) => {
   expect(await keeper.inFrame(`return ${text('#sr-vol-readout')} === 'muted' && document.getElementById('sr-volume').classList.contains('muted')`) && (await audio(keeper)).muted, 'mute silences this device');
   await sleep(900);
   const prefs = JSON.parse(await keeper.inFrame(`return await window.seamside.prefs.get('prefs');`) ?? 'null');
-  expect(prefs?.volume === 10 && prefs?.muted === true, 'volume and mute are kept as this browser\'s own, under the key installed copies used');
+  expect(prefs?.volume === 10 && prefs?.muted === true, 'volume and mute are kept as this browser\'s own');
   expect((await kept())?.station_id === 'fip' && (await kept())?.playing === true, 'and nothing of them reaches the shared state');
   await keeper.shot('5-muted');
   await keeper.click('#sr-mute');

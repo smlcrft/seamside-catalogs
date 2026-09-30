@@ -2,8 +2,8 @@
   "tier": "members",
   "publish": "open",
   "steps": [
-    { "why": "a title an installed copy left behind", "as": "collaborator", "at": "space", "do": "KV.PUT t/__fc_settings/help_desk_title", "body": { "v": "\"Front desk\"", "_created_at": 1, "_modified_at": 1 }, "status": 200 },
-    { "why": "a message an installed copy left behind", "as": "collaborator", "at": "space", "do": "KV.PUT t/help_desk_submissions/old1", "body": { "submitted_at": 5, "email": "old@example.com", "fields_json": "{}", "status": "resolved", "_created_at": 5, "_modified_at": 5 }, "status": 200 },
+    { "why": "a collaborator names the desk", "as": "collaborator", "do": "PUT {api}/admin/title", "body": { "title": "Front desk" }, "status": 200 },
+    { "why": "a message already in the space's frame data", "as": "collaborator", "at": "space", "do": "KV.PUT t/_fdata%2Fhelp_desk_submissions/old1", "body": { "submitted_at": 5, "email": "old@example.com", "fields_json": "{}", "status": "resolved", "_created_at": 5, "_modified_at": 5 }, "status": 200 },
 
     { "why": "the page is served", "do": "GET {frame}/index.html", "status": 200, "has": ["hd-root"] },
     { "why": "and its style", "do": "GET {frame}/index.css", "status": 200 },
@@ -14,13 +14,14 @@
     { "why": "deletes nothing", "do": "DELETE {api}/admin/messages/old1", "status": 403 },
     { "why": "names nothing", "do": "PUT {api}/admin/title", "body": { "title": "Mine" }, "status": 403 },
     { "why": "adds no field", "do": "POST {api}/admin/fields", "body": { "label": "Phone", "type": "text" }, "status": 403 },
-    { "why": "a stranger writes no row at the door", "do": "KV.PUT t/help_desk_submissions/x", "body": { "email": "x" }, "status": 403 },
-    { "why": "and reads no table there", "do": "KV.LIST t/help_desk_submissions/", "lacks": ["old@example.com"] },
+    { "why": "a stranger writes no row at the door", "do": "KV.PUT t/_fdata%2Fhelp_desk_submissions/x", "body": { "email": "x" }, "status": 403 },
+    { "why": "and reads no table there", "do": "KV.LIST t/_fdata%2Fhelp_desk_submissions/", "lacks": ["old@example.com"] },
+    { "why": "nor writes a setting", "do": "KV.PUT t/_fdata%2Fhelp_desk_settings/help_desk_title", "body": { "v": "\"Mine\"" }, "status": 403 },
     { "why": "someone signed in and on no roster is a visitor too", "as": "signed", "do": "GET {api}/admin/messages", "status": 403 },
 
     { "why": "a refused message says why", "do": "POST {api}/submit", "body": { "email": " " }, "status": 400, "is": { "/error": "email must not be empty" } },
     { "why": "a message is taken", "do": "POST {api}/submit", "body": { "email": "pat@example.com", "fields": { "default_message": "The door sticks.", "nope": "dropped" } }, "status": 200, "save": { "new": "/id" } },
-    { "why": "as a row of the space, in the shape installed copies hold", "table": "help_desk_submissions", "has": ["pat@example.com", "\"status\":\"new\"", "{\\\"default_message\\\":\\\"The door sticks.\\\"}", "_created_at", "_modified_at"], "lacks": ["dropped"] },
+    { "why": "as a row of the space's frame data", "table": "_fdata/help_desk_submissions", "has": ["pat@example.com", "\"status\":\"new\"", "{\\\"default_message\\\":\\\"The door sticks.\\\"}", "_created_at", "_modified_at"], "lacks": ["dropped"] },
 
     { "why": "a viewer is a member who may not edit", "as": "viewer", "do": "GET {api}/config", "is": { "/you": { "member": true, "editor": false } } },
     { "why": "a viewer reads the inbox, newest first", "as": "viewer", "do": "GET {api}/admin/messages", "status": 200, "is": { "/submissions/0/email": "pat@example.com", "/submissions/1/email": "old@example.com" } },
@@ -37,6 +38,8 @@
     { "why": "adds a field", "as": "collaborator", "do": "POST {api}/admin/fields", "body": { "label": "Phone", "type": "text", "required": true }, "status": 200, "save": { "phone": "/id" } },
     { "why": "but not one with no label", "as": "collaborator", "do": "POST {api}/admin/fields", "body": { "label": "  ", "type": "text" }, "status": 400 },
     { "why": "names the desk", "as": "collaborator", "do": "PUT {api}/admin/title", "body": { "title": " Help " }, "status": 200 },
+    { "why": "beside the desk's tables, with the marker that seeded the form", "table": "_fdata/help_desk_settings", "has": ["help_desk_title", "\"v\":\"\\\"Help\\\"\"", "help_desk_seeded"] },
+    { "why": "which a collaborator reads at the door, as the space's frame data", "as": "collaborator", "at": "space", "do": "KV.GET t/_fdata%2Fhelp_desk_settings/help_desk_title", "status": 200, "has": ["Help"] },
     { "why": "and a visitor sees both", "do": "GET {api}/config", "is": { "/title": "Help", "/fields/0/label": "Message", "/fields/1/label": "Phone" } },
     { "why": "a required field is required", "do": "POST {api}/submit", "body": { "email": "pat@example.com", "fields": { "default_message": "again" } }, "status": 400, "is": { "/error": "\"Phone\" is required" } },
     { "why": "the status landed over the row, which kept what it held", "as": "viewer", "do": "GET {api}/admin/messages", "is": { "/submissions/0/status": "in_progress", "/submissions/0/email": "pat@example.com", "/submissions/0/fields/default_message": "The door sticks." } },
@@ -45,7 +48,7 @@
     { "why": "the default one too", "as": "collaborator", "do": "DELETE {api}/admin/fields/default_message", "status": 200 },
     { "why": "and is not seeded twice", "do": "GET {api}/config", "is": { "/fields": [] } },
     { "why": "a message goes", "as": "collaborator", "do": "DELETE {api}/admin/messages/{new}", "status": 200 },
-    { "why": "with its notes", "table": "help_desk_notes", "lacks": ["Called back."] },
+    { "why": "with its notes", "table": "_fdata/help_desk_notes", "lacks": ["Called back."] },
     { "why": "and is gone", "as": "collaborator", "do": "GET {api}/admin/messages/{new}/notes", "status": 404 }
   ]
 }

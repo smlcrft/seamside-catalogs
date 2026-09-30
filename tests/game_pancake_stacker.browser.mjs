@@ -31,13 +31,13 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
     return null;
   }
 
-  // a best an installed copy left behind
-  await seed('pancake_scores', 'old_player', { name: 'Ana', score: 2, at: 5, _created_at: 5, _modified_at: 5 });
+  // a best already in the table
+  await seed('_fdata/pancake_scores', 'old_player', { name: 'Ana', score: 2, at: 5, _created_at: 5, _modified_at: 5 });
   await keeper.send('Page.reload');
   keeper.child = null;
   for (let i = 0; i < 60 && !keeper.child; i++) await sleep(250);
   if (!await keeper.until('the griddle', `!!document.getElementById('startBtn') && document.getElementById('best').textContent === '2'`)) return;
-  expect(await keeper.inFrame(`return getComputedStyle(document.querySelector('.board')).display === 'flex' && /Ready the griddle/.test(document.querySelector('.board').textContent)`), "the page has its style, and the best left behind is shown");
+  expect(await keeper.inFrame(`return getComputedStyle(document.querySelector('.board')).display === 'flex' && /Ready the griddle/.test(document.querySelector('.board').textContent)`), "the page has its style, and the best already there is shown");
   await keeper.shot('1-start');
 
   const visitor = await open();
@@ -61,9 +61,9 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   expect(await keeper.until('the new best', `/New best!/.test(document.getElementById('modal').textContent) && /You stacked 3 pancakes\\./.test(document.getElementById('modal').textContent)`), 'the keeper is told it is a new best');
   expect(await keeper.until('the best to follow', `document.getElementById('best').textContent === '3'`), 'and the HUD follows the answer');
   expect(await keeper.until('the holder', `document.querySelector('#modal .holder')?.textContent === 'best held by the owner'`), 'the best is held by the owner');
-  const mine = await untilRows('the score', 'pancake_scores', (r) => r.find((x) => x.id !== 'old_player' && x.cells.score === 3));
-  expect(mine?.id.startsWith('did_dht_') && mine?.cells.name === 'the owner' && mine?.cells.at > 0 && mine?.cells._created_at && mine?.cells._modified_at, "the game is the keeper's row, in the shape installed copies hold");
-  expect((await rows('pancake_scores')).find((x) => x.id === 'old_player')?.cells.score === 2, 'the best left behind is kept as it was');
+  const mine = await untilRows('the score', '_fdata/pancake_scores', (r) => r.find((x) => x.id !== 'old_player' && x.cells.score === 3));
+  expect(mine?.id.startsWith('did_dht_') && mine?.cells.name === 'the owner' && mine?.cells.at > 0 && mine?.cells._created_at && mine?.cells._modified_at, "the game is the keeper's row, in the table's shape");
+  expect((await rows('_fdata/pancake_scores')).find((x) => x.id === 'old_player')?.cells.score === 2, 'the best already there is kept as it was');
   await keeper.shot('3-new-best');
 
   // nobody touches the stranger's page: the push says to read again
@@ -79,7 +79,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, seed, expect, sl
   expect(await visitor.until('their result', `/Stack toppled\\./.test(document.getElementById('modal')?.textContent ?? '') && document.querySelector('#modal .holder')?.textContent === 'best held by the owner'`), 'they are told, and who holds the best');
   await visitor.shot('4-stranger');
   await sleep(500);
-  expect((await rows('pancake_scores')).length === 2, "a stranger's game is not recorded");
+  expect((await rows('_fdata/pancake_scores')).length === 2, "a stranger's game is not recorded");
 
   // play again
   await keeper.click('#again');

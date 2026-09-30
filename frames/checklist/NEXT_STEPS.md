@@ -7,4 +7,4 @@ Where this frame could grow:
 - **Section headers.** A second item `kind` ("task" | "header") to group long lists.
 - **Archive vs delete.** Soft-complete archiving so finished items can be hidden but recovered.
 - **Per-space settings.** A list title and a "let viewers check off, but not add/delete" policy toggle.
-- **Several lists in one space.** Every checklist session in a space shows the one `checklist` table; a `list` column (or a table per list) would let a space hold more than one.
+- **Several lists in one space.** Every checklist session in a space shows the one `_fdata/checklist` table; a `list` column (or a table per list) would let a space hold more than one.

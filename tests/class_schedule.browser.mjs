@@ -44,15 +44,15 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   expect(await keeper.inFrame(`return document.querySelector('.naming-new .days-mini button:nth-child(3)').classList.contains('on') && document.activeElement === document.querySelector('.naming-new input')`), 'Wednesday is ticked and the name keeps the caret');
   await keeper.fill('.naming-new input', 'Maths');
   await keeper.press('Enter');
-  const maths = await untilRows('the two meetings', 'class_schedule', (r) => {
+  const maths = await untilRows('the two meetings', '_fdata/class_schedule', (r) => {
     const m = r.filter((x) => x.cells.title === 'Maths');
     return m.length === 2 ? m : null;
   });
   expect(maths && maths.map((x) => x.cells.day).sort().join() === '0,2' && maths.every((x) => x.cells.start_min === 570 && x.cells.end_min === 630
-    && x.cells.place === '' && x.cells.note === '' && x.cells._created_at && x.cells._modified_at), 'one row per meeting, 9:30 to 10:30, in the shape installed copies hold');
+    && x.cells.place === '' && x.cells.note === '' && x.cells._created_at && x.cells._modified_at), 'one row per meeting, 9:30 to 10:30, in the shape the table holds');
   expect(await keeper.until('both blocks', `document.querySelectorAll('.block').length === 2 && !document.querySelector('.naming-new')`), 'and both meetings are drawn');
   await sleep(300);
-  expect((await rows('class_schedule')).length === 2, 'nothing is written twice');
+  expect((await rows('_fdata/class_schedule')).length === 2, 'nothing is written twice');
   const mon = maths?.find((x) => x.cells.day === 0);
 
   // ----- move Monday's meeting an hour later, onto Tuesday
@@ -60,7 +60,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   let at = await pick(keeper, 'Maths', 0);
   const tueX = await colX(keeper, 1);
   await drag(keeper, { x: at.x, y: at.y }, { x: tueX, y: at.y + px });
-  const moved = await untilRows('the move', 'class_schedule', (r) => r.find((x) => x.id === mon?.id && x.cells.day === 1));
+  const moved = await untilRows('the move', '_fdata/class_schedule', (r) => r.find((x) => x.id === mon?.id && x.cells.day === 1));
   expect(moved?.cells.start_min === 630 && moved?.cells.end_min === 690 && moved?.cells._created_at === mon?.cells._created_at, 'a dragged block moves its meeting to the day and hour it was let go on, the row kept');
   expect(await keeper.until('it to draw on Tuesday', `!!document.querySelector('.col[data-day="1"] .block') && !document.querySelector('.col[data-day="0"] .block')`), 'and is drawn there');
 
@@ -68,7 +68,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   px = await hourPx(keeper);
   at = await pick(keeper, 'Maths', 1);
   await drag(keeper, { x: at.x, y: at.bottom - 3 }, { x: at.x, y: at.bottom - 3 + px / 2 });
-  expect(await untilRows('the stretch', 'class_schedule', (r) => r.find((x) => x.id === mon?.id && x.cells.start_min === 630 && x.cells.end_min === 720)), 'the foot of a block changes how long it runs');
+  expect(await untilRows('the stretch', '_fdata/class_schedule', (r) => r.find((x) => x.id === mon?.id && x.cells.start_min === 630 && x.cells.end_min === 720)), 'the foot of a block changes how long it runs');
 
   // ----- tap to rename; the class is renamed, and a Thursday meeting is ticked on
   at = await pick(keeper, 'Maths', 1);
@@ -79,7 +79,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.shot('3-renaming');
   // committed by leaving the box: Enter there opens the box again (reported, not this move's)
   await keeper.click('.header h1');
-  const calc = await untilRows('the rename', 'class_schedule', (r) => {
+  const calc = await untilRows('the rename', '_fdata/class_schedule', (r) => {
     const c = r.filter((x) => x.cells.title === 'Calculus');
     return c.length === 3 && !r.some((x) => x.cells.title === 'Maths') ? c : null;
   });
@@ -98,7 +98,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.fill('.sheet input[placeholder="Room 2.04"]', 'Room 9');
   await keeper.shot('5-sheet');
   await keeper.click('.sheet .btn-primary');
-  const wed = await untilRows('the place', 'class_schedule', (r) => r.find((x) => x.cells.day === 2 && x.cells.place === 'Room 9'));
+  const wed = await untilRows('the place', '_fdata/class_schedule', (r) => r.find((x) => x.cells.day === 2 && x.cells.place === 'Room 9'));
   expect(wed?.cells.start_min === 570 && wed?.cells.end_min === 630 && wed?.cells.title === 'Calculus', 'save writes the place and keeps the times the sheet showed');
   expect(await keeper.until('the sheet to close', `!document.querySelector('.sheet')`), 'and the sheet closes');
 
@@ -112,14 +112,14 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   if (!await keeper.until('the question', `document.querySelectorAll('.framelib-choose-opt').length === 2`)) return;
   await keeper.shot('6-choose');
   await keeper.click('.framelib-choose-opt');
-  expect(await untilRows('the one removed', 'class_schedule', (r) => r.length === 2 && !r.some((x) => x.id === thu?.id)), 'Just this meeting removes that one meeting');
+  expect(await untilRows('the one removed', '_fdata/class_schedule', (r) => r.length === 2 && !r.some((x) => x.id === thu?.id)), 'Just this meeting removes that one meeting');
 
   // ----- Add: today, named in place
   await keeper.click('.toolbar .iconbtn');
   if (!await keeper.until('the new block', `document.activeElement === document.querySelector('.naming-new input')`)) return;
   await keeper.fill('.naming-new input', 'Study');
   await keeper.press('Enter');
-  const study = await untilRows('the class added', 'class_schedule', (r) => r.find((x) => x.cells.title === 'Study'));
+  const study = await untilRows('the class added', '_fdata/class_schedule', (r) => r.find((x) => x.cells.title === 'Study'));
   expect(study?.cells.day === today && study?.cells.end_min - study?.cells.start_min === 60, 'Add makes an hour today');
   await keeper.click('.seg button:nth-child(1)');
   expect(await keeper.until('today', `[...document.querySelectorAll('.agenda .ag .nm')].some((n) => n.textContent === 'Study') && !!document.querySelector('.countdown .big')`), 'and today lists it under the countdown');
@@ -137,7 +137,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await drag(visitor, vat, { x: vat.x, y: vat.y + 60 });
   await drag(visitor, vat, vat);
   expect(await visitor.inFrame(`return !document.querySelector('.block.renaming') && !document.querySelector('.naming-new')`), "a stranger's drag and tap open nothing");
-  expect((await rows('class_schedule')).find((x) => x.id === mon?.id)?.cells.start_min === 630, 'and change nothing');
+  expect((await rows('_fdata/class_schedule')).find((x) => x.id === mon?.id)?.cells.start_min === 630, 'and change nothing');
 
   // ----- remove every meeting of a class; the stranger's page is told to read again
   await keeper.click('.seg button:nth-child(2)');
@@ -150,7 +150,7 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.click('.sheet-foot .btn-quiet');
   await keeper.until('the question', `document.querySelectorAll('.framelib-choose-opt').length === 2`);
   await keeper.click('.framelib-choose-opt:nth-child(2)');
-  expect(await untilRows('the class removed', 'class_schedule', (r) => r.length === 1 && r[0].cells.title === 'Study'), 'Every meeting removes the class');
+  expect(await untilRows('the class removed', '_fdata/class_schedule', (r) => r.length === 1 && r[0].cells.title === 'Study'), 'Every meeting removes the class');
   expect(await visitor.until('the stranger to follow', `document.querySelectorAll('.block').length === 1`), "and the stranger's open page follows");
 
   // ----- turning off every day of a class asks, then removes it
@@ -161,9 +161,9 @@ export default async ({ keeper, visitor: open, rows, untilRows, expect, sleep })
   await keeper.click('.header h1');
   if (!await keeper.until('the question', `!!document.querySelector('.framelib-btn-primary')`)) return;
   await sleep(300);
-  expect((await rows('class_schedule')).length === 1, 'nothing goes before the answer');
+  expect((await rows('_fdata/class_schedule')).length === 1, 'nothing goes before the answer');
   await keeper.click('.framelib-btn-primary');
-  expect(await untilRows('the last removed', 'class_schedule', (r) => r.length === 0), 'Remove takes the class out');
+  expect(await untilRows('the last removed', '_fdata/class_schedule', (r) => r.length === 0), 'Remove takes the class out');
   await keeper.click('.seg button:nth-child(1)');
   expect(await keeper.until('the empty day', says('/Nothing here yet/')), 'and the keeper is back to an empty timetable');
   expect(await visitor.until('the stranger to see it empty', `document.querySelectorAll('.block').length === 0`), 'as is the stranger');

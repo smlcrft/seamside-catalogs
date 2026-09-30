@@ -12,8 +12,10 @@
 //   - Everyone else who reaches the frame — viewers while the toggle is off, and anyone
 //     the frame is published to — follows along read-only. The page reads no table: what
 //     it shows is what GET /api/state hands whoever is asking.
-//   - Messages, items and votes are the space's tables (roundtable_messages,
-//     roundtable_items, roundtable_votes), synced with it; the prefs are settings rows.
+//   - Messages, items and votes are tables in the space's frame data folder
+//     (_fdata/roundtable_messages, _fdata/roundtable_items, _fdata/roundtable_votes),
+//     synced with it, and so are the title and list labels (_fdata/roundtable_settings);
+//     the viewers toggle is a row of this session's own settings, which no door writes.
 //
 // Realtime: a push says what changed and never what it holds. Every open page of the
 // frame hears it, a stranger's included, and each reads again as whoever it is.
@@ -22,10 +24,12 @@ import type { Ctx, FrameTableDecl } from "@frame-core";
 import { declareTables, sanitizeText } from "@frame-core";
 
 // ----------------------------------------------------------------------------------------
-// PREFS — owner-editable, rows of a settings store every frame in the space shares, so
-// each key carries this frame's name. Each value is JSON under `v`.
+// PREFS — owner-editable, one row per key, each value JSON under `v`. The title and list
+// labels describe the space's lists, so they are the space's, beside them; who may take part
+// is decided here alone, so it stays in this session's own settings, which no door writes.
 // ----------------------------------------------------------------------------------------
-const SETTINGS = "__fc_settings";
+const LIST_SETTINGS = "roundtable_settings";
+const SETTINGS = "settings";
 
 type Prefs = { title: string; positive_label: string; negative_label: string; public_to_space_viewers: boolean };
 const DEFAULT_PREFS: Prefs = {
@@ -36,8 +40,8 @@ const DEFAULT_PREFS: Prefs = {
 };
 const LABEL_KEYS = ["title", "positive_label", "negative_label"] as const;
 
-async function setting<T>(ctx: Ctx, key: string): Promise<T | null> {
-  const row = await rows(ctx, SETTINGS).get(key);
+async function setting<T>(ctx: Ctx, table: string, key: string): Promise<T | null> {
+  const row = await rows(ctx, table).get(key);
   if (row?.v == null) return null;
   try {
     return JSON.parse(String(row.v)) as T;
@@ -46,17 +50,18 @@ async function setting<T>(ctx: Ctx, key: string): Promise<T | null> {
   }
 }
 
-const setSetting = (ctx: Ctx, key: string, value: unknown) => keep(ctx, SETTINGS, key, { v: JSON.stringify(value) });
+const setSetting = (ctx: Ctx, table: string, key: string, value: unknown) =>
+  keep(ctx, table, key, { v: JSON.stringify(value) });
 
 async function getPrefs(ctx: Ctx): Promise<Prefs> {
   const out = { ...DEFAULT_PREFS };
-  for (const k of LABEL_KEYS) out[k] = (await setting<string>(ctx, `roundtable_${k}`)) || DEFAULT_PREFS[k];
-  out.public_to_space_viewers = (await setting<boolean>(ctx, "roundtable_public_to_space_viewers")) === true;
+  for (const k of LABEL_KEYS) out[k] = (await setting<string>(ctx, LIST_SETTINGS, `roundtable_${k}`)) || DEFAULT_PREFS[k];
+  out.public_to_space_viewers = (await setting<boolean>(ctx, SETTINGS, "roundtable_public_to_space_viewers")) === true;
   return out;
 }
 async function setPrefs(ctx: Ctx, next: Prefs): Promise<void> {
-  for (const k of LABEL_KEYS) await setSetting(ctx, `roundtable_${k}`, next[k]);
-  await setSetting(ctx, "roundtable_public_to_space_viewers", next.public_to_space_viewers);
+  for (const k of LABEL_KEYS) await setSetting(ctx, LIST_SETTINGS, `roundtable_${k}`, next[k]);
+  await setSetting(ctx, SETTINGS, "roundtable_public_to_space_viewers", next.public_to_space_viewers);
 }
 
 function canParticipate(peer: Ctx["peer"], prefs: Prefs): boolean {
@@ -64,7 +69,7 @@ function canParticipate(peer: Ctx["peer"], prefs: Prefs): boolean {
 }
 
 // ----------------------------------------------------------------------------------------
-// THE SPACE'S TABLES — messages, list items, item votes; named for this frame
+// THE SPACE'S TABLES — messages, list items, item votes; in its frame data folder
 // ----------------------------------------------------------------------------------------
 const MESSAGES = "roundtable_messages";
 const ITEMS = "roundtable_items";
@@ -110,7 +115,10 @@ declareTables(TABLES);
 
 type Row = Record<string, unknown> & { id: string };
 
-const rows = (ctx: Ctx, name: string) => ctx.table<Record<string, unknown>>(name);
+// The settings are this session's own table, which only this worker reaches; every other
+// table is the space's frame data (`_fdata/`), shared with every frame and member.
+const rows = (ctx: Ctx, name: string) =>
+  name === SETTINGS ? ctx.own.table<Record<string, unknown>>(SETTINGS) : ctx.shared.table<Record<string, unknown>>(name);
 
 /** What a new row of a table starts from: the defaults its schema declares. */
 function defaults(name: string): Record<string, unknown> {

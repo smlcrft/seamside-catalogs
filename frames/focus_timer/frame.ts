@@ -8,8 +8,9 @@
 //                                           state, not a collection of rows: there is
 //                                           nothing to list, nothing another frame would
 //                                           want to share. It is this session's own key
-//                                           (`timer` in ctx.kv), so two timers in one
-//                                           space run apart and it travels with the space.
+//                                           (`timer` in ctx.kv), which only this worker
+//                                           reads, so two timers in one space run apart;
+//                                           every page reads it through /api/state.
 //   view_realtime:  view-collaborative    — every change pushes `{ focus_timer: "timer" }` so
 //                                           all viewers re-read at once.
 //   settings_scope: settings-per-session  — one timer per session of the frame.

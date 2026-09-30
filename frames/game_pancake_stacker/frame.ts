@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------------------
-// Pancake Stacker — solo arcade game. Scores are the space's `pancake_scores` table: one
+// Pancake Stacker — solo arcade game. Scores are the space's `_fdata/pancake_scores` table: one
 // row per player holding their best, so every session of the frame in the space shares
 // one board and the space's best is the highest row. Everyone plays their own game; an
 // editor's finished game is recorded here, and a new best tells every open page to read
@@ -25,12 +25,12 @@ const SCHEMA = [{
 }];
 declareTables(SCHEMA);
 
-/** A new row starts from the schema's defaults, as installed copies' rows did. */
+/** A new row starts from the schema's defaults. */
 const DEFAULTS: Record<string, unknown> = Object.fromEntries(
   SCHEMA[0].schema.map((c) => [c.name, c.col_type === "integer" ? Number(c.default_val) : c.default_val]),
 );
 
-const scores = (ctx: Ctx) => ctx.table<Record<string, unknown>>(SCORES);
+const scores = (ctx: Ctx) => ctx.shared.table<Record<string, unknown>>(SCORES);
 
 /** Write a row over what it held, stamped when it was made and when it changed. */
 async function keep(ctx: Ctx, id: string, values: Record<string, unknown>): Promise<void> {
