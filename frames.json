@@ -175,7 +175,7 @@
       "name": "Community Home",
       "description": "A simple home page for a community. Editors set the title and tagline and add sections (plain text or HTML), links and links to public frames, in any order, and preview what visitors see; everyone else \u2014 viewers, and anyone the frame is published to \u2014 sees the page, updated live. Links open in the visitor's own browser tab. The page's blocks are the community_blocks table in the space's frame data folder; its title and tagline are the frame's own settings.",
       "icon": "ph:browsers",
-      "modified_at": "2026-09-30T21:08:28Z",
+      "modified_at": "2026-10-01T11:16:07Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 0,
@@ -183,7 +183,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/community_home.tar.gz",
-      "package_sha256": "c0b359396a0760b8444141760bf9566541451b332ee9eb4a78fd6f39747cd7e3",
+      "package_sha256": "bd4c588e9e4247d1feac4a8b186723fb9fe24903e2920cfd406cf78ebf0edc73",
       "color": "c1",
       "app_version_min": "1.0.12",
       "tags": [

@@ -20,14 +20,14 @@
     { "why": "adds no block", "as": "viewer", "do": "POST {api}/admin/blocks", "body": { "kind": "link", "label": "Mine", "url": "https://example.com" }, "status": 403 },
     { "why": "changes none", "as": "viewer", "do": "PUT {api}/admin/blocks/seed_about", "body": { "heading": "Mine" }, "status": 403 },
     { "why": "removes none", "as": "viewer", "do": "DELETE {api}/admin/blocks/seed_about", "status": 403 },
-    { "why": "and none of it seeded anything", "table": "_fdata/community_setup", "lacks": ["seeded"] },
+    { "why": "and none of it seeded anything", "table": "_settings", "lacks": ["community_home_seeded"] },
     { "why": "nor wrote a setting", "table": "_settings", "lacks": ["Mine"] },
     { "why": "nor does a stranger write a setting at the door", "do": "KV.PUT t/_settings/community_home_title f:{id}", "body": { "v": "\"Mine\"" }, "status": 403 },
     { "why": "nor a viewer", "as": "viewer", "at": "space", "do": "KV.PUT t/_settings/community_home_title f:{id}", "body": { "v": "\"Mine\"" }, "status": 403 },
 
     { "why": "the first editor to open it seeds the page", "as": "collaborator", "do": "GET {api}/page", "status": 200, "is": { "/you": { "member": true, "editor": true }, "/title": "Welcome to our community", "/tagline": "A place for updates, links, and news.", "/blocks/0/id": "seed_about", "/blocks/0/width": 320, "/blocks/0/label": "" } },
     { "why": "as a row of the space's frame data, from the schema's defaults and stamped", "table": "_fdata/community_blocks", "has": ["\"kind\":\"section\"", "\"heading\":\"About us\"", "\"format\":\"text\"", "\"label\":\"\"", "\"url\":\"\"", "\"width\":320", "\"height\":320", "\"sort_order\":0", "_created_at", "_modified_at"] },
-    { "why": "and the seeded marker beside the blocks", "table": "_fdata/community_setup", "has": ["seeded", "\"v\":\"true\"", "_created_at", "_modified_at"] },
+    { "why": "and the seeded marker is the session's own setting", "table": "_settings", "has": ["community_home_seeded", "\"v\":\"true\"", "_created_at", "_modified_at"] },
     { "why": "the default title and tagline are read, never written", "table": "_settings", "lacks": ["Welcome to our community", "A place for updates"] },
 
     { "why": "a title named through the frame", "as": "collaborator", "do": "PUT {api}/admin/page", "body": { "title": "Old town" }, "status": 200 },

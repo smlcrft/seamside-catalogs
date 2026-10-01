@@ -7,8 +7,8 @@
 //     with a "preview" toggle that renders the same public view.
 //
 // The page's blocks are the table community_blocks in the space's frame data folder
-// (_fdata/), so each space has one page, synced with it; the marker that it was seeded is
-// _fdata/community_setup beside it. Its title and tagline are the session's own settings
+// (_fdata/), so each space has one page, synced with it. Its title and tagline, and the
+// marker that this session seeded the default block, are the session's own settings
 // (ctx.own.table("settings")), read with the default where none was set. A visitor reads no
 // table: the page asks GET /api/page, and every write route decides on ctx.peer.
 //
@@ -22,7 +22,6 @@ import type { Ctx } from "@frame-core";
 // own settings.
 // ----------------------------------------------------------------------------------------
 const BLOCKS = "community_blocks";
-const SETUP = "community_setup";
 const SETTINGS = "settings";
 
 // Unified page-content table. Lets admins mix sections, links, and pub_frame embeds
@@ -106,9 +105,9 @@ function clampStr(v: unknown, max: number): string {
 
 // Page-level settings (title / tagline / updated_at) are rows of the session's own settings
 // table, each value JSON under `v`, read as SEED's where no row is. The default block is
-// seeded once, by the first editor to open the page, and the marker is row `seeded` of the
-// space's community_setup table, so no other session or device seeds it again after an editor
-// removed it; until then a reader is shown the same default, unwritten.
+// seeded once per session, by the first editor to open the page there, and the marker is the
+// session's own `seeded` setting, so an editor's removal holds for that session; until then
+// a reader is shown the same default, unwritten.
 const SEED_BLOCK_ROW = "seed_about"; // fixed id so a concurrent first-load can't duplicate it
 const K = (k: string) => `community_home_${k}`;
 const SEED = {
@@ -133,11 +132,11 @@ async function setting<T>(ctx: Ctx, key: string): Promise<T | null> {
 
 const setSetting = (ctx: Ctx, key: string, value: unknown) => keep(ctx, SETTINGS, K(key), { v: JSON.stringify(value) });
 
-const seeded = async (ctx: Ctx) => (await rows(ctx, SETUP).get("seeded"))?.v === "true";
+const seeded = async (ctx: Ctx) => (await setting<boolean>(ctx, "seeded")) === true;
 
 async function ensurePage(ctx: Ctx): Promise<void> {
   if (await seeded(ctx)) return;
-  await keep(ctx, SETUP, "seeded", { v: "true" });
+  await setSetting(ctx, "seeded", true);
   await keepBlock(ctx, SEED_BLOCK_ROW, SEED.block);
 }
 
