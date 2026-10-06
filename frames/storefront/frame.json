@@ -1,0 +1,29 @@
+{
+  "name": "Storefront",
+  "frame_type": "Tandem",
+  "description": "A small shop: a menu you set, a page where anyone chooses and pays, and the orders as they come in. Payments go to your own Stripe, Square or PayPal account on that processor's page, or to your Venmo, Cash App or Zelle by hand. Publish the frame and share its link. Its menu, orders and pictures are kept in the space's frame data, where another frame can use them too.",
+  "tags": [
+    "smallbiz",
+    "demo"
+  ],
+  "icon": "ph:storefront",
+  "color": "c4",
+  "licensed_under_cc0": true,
+  "app_version_min": "1.0.12",
+  "created_at": "2026-09-29T00:00:00Z",
+  "modified_at": "2026-10-01T17:21:26Z",
+  "default_width_px": 760,
+  "default_height_px": 720,
+  "permissions_backend": {
+    "net": [
+      "api.stripe.com",
+      "connect.squareup.com",
+      "api-m.paypal.com"
+    ],
+    "keys": {
+      "stripe": "takes payments through your Stripe account, when you accept Stripe",
+      "square": "takes payments through your Square account, when you accept Square",
+      "paypal": "takes payments through your PayPal account, when you accept PayPal"
+    }
+  }
+}

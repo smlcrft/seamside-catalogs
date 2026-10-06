@@ -1,0 +1,117 @@
+/* Storefront. Register: consumer for the shop a buyer sees, instrument for
+   the three pages a member works in. Tokens only; numbers from PRECISION. */
+
+body { margin: 0; background: var(--os-bg); color: var(--os-text); font-size: var(--os-fs-base); line-height: 1.5; }
+main { max-width: 44rem; margin: 0 auto; padding: var(--os-sp-3xl) var(--os-sp-xl) var(--os-sp-3xl); }
+.quiet { color: var(--os-text-muted); }
+.err { color: var(--os-cError); font-size: var(--os-fs-sm); margin: var(--os-sp-sm) 0 0; }
+.tnum { font-feature-settings: 'tnum' 1; font-variant-numeric: tabular-nums; }
+code.order { font-family: var(--os-font-mono); font-size: var(--os-fs-md); letter-spacing: 0.04em; background: none; padding: 0; }
+
+/* the head: the shop's name is the page's one serif line */
+header h1 { font-family: var(--os-font-serif, var(--os-font-sans)); font-size: var(--os-fs-2xl); font-weight: var(--os-weight-bold); letter-spacing: -0.01em; line-height: 1.2; margin: 0; }
+header p { color: var(--os-text-secondary); font-size: var(--os-fs-md); margin: var(--os-sp-xs) 0 0; }
+
+/* the shop's own mark: a logo beside its name, on the head's first line */
+.brand { display: flex; align-items: center; gap: var(--os-sp-lg); }
+.logo { width: 56px; height: 56px; flex: none; object-fit: contain; border-radius: var(--os-radius-md); }
+.thumb { width: 56px; height: 56px; flex: none; object-fit: cover; border-radius: var(--os-radius-sm); background: var(--os-bg-subtle); }
+
+/* a picture's cell: dashed and empty, or the picture with its one act */
+.pic { position: relative; width: 72px; height: 72px; }
+.pic img { width: 72px; height: 72px; object-fit: cover; border-radius: var(--os-radius-sm); background: var(--os-bg-subtle); display: block; }
+.pic .choose { --btn-py: 0px; --btn-px: 0px; width: 72px; height: 72px; justify-content: center; border: 1px dashed var(--os-border-color); border-radius: var(--os-radius-sm); color: var(--os-text-muted); font-size: var(--os-fs-2xl); }
+.pic .choose:hover { border-color: var(--os-text-subtle); color: var(--os-text); background: transparent; }
+.pic .x { --btn-py: 0px; --btn-px: 0px; --press-amt: 0px; position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; justify-content: center; border-radius: var(--os-radius-full); background: var(--os-bg-elevated); color: var(--os-text-secondary); border: 1px solid var(--os-border-color); font-size: var(--os-fs-sm); line-height: 1; }
+.pic .x:hover { background: var(--os-bg-elevated); color: var(--os-text); border-color: var(--os-text-subtle); }
+
+/* the twelve channels: 16px discs, the chosen one ringed in its own colour */
+.dots { display: flex; flex-wrap: wrap; gap: var(--os-sp-sm); padding: var(--os-sp-sm) 0; }
+.dot { --btn-py: 0px; --btn-px: 0px; --press-amt: 0px; width: 16px; height: 16px; border-radius: var(--os-radius-full); background: var(--dot); }
+.dot:hover { background: var(--dot); box-shadow: 0 0 0 2px var(--os-bg), 0 0 0 3px color-mix(in srgb, var(--dot), transparent 40%); }
+.dot[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--os-bg), 0 0 0 3px var(--dot); }
+
+.notice { margin: 0 0 var(--os-sp-md); padding: var(--os-sp-md) var(--os-sp-lg); background: var(--os-bg-subtle); border-radius: var(--os-radius-md); color: var(--os-text-secondary); font-size: var(--os-fs-sm); line-height: 1.5; }
+.notice button { margin-left: var(--os-sp-sm); vertical-align: middle; }
+
+/* a member's pages: a segmented control on the 32px rail */
+.seg { display: inline-flex; margin-top: var(--os-sp-lg); padding: 2px; border: 1px solid var(--os-border-color); border-radius: var(--os-radius-md); }
+.seg button { --btn-py: 0px; --btn-px: var(--os-sp-md); --press-amt: 0px; height: 26px; background: transparent; color: var(--os-text-secondary); border-radius: var(--os-radius-sm); font-weight: var(--os-weight-normal); }
+.seg button:hover { background: var(--os-bg-subtle); }
+.seg button[aria-pressed="true"] { background: var(--os-bg-inset); color: var(--os-text); font-weight: var(--os-weight-medium); box-shadow: none; }
+.seg .count { color: var(--os-text-muted); margin-left: var(--os-sp-xs); }
+
+section { margin-top: var(--os-sp-2xl); }
+h2 { font-size: var(--os-fs-xs); font-weight: var(--os-weight-semibold); text-transform: uppercase; letter-spacing: 0.06em; color: var(--os-text-muted); line-height: 1.2; margin: 0 0 var(--os-sp-sm); }
+
+/* rows: hairlines between, never around */
+.rows { list-style: none; margin: 0; padding: 0; }
+.rows > li { display: flex; align-items: center; gap: var(--os-sp-md); min-height: 52px; padding: var(--os-sp-sm) 0; margin: 0; border-top: 1px solid var(--os-border-color-subtle); }
+.rows > li:first-child { border-top: 0; }
+.what { flex: 1; min-width: 0; }
+.what b { display: block; font-size: var(--os-fs-md); font-weight: var(--os-weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.what span { display: block; color: var(--os-text-secondary); font-size: var(--os-fs-sm); }
+.price { font-size: var(--os-fs-md); color: var(--os-text); min-width: 4.5rem; text-align: right; }
+.mark { font-size: var(--os-fs-sm); color: var(--os-text-muted); }
+.mark.paid { color: var(--os-cSuccess); }
+li.off .what b, li.off .price { color: var(--os-text-muted); }
+
+/* the stepper: two 32px icon buttons about a figure */
+.qty { display: inline-flex; align-items: center; gap: var(--os-sp-xs); }
+.qty button { --btn-py: 0px; --btn-px: 0px; width: 32px; height: 32px; justify-content: center; font-size: var(--os-fs-lg); }
+.qty output { min-width: 2rem; text-align: center; font-size: var(--os-fs-md); font-weight: var(--os-weight-medium); }
+
+/* the order being made: the one raised surface on the page */
+.card { background: var(--os-bg-surface); border: 1px solid var(--os-border-color-subtle); border-radius: var(--os-radius-lg); padding: var(--os-sp-xl); }
+.total { display: flex; align-items: baseline; justify-content: space-between; gap: var(--os-sp-md); }
+.total b { font-size: var(--os-fs-3xl); font-weight: var(--os-weight-semibold); letter-spacing: -0.02em; line-height: 1; }
+.total span { color: var(--os-text-secondary); font-size: var(--os-fs-sm); }
+.card .fields { display: grid; gap: var(--os-sp-md); margin-top: var(--os-sp-lg); }
+.acts { display: flex; flex-wrap: wrap; gap: var(--os-sp-sm); margin-top: var(--os-sp-lg); }
+.card > p { margin: var(--os-sp-sm) 0 0; color: var(--os-text-secondary); }
+.card h3 { font-size: var(--os-fs-lg); font-weight: var(--os-weight-semibold); letter-spacing: -0.01em; line-height: 1.2; margin: 0; }
+/* paid: the one moment the page celebrates, in the theme's success colour */
+.card.paid { background: var(--os-cSuccess-muted); border-color: var(--os-cSuccess); }
+.card.paid h3 { display: flex; align-items: center; gap: var(--os-sp-sm); font-size: var(--os-fs-xl); }
+.card.paid .tick { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; flex: none;
+  background: var(--os-cSuccess); color: var(--os-cSuccess-fg); font-size: var(--os-fs-md); line-height: 1; }
+.card.paid > p, .card.paid .total span { color: var(--os-text); }
+@media (prefers-reduced-motion: no-preference) {
+  .card.arrives { animation: bloom 200ms var(--os-ease-spring, ease-out); }
+  @keyframes bloom { from { opacity: 0; transform: scale(0.95); } }
+  .card.paid.arrives { animation: bloom 320ms var(--os-ease-spring, ease-out), ring 900ms ease-out 120ms; }
+  .card.paid.arrives .tick { animation: pop 420ms var(--os-ease-spring, ease-out) 160ms both; }
+  @keyframes ring { from { box-shadow: 0 0 0 0 var(--os-cSuccess); } to { box-shadow: 0 0 0 14px transparent; } }
+  @keyframes pop { from { transform: scale(0); } }
+}
+
+input, select, textarea { min-height: 32px; font-size: var(--os-fs-base); background: var(--os-bg-inset); }
+input:focus, select:focus, textarea:focus { background: var(--os-bg-surface); border-color: var(--os-text); outline: none; box-shadow: none; }
+textarea { min-height: 4rem; }
+.field label { margin-bottom: var(--os-sp-xs); }
+.field small { display: block; color: var(--os-text-muted); font-size: var(--os-fs-xs); line-height: 1.45; margin-top: var(--os-sp-xs); }
+
+/* a way to pay: a whole row is the button */
+.ways { display: grid; gap: var(--os-sp-sm); margin-top: var(--os-sp-lg); }
+.ways button { --btn-py: var(--os-sp-md); --btn-px: var(--os-sp-lg); justify-content: space-between; text-align: left; line-height: 1.3; border-radius: var(--os-radius-sm); }
+.ways button b { font-size: var(--os-fs-md); font-weight: var(--os-weight-medium); }
+.ways button span { color: var(--os-text-secondary); font-size: var(--os-fs-sm); font-weight: var(--os-weight-normal); }
+
+/* a member's editor */
+.edit { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--os-sp-md); padding: var(--os-sp-lg) 0 var(--os-sp-xl); }
+.edit .w6 { grid-column: span 6; } .edit .w4 { grid-column: span 4; } .edit .w3 { grid-column: span 3; } .edit .w2 { grid-column: span 2; }
+/* the shared sheet draws every input as a block, a hidden chooser included */
+input[type="file"][hidden] { display: none; }
+.check { display: flex; align-items: center; gap: var(--os-sp-sm); margin: 0; color: var(--os-text); font-weight: var(--os-weight-normal); font-size: var(--os-fs-base); }
+.check input { width: 16px; height: 16px; min-height: 0; flex: none; }
+.add { --btn-px: 0px; color: var(--os-text-muted); font-weight: var(--os-weight-normal); }
+.small { --btn-py: 6px; --btn-px: var(--os-sp-md); --press-amt: 0px; border-radius: var(--os-radius-sm); }
+
+footer { margin-top: var(--os-sp-3xl); color: var(--os-text-muted); font-size: var(--os-fs-sm); }
+footer button { --btn-px: 0px; --btn-py: 0px; font-size: inherit; text-decoration: underline; }
+
+@media (max-width: 34rem) {
+  main { padding: var(--os-sp-2xl) var(--os-sp-lg); }
+  .edit .w4, .edit .w3, .edit .w2 { grid-column: span 6; }
+  .rows > li { flex-wrap: wrap; }
+}

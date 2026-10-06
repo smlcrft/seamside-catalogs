@@ -1,6 +1,6 @@
 # Writing a catalog frame against the v1 frame API
 
-Every frame here speaks the v1 frame API (`export default { fetch }`, `ctx`, `window.seamside`); the older entry shape (`self.onNetworkRequest`, `parsePeerInfo`, `table(key, sfiId)`, `pushToInstance`, `frame.api`, `frame.busSend`) is gone from Seamside, and this is how a frame written against it moves. There is one frame API with two surfaces, so the move is a change of style with two real repairs (rules A and B below). Where a frame keeps its data is `seamside1/docs/plans/2026-09-30-frame-data.md`. `frames/help_desk` is the worked example; `seamside1/frames/examples/storefront` is its relative in the app's own repo. Read both before moving a frame.
+Every frame here speaks the v1 frame API (`export default { fetch }`, `ctx`, `window.seamside`); the older entry shape (`self.onNetworkRequest`, `parsePeerInfo`, `table(key, sfiId)`, `pushToInstance`, `frame.api`, `frame.busSend`) is gone from Seamside, and this is how a frame written against it moves. There is one frame API with two surfaces, so the move is a change of style with two real repairs (rules A and B below). Where a frame keeps its data is `seamside1/docs/plans/2026-09-30-frame-data.md`. `frames/help_desk` is the worked example; `frames/storefront` is its relative here, the one that takes payments. Read both before moving a frame.
 
 The API itself: `seamside1/arbiter/framecore.ts` (worker side, read its top comment and the `Ctx` interface), `seamside1/framelib/framelib.js` (page side), `seamside1/docs/agent-primer.md` ("The server half").
 
