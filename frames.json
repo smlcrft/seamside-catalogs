@@ -742,7 +742,7 @@
       "name": "Roadmap",
       "description": "A simple, robust project roadmapping tool \u2014 one roadmap per space. Set a project name and quick links; break the work into milestones with target dates; and track dozens of small tasks per milestone through three states (unstarted, in progress, complete), claiming and checking them off as you go. Drag tasks between milestones (or the Back Burner / Maybe Later buckets) to reprioritize, and within a milestone to rank them. Milestone headers show live counts and a completed-per-day burn rate; a Timeline view lays out upcoming milestones with days remaining and overdue colour-coding. A milestone can only be marked done once all its tasks are complete. Editors change everything; viewers and anyone the frame is published to get a live read-only view. Milestones and tasks are tables in the space's frame data folder, roadmap_milestones.table.jsonl and roadmap_tasks.table.jsonl, synced with the space; the project name, overview and links are the session's own settings, kept on this device.",
       "icon": "ph:signpost",
-      "modified_at": "2026-09-30T21:08:28Z",
+      "modified_at": "2026-11-09T15:28:16Z",
       "frame_preview": {
         "frame_type": "Tandem",
         "default_width_px": 720,
@@ -750,7 +750,7 @@
       },
       "capability_preview": null,
       "package_url": "https://raw.githubusercontent.com/smlcrft/seamside-catalogs/main/packages/frames/roadmap.tar.gz",
-      "package_sha256": "2d3db0bfd807718591e8cfcb08c1fd0af0e490c314de0613153607a320b71c81",
+      "package_sha256": "764913e431653ee3ce458eae132f5f7bdb4817549edffeb19d74a88dfed9d0e6",
       "color": "c1",
       "app_version_min": "1.0.12",
       "tags": [

@@ -525,6 +525,18 @@
       }, []);
       // The worker says what changed and never what it holds: read it again, as whoever this is.
       useFramePush((d) => { if (d.roadmap === "state") refresh(); });
+      // Other frames and agents write the same tables without a push: hear the tables too.
+      useEffect(() => {
+        let soon;
+        const watches = ["_fdata/roadmap_tasks", "_fdata/roadmap_milestones"].map((path) => {
+          let first = true;
+          return window.seamside.table(path).watch(() => {
+            if (first) { first = false; return; }
+            clearTimeout(soon); soon = setTimeout(refresh, 250);
+          });
+        });
+        return () => { clearTimeout(soon); watches.forEach((w) => w?.close?.()); };
+      }, []);
 
       // group tasks by milestone
       const byMs = useMemo(() => {
